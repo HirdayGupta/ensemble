@@ -109,6 +109,9 @@ final class Coordinator: AppCoordinating {
     /// Wait this long after the hand opens before stopping, so the last word is caught.
     private let stopTail = 0.4
     private static let staleHeadSeconds = 2.0
+    private static let sessionScanFaceWindow = 5.0
+    private static let sessionScanIdleInterval = 5.0
+    private var lastSessionScan: TimeInterval = 0
 
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
@@ -328,12 +331,16 @@ final class Coordinator: AppCoordinating {
     private func handle(head: HeadObservation) {
         latestHead = head
         faceCount = head.faceCount
-        if head.faceCount == 1 { lastOneFaceT = head.t }
+        if head.faceCount == 1 {
+            let returned = head.t - lastOneFaceT >= Self.sessionScanFaceWindow
+            lastOneFaceT = head.t
+            if returned { refreshSessions() }
+        }
 
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
-        if head.t - headStats.since >= 5 {
+        if head.t - headStats.since >= 30 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
-            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
+            ClutchLog.write("head: \(headStats.n) readings in 30 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
             headStats = (head.t, 0, [0, 0, 0])
         }
         guard !state.calibrating else { return }
@@ -430,8 +437,8 @@ final class Coordinator: AppCoordinating {
             cameraProblem = nil; trackerFailure = nil; trackerReady = false
         case .running(let fps, let camera):
             cameraProblem = nil
-            state.fps = fps
-            state.cameraName = camera
+            state.set(\.fps, fps)
+            state.set(\.cameraName, camera)
         case .permissionDenied:
             cameraAllowed = false
         case .noCamera:
@@ -457,6 +464,7 @@ final class Coordinator: AppCoordinating {
             else if !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet { pendingFocus = nil; lookedAt(p.session) }
         }
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
+        engine.setForceFullRate(needsFullRate)
         overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
@@ -494,6 +502,12 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// Every hand frame is needed while dictating, a send is pending, calibrating, or a gesture is in progress.
+    private var needsFullRate: Bool {
+        listeningSession != nil || pendingSend != nil || busy || sendAfterStop || state.calibrating || calibrationPending
+            || scrollSession != nil || inertia != 0 || gestures.pinchHeld || gestures.progress != nil
+    }
+
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
     private func dropStaleReadings() {
         guard let head = latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
@@ -511,6 +525,11 @@ final class Coordinator: AppCoordinating {
         }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
         guard !refreshInFlight, listeningSession == nil else { return }
+        // Nobody in front of the camera for 5 s: the window scan (which also costs Claude's own process) runs
+        // every 5 s instead of every second, and immediately when a face comes back.
+        let now = CACurrentMediaTime()
+        guard now - lastOneFaceT < Self.sessionScanFaceWindow || now - lastSessionScan >= Self.sessionScanIdleInterval else { return }
+        lastSessionScan = now
         refreshInFlight = true
         Task { @MainActor in
             defer { self.refreshInFlight = false }
@@ -809,18 +828,18 @@ final class Coordinator: AppCoordinating {
             frozenPoint = nil
             if let d = lastNose {
                 let inner = session.frame.insetBy(dx: session.frame.width * 0.15, dy: session.frame.height * 0.15)
-                state.nosePoint = inner.contains(d) ? nil : d
+                state.set(\.nosePoint, inner.contains(d) ? nil : d)
             } else {
-                state.nosePoint = nil
+                state.set(\.nosePoint, nil)
             }
         } else if gestureShowing {
             if frozenPoint == nil { frozenPoint = dotPoint }
-            state.nosePoint = frozenPoint
+            state.set(\.nosePoint, frozenPoint)
         } else {
             frozenPoint = nil
-            state.nosePoint = settings.showNoseDot ? dotPoint : nil
+            state.set(\.nosePoint, settings.showNoseDot ? dotPoint : nil)
         }
-        state.targetFrame = listeningSession?.frame ?? target?.frame
+        state.set(\.targetFrame, listeningSession?.frame ?? target?.frame)
     }
 
     // MARK: - Screen and version checks
@@ -886,15 +905,19 @@ final class Coordinator: AppCoordinating {
     }
 
     private func updateStatus() {
-        if !settings.enabled || !running { state.status = .off; return }
-        if !accessibilityTrusted { state.status = .needsPermission("Accessibility"); return }
-        if !cameraAllowed { state.status = .needsPermission("Camera"); return }
-        if let problem = cameraProblem { state.status = .error(problem); return }
-        if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
-        if cover.covered { state.status = .cameraCovered; return }
-        if !calibratedHere { state.status = .needsCalibration; return }
-        if !claudeRunning { state.status = .claudeNotRunning; return }
-        state.status = state.listening ? .listening : .watching
+        state.set(\.status, currentStatus())
+    }
+
+    private func currentStatus() -> AppStatus {
+        if !settings.enabled || !running { return .off }
+        if !accessibilityTrusted { return .needsPermission("Accessibility") }
+        if !cameraAllowed { return .needsPermission("Camera") }
+        if let problem = cameraProblem { return .error(problem) }
+        if let failure = trackerFailure { return .error("Face tracking stopped: \(failure)") }
+        if cover.covered { return .cameraCovered }
+        if !calibratedHere { return .needsCalibration }
+        if !claudeRunning { return .claudeNotRunning }
+        return state.listening ? .listening : .watching
     }
 
     /// Re-reads both permissions every second. A grant that arrives while Clutch runs clears the status and

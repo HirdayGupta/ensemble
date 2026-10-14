@@ -72,7 +72,8 @@ Clutch does not ask for the Microphone permission: Claude records, and Clutch on
 - The app makes no network connections. The face tracker is a web page served from inside the app bundle through a custom URL scheme, and the model ships in the bundle.
 - It only acts on Claude. If another app is in front, gestures do nothing.
 - A draft sends only in the moment you spoke it, to the session you spoke it to. A thumbs-up sends only within 30 seconds of your dictation ending, only into the session you dictated into, and only if you have not typed or clicked since. A draft you walked away from, in a session you have since left, can never go out later from a stray gesture.
-- The only files it writes are settings, a small log, and the two safety records described below.
+- The only files it writes are settings, a small log (rolled over at 1 MB with one backup), and the two safety records described below.
+- An optional per-frame trace for tuning (numbers and states only) is written only when the hidden setting `detailedTrace` is on (`defaults write dev.ensemble.app detailedTrace -bool true`, then restart); it rolls over at 20 MB.
 
 ## Safety design
 
@@ -106,12 +107,16 @@ swift test --enable-swift-testing -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $
 
 ## Architecture
 
-- **`Sources/ClutchCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, and the hand-pose classifier adapted from Sleight (`Vendor/`).
+- **`Sources/ClutchCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, the size-capped log file, the frame-rate planner, and the hand-pose classifier adapted from Sleight (`Vendor/`).
 - **`Sources/Clutch`** is the app:
-  - `Engine/` captures camera frames. Hands go to Apple's Vision hand-pose request. Faces go to MediaPipe Face Landmarker running in a hidden `WKWebView` (the MediaPipe runtime, its WebAssembly and the model are bundled in `Resources/web` and served by a custom URL scheme, so nothing touches the network).
+  - `Engine/` captures camera frames. Hands go to Apple's Vision hand-pose request. Faces go to MediaPipe Face Landmarker running in a hidden `WKWebView` (the MediaPipe runtime, its WebAssembly and the model are bundled in `Resources/web` and served by a custom URL scheme, so nothing touches the network). To stay light on CPU, the camera runs at its own rate but analyses are scheduled: hand pose at every frame only while a hand is in view (and for 1 s after), while dictating, while a send is pending, while calibrating or while a gesture is held, otherwise a probe about 8 times a second; the face tracker gets a 320x240 frame about 15 times a second; and after 3 s with no face both drop to about 2 a second until a face returns (never while dictating).
   - `Claude/` is the Accessibility bridge: it finds Claude's session panes, reads the state of the dictation, Send and mode controls, presses them, and runs the dictation safety checks.
   - `Coordinator/` joins the two: it turns gesture intents into actions on the session you are looking at, after every safety guard has agreed.
   - `App/` is the shell: menu bar, settings, calibration, the status capsule and overlay, hotkey, notifications.
+
+## Measuring performance
+
+`Tools/PerfBench` is a separate Swift package of camera-free micro-benchmarks (synthetic frames): `swift build -c release && .build/release/perfbench native` times frame preparation and Vision; `perfbench web transfer=b64 w=320 h=240 hz=15 sec=10 [delegate=GPU|CPU] [face=0|1]` runs the bundled MediaPipe page in a hidden web view and reports CPU of the harness, the WebContent and the GPU process. It never touches the camera or the installed app.
 
 ## Limitations
 

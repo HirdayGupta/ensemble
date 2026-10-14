@@ -102,8 +102,16 @@ private struct HighlightView: View {
             .position(x: frame.midX, y: frame.midY)
             .onAppear {
                 withAnimation(.easeOut(duration: 0.6)) { settled = true }
-                if listening { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true } }
+                if listening { startBreathing() }
             }
+            .onChange(of: listening) { _, on in
+                if on { startBreathing() } else { withAnimation(.easeOut(duration: 0.2)) { breathe = false } }
+            }
+    }
+
+    /// The breathing pulse is only visible while listening; running it otherwise redraws the border for nothing.
+    private func startBreathing() {
+        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true }
     }
 }
 
@@ -604,7 +612,7 @@ struct SoundWaves: View {
     var level: Double = 0
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .center, spacing: 2) {
                 ForEach(0..<5, id: \.self) { i in

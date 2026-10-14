@@ -24,7 +24,10 @@ struct SessionSwitch: Equatable {
 @MainActor
 final class OverlayModel: ObservableObject {
     @Published var target: CGRect?
+    /// What the SwiftUI views draw. Set only when a view needs it (see `OverlayController.update`), so a moving
+    /// nose does not re-evaluate the views while the glass dot window does the drawing.
     @Published var nose: CGPoint?
+    var hasNose = false
     @Published var listening = false
     @Published var countdown: Countdown?
     @Published var showNoseDot = true
@@ -45,7 +48,7 @@ final class OverlayModel: ObservableObject {
     @Published var sessionSwitch: SessionSwitch?
 
     var hasContent: Bool {
-        (showHighlight && target != nil) || (showNoseDot && nose != nil) || listening || countdown != nil || banner != nil || arrival != nil
+        (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || countdown != nil || banner != nil || arrival != nil
     }
 }
 
@@ -68,8 +71,10 @@ final class OverlayController {
 
     func update(target: CGRect?, nose: CGPoint?, listening: Bool, countdown: Countdown?, showNoseDot: Bool, showHighlight: Bool) {
         setIfChanged(&model.target, target)
-        setIfChanged(&model.nose, nose)
+        latestNose = nose
+        model.hasNose = nose != nil
         setIfChanged(&model.listening, listening)
+        setIfChanged(&model.nose, listening || !OverlayScreenView.systemGlassDot ? nose : nil)
         setIfChanged(&model.countdown, countdown)
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
@@ -77,6 +82,7 @@ final class OverlayController {
         syncGlassDot()
     }
 
+    private var latestNose: CGPoint?
     private var glassDotStore: AnyObject?
     /// On macOS 26 the dot is a separate glass window; the SwiftUI overlay skips drawing it there.
     private func syncGlassDot() {
@@ -84,7 +90,7 @@ final class OverlayController {
         let dot = (glassDotStore as? GlassDot) ?? GlassDot()
         glassDotStore = dot
         let visible = !model.listening && (model.showNoseDot || model.gesture != nil)
-        dot.show(at: visible ? model.nose : nil)
+        dot.show(at: visible ? latestNose : nil)
     }
 
     /// Re-applies visibility toggles between coordinator updates.

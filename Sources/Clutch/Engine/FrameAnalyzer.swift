@@ -12,7 +12,7 @@ final class FrameAnalyzer: @unchecked Sendable {
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    static let jpegScale: CGFloat = 0.75      // 640x480 -> 480x360
+    static let jpegScale: CGFloat = 0.5       // 640x480 -> 320x240
     static let jpegQuality = 0.6
 
 
