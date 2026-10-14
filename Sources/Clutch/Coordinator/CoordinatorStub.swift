@@ -13,7 +13,9 @@ protocol AppCoordinating: AnyObject {
 /// The integrator replaces the body of this factory (in another file) with the real coordinator.
 @MainActor
 func makeCoordinator(state: AppState, settings: SettingsStore, overlay: OverlayController) -> AppCoordinating {
-    StubCoordinator(state: state, settings: settings, overlay: overlay)
+    ProcessInfo.processInfo.arguments.contains("--stub")
+        ? StubCoordinator(state: state, settings: settings, overlay: overlay)
+        : Coordinator(state: state, settings: settings, overlay: overlay)
 }
 
 /// Animates fake states so the UI can be exercised without a camera.
