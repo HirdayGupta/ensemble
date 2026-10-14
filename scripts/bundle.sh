@@ -8,8 +8,9 @@ cd "$ROOT"
 APP="build/Ensemble.app"
 LOG="/tmp/ensemble-bundle.log"
 
-echo "[$(date -u +%FT%TZ)] swift build -c release" | tee "$LOG"
-swift build -c release 2>&1 | tee -a "$LOG"
+# -Osize: the app's own code is not the CPU-heavy part (WebKit, Vision and the GPU are), so size wins over speed.
+echo "[$(date -u +%FT%TZ)] swift build -c release -Xswiftc -Osize" | tee "$LOG"
+swift build -c release -Xswiftc -Osize 2>&1 | tee -a "$LOG"
 BIN_DIR="$(swift build -c release --show-bin-path)"
 
 echo "[$(date -u +%FT%TZ)] assembling $APP" | tee -a "$LOG"
@@ -17,6 +18,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN_DIR/Ensemble" "$APP/Contents/MacOS/Ensemble"
+strip -x "$APP/Contents/MacOS/Ensemble"
 cp Sources/Ensemble/Info.plist "$APP/Contents/Info.plist"
 
 if [ -f Assets/AppIcon.icns ]; then
@@ -32,6 +34,9 @@ fi
 RESOURCE_BUNDLE="$BIN_DIR/Ensemble_Ensemble.bundle"
 if [ -d "$RESOURCE_BUNDLE" ]; then
   cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+  # Large web files are stored LZMA-packed (about 5 MB smaller); AssetSchemeHandler unpacks them on the fly.
+  echo "[$(date -u +%FT%TZ)] packing web assets" | tee -a "$LOG"
+  swift scripts/pack-web.swift "$APP/Contents/Resources/Ensemble_Ensemble.bundle/web" 2>&1 | tee -a "$LOG"
 else
   echo "error: $RESOURCE_BUNDLE not found" | tee -a "$LOG"
   exit 1
@@ -48,6 +53,15 @@ mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
 # Ensemble is not sandboxed, so Sparkle's XPC services are not used (https://sparkle-project.org/documentation/sandboxing/).
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+# The app is arm64 only: keep the arm64 slice of Sparkle's code, drop the Intel half, local symbols and the headers.
+SPARKLE_B="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+for macho in "$SPARKLE_B/Sparkle" "$SPARKLE_B/Autoupdate" "$SPARKLE_B/Updater.app/Contents/MacOS/Updater"; do
+  lipo "$macho" -thin arm64 -output "$macho.thin"
+  mv "$macho.thin" "$macho"
+  strip -x "$macho"
+done
+rm -rf "$SPARKLE_B/Headers" "$SPARKLE_B/PrivateHeaders" "$SPARKLE_B/Modules" \
+  "$APP/Contents/Frameworks/Sparkle.framework/Headers" "$APP/Contents/Frameworks/Sparkle.framework/PrivateHeaders" "$APP/Contents/Frameworks/Sparkle.framework/Modules"
 
 # Optional version stamping for releases (scripts/release.sh). Sparkle compares CFBundleVersion, so it must grow every release.
 if [ -n "${ENSEMBLE_VERSION:-}" ]; then
