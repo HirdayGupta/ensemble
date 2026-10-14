@@ -1,6 +1,7 @@
 import AVFoundation
 import ClutchCore
 import Foundation
+import os
 import QuartzCore
 
 enum EngineStatus: Equatable {
@@ -30,6 +31,10 @@ final class VisionEngine {
     private let camera = CameraSession()
     private let face = FaceTracker()
     private let analyzer = FrameAnalyzer()
+    /// Owned by the camera queue. Decides which analyses run on each frame.
+    nonisolated(unsafe) private var planner = FrameRatePlanner()
+    private struct RateHints { var forceFull = false; var lastFaceSeenAt: TimeInterval? }
+    private let hints = OSAllocatedUnfairLock(initialState: RateHints())
     nonisolated(unsafe) private var generation = 0
     nonisolated(unsafe) private var cameraLabel = ""
     nonisolated(unsafe) private var fpsWindowStart = 0.0
@@ -46,7 +51,12 @@ final class VisionEngine {
             self?.onStatus?(.faceTrackerReady)
         }
         face.onFailure = { [weak self] message in self?.trackerFailed(message) }
-        face.onHead = { [weak self] head in self?.trackerRestarted = false; self?.onHead?(head) }
+        face.onHead = { [weak self] head in
+            guard let self else { return }
+            self.trackerRestarted = false
+            if head.faceCount >= 1 { self.hints.withLock { $0.lastFaceSeenAt = CACurrentMediaTime() } }
+            self.onHead?(head)
+        }
         face.onDiagnostic = { [weak self] note in self?.onDiagnostic?(note) }
         camera.onFrame = { [weak self] buffer in self?.process(buffer) }
         camera.onNote = { [weak self] note in
@@ -68,6 +78,9 @@ final class VisionEngine {
             face.start()
         }
     }
+
+    /// True while something needs every hand frame (dictating, a send pending, calibrating, a gesture held).
+    func setForceFullRate(_ on: Bool) { hints.withLock { if $0.forceFull != on { $0.forceFull = on } } }
 
     static func cameraNames() -> [String] { CameraSession.names() }
 
@@ -154,11 +167,19 @@ final class VisionEngine {
         lastFrameAt = t
         let mine = generation
 
-        let hand = analyzer.hand(from: buffer, at: t)
-        let light = analyzer.light(from: pixels, at: t)
+        let hint = hints.withLock { $0 }
+        let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt)
+
+        var hand: HandObservation?
+        if plan.runHand {
+            let h = analyzer.hand(from: buffer, at: t)
+            planner.noteHand(present: h.present, at: t)
+            hand = h
+        }
+        let light = plan.runLight ? analyzer.light(from: pixels, at: t) : nil
 
         var jpeg: Data?
-        if face.gate.tryEnter(now: t) {
+        if plan.runFace, face.gate.tryEnter(now: t) {
             jpeg = analyzer.jpeg(from: pixels)
             if jpeg == nil { face.gate.leave() }
         }
@@ -172,6 +193,7 @@ final class VisionEngine {
             fpsFrames = 0
         }
         let label = cameraLabel
+        if hand == nil, light == nil, jpeg == nil, fps == nil { return }
 
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
@@ -179,8 +201,8 @@ final class VisionEngine {
                     if jpeg != nil { self?.face.gate.leave() }
                     return
                 }
-                self.onHand?(hand)
-                self.onLight?(light)
+                if let hand { self.onHand?(hand) }
+                if let light { self.onLight?(light) }
                 if let jpeg { self.face.submit(jpeg: jpeg, t: t) }
                 if let fps { self.onStatus?(.running(fps: fps, camera: label)) }
             }

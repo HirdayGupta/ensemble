@@ -444,6 +444,7 @@ final class Coordinator: AppCoordinating {
             else if !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet { pendingFocus = nil; lookedAt(p.session) }
         }
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
+        engine.setForceFullRate(needsFullRate)
         overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
@@ -479,6 +480,12 @@ final class Coordinator: AppCoordinating {
                 }
             }
         }
+    }
+
+    /// Every hand frame is needed while dictating, a send is pending, calibrating, or a gesture is in progress.
+    private var needsFullRate: Bool {
+        listeningSession != nil || pendingSend != nil || busy || sendAfterStop || state.calibrating || calibrationPending
+            || scrollSession != nil || inertia != 0 || gestures.pinchHeld || gestures.progress != nil
     }
 
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
