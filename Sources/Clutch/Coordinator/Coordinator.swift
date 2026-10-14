@@ -21,6 +21,7 @@ final class Coordinator: AppCoordinating {
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
     private var lastManyFacesT: TimeInterval = -.infinity
+    private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
@@ -119,6 +120,7 @@ final class Coordinator: AppCoordinating {
     func stop() {
         ClutchLog.write("stop")
         running = false
+        latestHead = nil
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
         if listeningSession != nil { endTalk(reason: "turned off") }
@@ -132,7 +134,16 @@ final class Coordinator: AppCoordinating {
 
     func calibrate() {
         ClutchLog.write("calibrate requested (engine running=\(engine.isRunning))")
-        guard engine.isRunning else { refuse("Turn Clutch on before calibrating"); return }
+        // Calibrating while off turns Clutch on first and waits for the camera's first face reading.
+        if !engine.isRunning || latestHead == nil {
+            if !settings.enabled { settings.enabled = true } else if !running { start() }
+            Task { @MainActor in
+                for _ in 0..<50 where self.latestHead?.faceCount != 1 { try? await Task.sleep(nanoseconds: 100_000_000) }
+                guard self.engine.isRunning, self.latestHead != nil else { self.refuse("The camera did not start; check Camera permission"); return }
+                self.calibrate()
+            }
+            return
+        }
         state.calibrating = true
         CalibrationController.shared.run(headSource: { [weak self] in self?.latestHead }) { [weak self] samples in
             guard let self else { return }
@@ -165,6 +176,11 @@ final class Coordinator: AppCoordinating {
         latestHead = head
         faceCount = head.faceCount
         if head.faceCount == 1 { lastOneFaceT = head.t } else if head.faceCount > 1 { lastManyFacesT = head.t }
+        headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
+        if head.t - headStats.since >= 5 {
+            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), last yaw \(String(format: "%.2f", head.yaw)) pitch \(String(format: "%.2f", head.pitch)), nose on Claude: \(target != nil)")
+            headStats = (head.t, 0, [0, 0, 0])
+        }
         guard !state.calibrating else { return }
         if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
             // Claude only: the nose counts only over a Claude session whose window is actually in front there.
