@@ -52,7 +52,7 @@ private struct HighlightView: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        let color: Color = listening ? .red : .accentColor
+        let color: Color = listening ? .teal : .accentColor
         shape
             .strokeBorder(color.opacity(listening ? (breathe ? 0.95 : 0.6) : 0.9), lineWidth: listening ? 3.5 : 3)
             .shadow(color: color.opacity(0.6), radius: listening ? (breathe ? 16 : 8) : 10)
@@ -110,7 +110,7 @@ private struct IslandView: View {
             EmptyView()
         case .listening:
             HStack(spacing: 10) {
-                SoundWaves(color: .red).frame(width: 26, height: 16)
+                SoundWaves(color: .teal).frame(width: 26, height: 16)
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
                 Text("open hand to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -171,7 +171,7 @@ private struct ListeningView: View {
 private struct ListeningPill: View {
     var body: some View {
         HStack(spacing: 8) {
-            SoundWaves(color: .red).frame(width: 22, height: 16)
+            SoundWaves(color: .teal).frame(width: 22, height: 16)
             Text("Listening").fontWeight(.semibold)
         }
         .font(.callout)
@@ -189,7 +189,7 @@ private struct NoseDot: View {
     private var tint: Color {
         guard let g = gesture else { return .accentColor }
         if !g.willAct { return .gray }
-        return g.action == .talk && g.active ? .red : .accentColor
+        return g.action == .talk && g.active ? .teal : .accentColor
     }
 
     private var symbol: String {
