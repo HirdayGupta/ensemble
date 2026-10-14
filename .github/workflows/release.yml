@@ -121,7 +121,7 @@ jobs:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           export CLUTCH_DOWNLOAD_PREFIX="https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/"
-          scripts/appcast.sh "build/Clutch-${VERSION#v}.dmg" pages
+          scripts/appcast.sh "build/Ensemble-${VERSION#v}.dmg" pages
           cd pages
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

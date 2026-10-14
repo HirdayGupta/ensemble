@@ -7,7 +7,7 @@ How a release is built, signed, notarized, published, and delivered to installed
 | Piece | What it does |
 |---|---|
 | `scripts/bundle.sh` | Builds the release binary, assembles `build/Clutch.app` with Sparkle inside, signs it. Local identity by default; `CLUTCH_SIGN_IDENTITY="Developer ID Application: ..."` switches to hardened runtime + secure timestamp + `Sources/Clutch/Clutch.entitlements`. |
-| `scripts/release.sh` | Runs `bundle.sh`, optionally notarizes and staples the app, builds `build/Clutch-<version>.dmg` with `hdiutil` (app plus an Applications shortcut), signs/notarizes/staples the DMG, writes the `.sha256`, prints a summary. `--dry-run` prints the Apple-service commands instead of running them. |
+| `scripts/release.sh` | Runs `bundle.sh`, optionally notarizes and staples the app, builds `build/Ensemble-<version>.dmg` with `hdiutil` (app plus an Applications shortcut), signs/notarizes/staples the DMG, writes the `.sha256`, prints a summary. `--dry-run` prints the Apple-service commands instead of running them. |
 | `scripts/appcast.sh` | Adds a DMG to the Sparkle appcast with Sparkle's `generate_appcast`; refuses to write an appcast whose items lack an EdDSA signature. |
 | `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release, update the appcast on the `gh-pages` branch. |
 | `Sources/Clutch/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
@@ -65,7 +65,7 @@ A DMG made with the local identity opens on this Mac only. Gatekeeper rejects it
 
 1. Merge to `main`; the tests pass.
 2. `git tag v0.1.0 && git push origin v0.1.0`. The version comes from the tag; the build number is the commit count, so it grows with every commit (Sparkle compares the build number, never reuse or lower one).
-3. The workflow runs (about 20 to 40 minutes, most of it Apple's notary queue). On success the GitHub Release holds `Clutch-0.1.0.dmg` and its `.sha256`, and `appcast.xml` on `gh-pages` lists the new version.
+3. The workflow runs (about 20 to 40 minutes, most of it Apple's notary queue). On success the GitHub Release holds `Ensemble-0.1.0.dmg` and its `.sha256`, and `appcast.xml` on `gh-pages` lists the new version.
 4. Check on a Mac that has never run Clutch: download the DMG from the release page, drag the app to Applications, double-click. It must open with no Gatekeeper warning. `spctl -a -t exec -vv /Applications/Clutch.app` says `source=Notarized Developer ID`.
 5. Tags with a dash (`v0.2.0-beta.1`) publish a pre-release and are not added to the appcast.
 
@@ -99,7 +99,7 @@ The main `homebrew-cask` repository disabled casks that fail Gatekeeper on 2026-
 ```ruby
 cask "clutch" do
   version "0.1.0"
-  sha256 "<contents of Clutch-0.1.0.dmg.sha256, the hash only>"
+  sha256 "<contents of Ensemble-0.1.0.dmg.sha256, the hash only>"
 
   url "https://github.com/OWNER/REPO/releases/download/v#{version}/Clutch-#{version}.dmg"
   name "Clutch"

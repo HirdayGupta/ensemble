@@ -1,5 +1,5 @@
 #!/bin/bash
-# Adds a DMG to the Sparkle appcast: scripts/appcast.sh build/Clutch-0.1.0.dmg [appcast-dir]
+# Adds a DMG to the Sparkle appcast: scripts/appcast.sh build/Ensemble-0.1.0.dmg [appcast-dir]
 # appcast-dir (default build/appcast) holds the published appcast.xml, if any; it is updated in place.
 #
 # Environment:
