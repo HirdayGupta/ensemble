@@ -4,9 +4,8 @@ import EnsembleCore
 @MainActor
 protocol AppCoordinating: AnyObject {
     func start()
-    func stop()
+    func stop(disarm: Bool)
     func calibrate()
-    func clearAndDisarm()
     /// Called once as the app quits; must finish within about two seconds and leave nothing recording.
     func shutdown()
     var cameraNames: [String] { get }
@@ -48,21 +47,15 @@ final class StubCoordinator: AppCoordinating {
         }
     }
 
-    func stop() {
+    func stop(disarm: Bool) {
         timer?.invalidate()
         timer = nil
         state.status = .off
         push(target: nil, nose: nil, listening: false)
     }
 
-    func shutdown() { stop() }
+    func shutdown() { stop(disarm: false) }
 
-    func clearAndDisarm() {
-        state.listening = false
-        state.lastRefusal = nil
-        push(target: state.targetFrame, nose: state.nosePoint, listening: false)
-        started = Date()
-    }
 
     func calibrate() {
         guard !state.calibrating else { return }
@@ -82,7 +75,7 @@ final class StubCoordinator: AppCoordinating {
 
     private func tick() {
         guard settings.enabled else {
-            if state.status != .off { stop() }
+            if state.status != .off { stop(disarm: false) }
             return
         }
         let t = Date().timeIntervalSince(started)

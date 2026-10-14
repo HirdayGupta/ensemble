@@ -253,7 +253,6 @@ final class DictationController {
                 EnsembleLog.write("clear and disarm: microphone confirmed off")
             }
             self.ctx.changed()
-            self.ctx.settings.enabled = false
         }
     }
 

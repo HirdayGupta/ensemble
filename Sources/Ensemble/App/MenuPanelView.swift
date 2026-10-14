@@ -3,7 +3,6 @@ import SwiftUI
 struct PanelActions {
     var calibrate: () -> Void
     var openSettings: () -> Void
-    var clearAndDisarm: () -> Void
     var checkForUpdates: () -> Void
     var quit: () -> Void
 }
@@ -30,9 +29,10 @@ struct MenuPanelView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: state.status.symbolName)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(state.status.tint)
+            Image(nsImage: StatusIconModel.render(!settings.enabled ? .off : state.listening ? .dictating(bright: true) : StatusIconModel.look(state.status)))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 26, height: 26)
                 .frame(width: 40, height: 40)
                 .glassSurface(Circle())
             VStack(alignment: .leading, spacing: 2) {
@@ -56,7 +56,7 @@ struct MenuPanelView: View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
             if settings.enabled, case .needsPermission(let what) = state.status {
-                row(symbol: "lock", text: Permissions.guidance(for: what), tint: .orange)
+                row(symbol: "exclamationmark.circle", text: Permissions.guidance(for: what), tint: .orange)
                 Button { Permissions.openSettings(for: what) } label: {
                     Label("Open \(what) settings", systemImage: "gearshape").frame(maxWidth: .infinity)
                 }
@@ -66,7 +66,7 @@ struct MenuPanelView: View {
                 row(symbol: "speaker.slash", text: "Sounds muted", tint: .secondary)
             }
             if let refusal = state.lastRefusal {
-                row(symbol: "hand.raised.slash", text: refusal, tint: .orange)
+                row(symbol: "info.circle", text: refusal, tint: .orange)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,9 +104,6 @@ struct MenuPanelView: View {
                 Button { actions.calibrate() } label: { Label("Calibrate…", systemImage: "scope").frame(maxWidth: .infinity) }
                     .disabled(state.calibrating)
                 Button { actions.openSettings() } label: { Label("Settings…", systemImage: "gearshape").frame(maxWidth: .infinity) }
-            }
-            Button(role: .destructive) { actions.clearAndDisarm() } label: {
-                Label("Clear and disarm", systemImage: "xmark.circle").frame(maxWidth: .infinity)
             }
             HStack {
                 Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { actions.checkForUpdates() }

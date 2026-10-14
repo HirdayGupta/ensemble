@@ -38,35 +38,12 @@ extension AppStatus {
         switch self {
         case .off: return "Off"
         case .watching: return "Watching"
-        case .listening: return "Listening"
+        case .listening: return "Claude dictation on"
         case .cameraCovered: return "Camera is covered"
         case .needsCalibration: return "Needs calibration"
         case .needsPermission(let what): return "Needs permission: \(what)"
         case .claudeNotRunning: return "Claude is not running"
         case .error(let message): return message
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .off: return "hand.raised.slash"
-        case .watching: return "hand.raised"
-        case .listening: return "hand.raised.fill"
-        case .cameraCovered: return "video.slash"
-        case .needsCalibration: return "scope"
-        case .needsPermission: return "lock"
-        case .claudeNotRunning: return "pause.circle"
-        case .error: return "exclamationmark.triangle"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .off: return .secondary
-        case .watching: return .green
-        case .listening: return .ensembleBlue
-        case .cameraCovered, .needsCalibration, .needsPermission, .claudeNotRunning: return .orange
-        case .error: return .red
         }
     }
 }

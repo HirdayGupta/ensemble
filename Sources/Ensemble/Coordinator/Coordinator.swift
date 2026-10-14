@@ -59,11 +59,11 @@ final class Coordinator: AppCoordinating {
         settings.$enabled.removeDuplicates().dropFirst().sink { [weak self] on in
             guard let self else { return }
             // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
-            DispatchQueue.main.async { on ? self.start() : self.stop() }
+            DispatchQueue.main.async { on ? self.start() : self.stop(disarm: true) }
         }.store(in: &cancellables)
         settings.$cameraName.removeDuplicates().dropFirst().sink { [weak self] _ in
             guard let self, self.health.running else { return }
-            DispatchQueue.main.async { self.stop(); self.start() }
+            DispatchQueue.main.async { self.stop(disarm: false); self.start() }
         }.store(in: &cancellables)
 
         engine.onHand = { [weak self] in self?.handle(hand: $0) }
@@ -110,13 +110,15 @@ final class Coordinator: AppCoordinating {
         return timer
     }
 
-    func stop() {
+    /// `disarm`: the owner switched Ensemble off. Any Claude dictation still recording is stopped and confirmed off,
+    /// and the safety record and microphone mute are cleared, the same as the old "Clear and disarm" button did.
+    func stop(disarm: Bool) {
         EnsembleLog.write("stop")
         health.running = false
         ctx.latestHead = nil
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
-        if ctx.listening != nil { dictation.end(reason: "turned off") }
+        if disarm { dictation.clearAndDisarm() } else if ctx.listening != nil { dictation.end(reason: "turned off") }
         engine.stop()
         gestures.reset()
         scroll.cancel()
@@ -138,8 +140,6 @@ final class Coordinator: AppCoordinating {
         dictation.shutdown()
         EnsembleLog.flush()
     }
-
-    func clearAndDisarm() { dictation.clearAndDisarm() }
 
     func calibrate() {
         guard !calibrationPending, !state.calibrating else { EnsembleLog.write("calibrate ignored: already in progress"); return }

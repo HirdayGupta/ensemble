@@ -18,7 +18,6 @@ final class AppEnvironment {
     private(set) lazy var panelActions = PanelActions(
         calibrate: { [weak self] in self?.dismissMenuPanel(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
-        clearAndDisarm: { [weak self] in self?.coordinator.clearAndDisarm() },
         checkForUpdates: { [weak self] in self?.dismissMenuPanel(); self?.updates.checkForUpdates() },
         quit: { NSApp.terminate(nil) }
     )
@@ -41,7 +40,6 @@ final class AppEnvironment {
         PanelActions(
             calibrate: { [weak self] in self?.floatingPanel.hide(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
-            clearAndDisarm: { [weak self] in self?.coordinator.clearAndDisarm() },
             checkForUpdates: { [weak self] in self?.floatingPanel.hide(); self?.updates.checkForUpdates() },
             quit: { NSApp.terminate(nil) }
         )
