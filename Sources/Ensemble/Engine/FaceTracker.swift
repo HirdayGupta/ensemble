@@ -17,12 +17,36 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     private(set) var isReady = false
     private var consecutiveFrameErrors = 0
     private var readyTimeout: Task<Void, Never>?
+    private var startAttempt: UUID?
     private static let readyTimeoutSeconds: UInt64 = 10
 
-    /// Loads the page. Safe to call again after `stop()`.
+    /// Compiles the network block, then loads the page. Safe to call again after `stop()`. The page is never
+    /// loaded without the block: if the rule list does not compile, the tracker fails instead of starting.
     func start() {
         stop()
+        let attempt = UUID()
+        startAttempt = attempt
+        Task { @MainActor [weak self] in
+            do {
+                let blockList = try await NetworkBlock.compile()
+                guard let self, self.startAttempt == attempt else { return }
+                self.load(blockList: blockList)
+            } catch {
+                guard let self, self.startAttempt == attempt else { return }
+                self.fail("Face tracking is off because its network block could not be set up: \(error.localizedDescription)")
+            }
+        }
+        readyTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.readyTimeoutSeconds * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.startAttempt == attempt, !self.isReady else { return }
+            self.fail("The face tracker did not become ready within \(Self.readyTimeoutSeconds) s")
+        }
+    }
+
+    private func load(blockList: WKContentRuleList) {
         let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        config.userContentController.add(blockList)
         config.setURLSchemeHandler(AssetSchemeHandler(), forURLScheme: AssetSchemeHandler.scheme)
         config.userContentController.add(WeakScriptHandler(self), name: "head")
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -43,11 +67,6 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         webView = view
         window = host
         view.load(URLRequest(url: URL(string: "\(AssetSchemeHandler.scheme)://local/head.html")!))
-        readyTimeout = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.readyTimeoutSeconds * 1_000_000_000)
-            guard !Task.isCancelled, let self, self.webView === view, !self.isReady else { return }
-            self.fail("The face tracker did not become ready within \(Self.readyTimeoutSeconds) s")
-        }
     }
 
     private func fail(_ message: String) {
@@ -57,6 +76,7 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
 
     func stop() {
+        startAttempt = nil
         readyTimeout?.cancel()
         readyTimeout = nil
         gate.setOpen(false)
@@ -116,6 +136,15 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
 
     // MARK: WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        let url = navigationAction.request.url
+        if NetworkBlock.allowsNavigation(to: url) { return .allow }
+        if webView === self.webView {
+            fail("The face tracker page tried to open \(url?.scheme ?? "an unknown")://\(url?.host ?? "") and was stopped")
+        }
+        return .cancel
+    }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         guard webView === self.webView else { return }
