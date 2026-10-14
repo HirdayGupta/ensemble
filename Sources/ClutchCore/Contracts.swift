@@ -8,6 +8,7 @@ import Foundation
 /// A static hand pose, per frame. Produced by the Sleight classifier (Vendor/Sleight).
 public enum Pose: String, Codable, CaseIterable, Sendable {
     case fist, openPalm, thumbsUp, twoFingers
+    case gather       // all five fingertips brought together into a point
 }
 
 /// One camera frame's hand reading. `present == false` means no hand was found.
@@ -43,7 +44,7 @@ public struct FrameLight: Sendable {
 
 /// Which pose does what. User-configurable.
 public struct GestureMapping: Codable, Equatable, Sendable {
-    public var talk: Pose = .fist           // hold to dictate
+    public var talk: Pose = .gather         // gather to start dictating; gather then bloom (open) to stop
     public var send: Pose? = .thumbsUp      // nil = sending by gesture is off
     public var scroll: Pose? = .twoFingers  // nil = scrolling by gesture is off
     public var cancel: Pose = .openPalm     // cancels a pending send
@@ -86,7 +87,13 @@ public enum BridgeResult: Equatable, Sendable {
 }
 
 /// What a held pose will do once its hold completes.
-public enum GestureAction: String, Sendable { case talk, send, cancel, scroll }
+public enum GestureAction: String, Sendable { case talk, stop, send, cancel, scroll }
+
+/// How the talk pose controls dictation.
+public enum TalkStyle: String, Codable, Sendable {
+    case gatherBloom   // the talk pose starts; the talk pose again then an open hand stops; the hand may leave in between
+    case hold          // dictate only while the talk pose is held
+}
 
 /// A pose being held right now: `progress` fills from 0 to 1 over the hold; `willAct` is false when this hold
 /// cannot fire (for example a fist that arrived already closed); `active` is true while it is acting (dictating, scrolling).

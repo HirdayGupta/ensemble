@@ -50,6 +50,7 @@ final class Coordinator: AppCoordinating {
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
     private var holdInputDevice: String?
     private var lastHoldAudioCheck: TimeInterval = 0
+    private var listeningSince: TimeInterval = 0
 
     /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
     private let inputQuiet = 1.5
@@ -228,7 +229,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func handle(hand: HandObservation) {
-        if listeningSession != nil, hand.present, hand.pose == settings.mapping.talk { safety.heartbeat() }
+        if listeningSession != nil { safety.heartbeat() }   // a fresh camera frame: the engine is alive
         guard !state.calibrating else { return }
         for intent in gestures.push(hand) { apply(intent) }
         let onClaude = target != nil || listeningSession != nil || pendingSend != nil
@@ -273,6 +274,11 @@ final class Coordinator: AppCoordinating {
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
         let now = CACurrentMediaTime()
+        // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
+        if listeningSession != nil, !busy, now - listeningSince > 1.5 {
+            if ClaudeBridge.secondsSinceUserInput() < 0.3 { refuse("Keyboard or mouse used; dictation stopped"); endTalk(reason: "input"); return }
+            if now - lastOneFaceT > 10 { refuse("No face for 10 seconds; dictation stopped"); endTalk(reason: "away"); return }
+        }
         if listeningSession != nil, !busy, now - lastHoldAudioCheck >= 0.5 {
             lastHoldAudioCheck = now
             if let other = bridge.otherProcessCapturingInput() {
@@ -339,6 +345,7 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation started")
+                self.listeningSince = CACurrentMediaTime()
                 self.holdInputDevice = self.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()
                 Notifier.shared.playCue(.listenStart)
@@ -365,6 +372,7 @@ final class Coordinator: AppCoordinating {
             self.listeningSession = nil
             self.state.listening = false
             self.safety.episodeEnded()
+            if self.gestures.talking { self.gestures.reset() }
             if case .done = result {} else { self.sendAfterStop = false }
             switch result {
             case .done:

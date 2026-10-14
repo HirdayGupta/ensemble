@@ -3,6 +3,7 @@ import Vision
 
 public enum Gesture: String, CaseIterable {
     case openPalm, fist, twoFingers, thumbsUp
+    case gather                  // Clutch: all fingertips together
     case swipeLeft, swipeRight   // dynamic, produced by SwipeDetector
 
     public var isSwipe: Bool { self == .swipeLeft || self == .swipeRight }
@@ -69,6 +70,8 @@ public struct GestureClassifier {
     /// Measured live on a MacBook camera: a natural fist read tipReach 0.84–0.91 and a tucked-thumb fist span
     /// 0.63–0.64, both at extent 0.32–0.50. The relaxed closed hand on the desk that the original 0.8 guards
     /// against (dogfood fixture, tipReach 0.81–0.95) sits at extent 0.12–0.13, so it keeps the strict limits.
+    static let gatherMaxSpread: CGFloat = 0.6
+    static let gatherMinReach: CGFloat = 1.0
     static let closeFistExtent: CGFloat = 0.2
     static let closeFistTipReach: CGFloat = 0.95
     static let closeFistMaxPalmSpan: CGFloat = 0.7
@@ -122,9 +125,21 @@ public struct GestureClassifier {
                              extent: hand.extent, palm: size, span: dist(indexMCP, littleMCP) / size,
                              upright: (midMCP.y - wrist.y) / size, tooSmall: false, angled: false)
         let n = f.extendedCount
+        // Clutch change: "gather" = all five fingertips brought together, fingers forward (not curled into a fist).
+        // Measured live: gathered tips spread 0.33–0.55 palm lengths with the tip centroid 1.07–1.38 from the wrist;
+        // an open palm spreads 0.9–1.4, a fist keeps its tips within 0.57–0.86 of the wrist.
+        let tipPts = [Joint.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip].compactMap { hand[$0] }
+        var gathered = false
+        if tipPts.count == 5 {
+            var spread: CGFloat = 0
+            for i in 0..<5 { for j in (i + 1)..<5 { spread = max(spread, dist(tipPts[i], tipPts[j])) } }
+            let c = CGPoint(x: tipPts.map(\.x).reduce(0, +) / 5, y: tipPts.map(\.y).reduce(0, +) / 5)
+            gathered = spread / size <= Self.gatherMaxSpread && dist(c, wrist) / size >= Self.gatherMinReach
+        }
         // Open palm ignores the thumb: a relaxed palm keeps it alongside the index (measured
         // 0.26–0.47 hand-widths from the index MCP, same range as a fist), so it carries no signal.
-        if n == 4 && tipReach <= Self.maxOpenTipReach { f.gesture = .openPalm }
+        if gathered { f.gesture = .gather }
+        else if n == 4 && tipReach <= Self.maxOpenTipReach { f.gesture = .openPalm }
         else if f.curled == 4 && !f.thumb && tipReach < (f.extent >= Self.closeFistExtent ? Self.closeFistTipReach : Self.fistTipReach) { f.gesture = .fist }
         else if ext[0] && ext[1] && curl[2] && curl[3] { f.gesture = .twoFingers }
         else if f.curled == 4 && f.thumb && f.thumbUp { f.gesture = .thumbsUp }
@@ -132,7 +147,7 @@ public struct GestureClassifier {
         if let g = f.gesture {
             let floor = (g == .openPalm || g == .twoFingers) ? minOpenExtent : minClosedExtent
             if f.extent < floor { f.tooSmall = true; f.gesture = nil }
-            else if (g != .thumbsUp && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || f.upright < Self.minUpright { f.angled = true; f.gesture = nil }
+            else if (g != .thumbsUp && g != .gather && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || f.upright < Self.minUpright { f.angled = true; f.gesture = nil }
         }
         return f
     }

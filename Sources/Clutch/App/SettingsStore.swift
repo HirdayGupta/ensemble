@@ -74,7 +74,12 @@ final class SettingsStore: ObservableObject {
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 1.5
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 
-        if let data = store.data(forKey: Key.mapping), let decoded = try? JSONDecoder().decode(GestureMapping.self, from: data) {
+        if let data = store.data(forKey: Key.mapping), var decoded = try? JSONDecoder().decode(GestureMapping.self, from: data) {
+            // Version 2 made "gather" the talk gesture (start; gather then open to stop). Move hold-a-fist setups over once.
+            if store.integer(forKey: "mappingVersion") < 2 {
+                if decoded.talk == .fist { decoded.talk = .gather }
+                store.set(2, forKey: "mappingVersion")
+            }
             mapping = decoded
         } else {
             mapping = GestureMapping()
@@ -150,6 +155,7 @@ extension Pose {
         case .openPalm: return "Open palm"
         case .thumbsUp: return "Thumbs up"
         case .twoFingers: return "Two fingers"
+        case .gather: return "Gather (fingertips together)"
         }
     }
 
@@ -160,6 +166,7 @@ extension Pose {
         case .openPalm: return "hand.raised.fingers.spread"
         case .thumbsUp: return "hand.thumbsup.fill"
         case .twoFingers: return "hand.point.up.fill"
+        case .gather: return "hand.pinch.fill"
         }
     }
 }

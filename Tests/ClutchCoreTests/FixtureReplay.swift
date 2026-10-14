@@ -42,8 +42,9 @@ enum FixtureReplay {
     }
 
     /// Intents with the time they fired, replayed through a fresh machine.
-    static func intents(_ name: String, mapping: GestureMapping = .init()) throws -> [(t: TimeInterval, intent: GestureIntent)] {
+    static func intents(_ name: String, mapping: GestureMapping = .holdFist) throws -> [(t: TimeInterval, intent: GestureIntent)] {
         let machine = GestureMachine(mapping: mapping)
+        machine.talkStyle = .hold
         var out: [(TimeInterval, GestureIntent)] = []
         for o in try observations(name) {
             for i in machine.push(o) { out.append((o.t, i)) }

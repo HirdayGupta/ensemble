@@ -9,7 +9,10 @@ final class GestureSim {
     var log: [(t: TimeInterval, intent: GestureIntent)] = []
     let fps = 30.0
 
-    init(mapping: GestureMapping = .init()) { machine = GestureMachine(mapping: mapping) }
+    init(mapping: GestureMapping = .holdFist, style: TalkStyle = .hold) {
+        machine = GestureMachine(mapping: mapping)
+        machine.talkStyle = style
+    }
 
     var intents: [GestureIntent] { log.map(\.intent) }
 

@@ -78,7 +78,7 @@ private struct IslandView: View {
     private var size: CGSize {
         switch mode {
         case .idle: return CGSize(width: 120, height: 0)
-        case .listening: return CGSize(width: 230, height: 38)
+        case .listening: return CGSize(width: 300, height: 38)
         case .countdown: return CGSize(width: 420, height: 112)
         case .banner: return CGSize(width: 380, height: 64)
         }
@@ -113,7 +113,7 @@ private struct IslandView: View {
                 SoundWaves(color: .teal).frame(width: 26, height: 16)
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
-                Text("open hand to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                Text("gather, then open to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
             }
         case .countdown:
             if let c = model.countdown {
@@ -195,6 +195,7 @@ private struct NoseDot: View {
     private var symbol: String {
         switch gesture?.action {
         case .talk: return "mic.fill"
+        case .stop: return "stop.fill"
         case .send: return "paperplane.fill"
         case .cancel: return "xmark"
         case .scroll: return "arrow.up.arrow.down"

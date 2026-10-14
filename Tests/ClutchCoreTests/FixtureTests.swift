@@ -16,7 +16,8 @@ import Testing
     }
 
     @Test func farFistBeginsAndEndsStaleWhenFramesStop() throws {
-        let machine = GestureMachine()
+        let machine = GestureMachine(mapping: .holdFist)
+        machine.talkStyle = .hold
         let obs = try FixtureReplay.observations("fist-far")
         var intents: [GestureIntent] = []
         for o in obs { intents += machine.push(o) }
