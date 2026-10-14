@@ -5,7 +5,7 @@ import WebKit
 /// MediaPipe script, its wasm and the model never touch the network.
 final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "clutch-asset"
-    static let root: URL? = Bundle.module.resourceURL?.appendingPathComponent("web", isDirectory: true)
+    static let root: URL? = ClutchResources.bundle.resourceURL?.appendingPathComponent("web", isDirectory: true)
 
     static func mimeType(forExtension ext: String) -> String {
         switch ext.lowercased() {
