@@ -59,3 +59,17 @@ import Testing
         #expect(s.count(.talkEnded(.released)) == 0)
     }
 }
+
+@Suite struct DoubleTapOnTouchTests {
+    @Test func secondPinchActsOnTouchEvenIfHeld() {
+        let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        s.tap()
+        s.pinch(0.2, for: 0.1)
+        s.pinch(0.04, for: 0.1)                 // second pinch just touched
+        #expect(s.count(.talkBegan) == 1)
+        s.pinch(0.04, for: 3)                   // and is held
+        s.pinch(0.2, for: 0.5)
+        #expect(s.count(.talkBegan) == 1)
+        #expect(s.machine.talking)
+    }
+}

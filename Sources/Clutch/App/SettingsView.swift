@@ -131,7 +131,7 @@ private struct DisplaySettings: View {
             Section("Sending") {
                 LabeledContent("Hold thumbs-up to send") {
                     HStack {
-                        Slider(value: $settings.sendCountdownSeconds, in: SettingsStore.countdownRange, step: 0.5)
+                        Slider(value: $settings.sendCountdownSeconds, in: SettingsStore.countdownRange, step: 0.25)
                             .frame(width: 180)
                         Text(String(format: "%.1f s", settings.sendCountdownSeconds))
                             .monospacedDigit()

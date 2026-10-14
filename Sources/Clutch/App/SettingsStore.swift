@@ -21,7 +21,7 @@ final class SettingsStore: ObservableObject {
         static let lastClaudeVersion = "lastClaudeVersion"
     }
 
-    static let countdownRange: ClosedRange<Double> = 1...5
+    static let countdownRange: ClosedRange<Double> = 0.5...3
 
     private let defaults: UserDefaults
 
@@ -71,7 +71,7 @@ final class SettingsStore: ObservableObject {
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
-        let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 1.5
+        let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 0.75
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 
         if let data = store.data(forKey: Key.mapping), var decoded = try? JSONDecoder().decode(GestureMapping.self, from: data) {

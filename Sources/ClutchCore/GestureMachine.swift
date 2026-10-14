@@ -22,6 +22,8 @@ public final class GestureMachine {
     private var pinchIsClosed = false
     private var pinchClosedAt: TimeInterval?
     private var pinchMin = 1.0
+    /// The current pinch already toggled on touch; its release must not start a new pair.
+    private var pinchToggled = false
     private var edgeCount = 0
     private var lastTapEnd: TimeInterval?
     private var lastToggleAt: TimeInterval = -.infinity
@@ -219,7 +221,15 @@ public final class GestureMachine {
             guard edgeCount >= Self.edgeFrames else { return }
             pinchIsClosed = true; edgeCount = 0
             pinchClosedAt = h.t; pinchMin = d
+            pinchToggled = false
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
+            // The second pinch acts the moment it touches; holding it afterwards changes nothing.
+            if lastTapEnd != nil, h.t - lastToggleAt >= Self.toggleCooldown {
+                lastTapEnd = nil
+                lastToggleAt = h.t
+                pinchToggled = true
+                if talking { endTalk(.released, at: h.t, into: &intents) } else { talking = true; intents.append(.talkBegan) }
+            }
         } else {
             pinchMin = min(pinchMin, d)
             edgeCount = d > max(Self.reopenAbove, pinchMin + Self.reopenRise) ? edgeCount + 1 : 0
@@ -229,14 +239,9 @@ public final class GestureMachine {
             guard let start = pinchClosedAt else { return }
             pinchClosedAt = nil
             let closedFor = h.t - start
+            if pinchToggled { pinchToggled = false; lastTapEnd = nil; return }
             guard closedFor >= Self.tapMin, closedFor <= Self.tapMax else { lastTapEnd = nil; return }
-            if let end = lastTapEnd, start - end <= Self.tapGap, h.t - lastToggleAt >= Self.toggleCooldown {
-                lastTapEnd = nil
-                lastToggleAt = h.t
-                if talking { endTalk(.released, at: h.t, into: &intents) } else { talking = true; intents.append(.talkBegan) }
-            } else {
-                lastTapEnd = h.t
-            }
+            lastTapEnd = h.t
         }
     }
 
