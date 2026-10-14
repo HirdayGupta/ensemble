@@ -229,7 +229,12 @@ final class DictationSafety: @unchecked Sendable {
         let target = session
         Task { [weak self] in
             guard let self else { return }
-            if let target { _ = await self.bridge.stopDictation(target) } else { _ = await self.bridge.stopAnyDictation() }
+            if let target {
+                // A refused stop usually means the session moved or went away: try whichever session shows an active mic.
+                if case .refused = await self.bridge.stopDictation(target) { _ = await self.bridge.stopAnyDictation() }
+            } else {
+                _ = await self.bridge.stopAnyDictation()
+            }
             self.queue.async { self.stopInFlight = false }
         }
     }

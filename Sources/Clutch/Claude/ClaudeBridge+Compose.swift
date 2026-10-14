@@ -35,11 +35,12 @@ extension ClaudeBridge {
     }
 
     /// Presses Claude's own Send button. Refuses unless every guard holds; never types a key.
-    func sendDraft(_ s: ClaudeSession) async -> BridgeResult {
-        await run { self.sendNow(s) }
+    /// `shown` is the draft the countdown displayed: if the composer no longer holds exactly that, nothing is sent.
+    func sendDraft(_ s: ClaudeSession, shown: String) async -> BridgeResult {
+        await run { self.sendNow(s, shown: shown) }
     }
 
-    private func sendNow(_ s: ClaudeSession) -> BridgeResult {
+    private func sendNow(_ s: ClaudeSession, shown: String) -> BridgeResult {
         guard let entry = liveEntry(s, rescanPane: true) else { return .refused(self.sessionNotFound) }
         let e = entry.elements
 
@@ -58,6 +59,9 @@ extension ClaudeBridge {
         guard let draft = AX.string(composer, kAXValueAttribute),
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .refused("draft is empty")
+        }
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines) == shown.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return .refused("the draft changed after the countdown started")
         }
         guard let send = e.sendButton else { return .refused("no Send button found") }
         let v = AX.multi(send, [kAXRoleAttribute, kAXDescriptionAttribute, kAXTitleAttribute, kAXEnabledAttribute])

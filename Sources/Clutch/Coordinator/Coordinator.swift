@@ -54,6 +54,7 @@ final class Coordinator: AppCoordinating {
     private var cameraAllowed = true
     private var lastCameraRestart = Date.distantPast
     private var calibrationPending = false
+    private var refreshInFlight = false
     /// Front-window check cache: who owns the window under the nose, refreshed at most every 0.15 s.
     private var topOwner: (at: CGPoint, t: TimeInterval, pid: pid_t?)?
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
@@ -368,7 +369,11 @@ final class Coordinator: AppCoordinating {
         guard bridge.claudeIsRunning() else {
             sessions = []; target = nil; updateStatus(); return
         }
+        // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
+        guard !refreshInFlight, listeningSession == nil else { return }
+        refreshInFlight = true
         Task { @MainActor in
+            defer { self.refreshInFlight = false }
             let found = await self.bridge.refreshSessions()
             if found.map(\.id) != self.sessions.map(\.id) { ClutchLog.write("Claude sessions found: \(found.count) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.sessions = found
@@ -505,7 +510,7 @@ final class Coordinator: AppCoordinating {
         pushOverlay()
         busy = true
         Task { @MainActor in
-            let result = await self.bridge.sendDraft(send.session)
+            let result = await self.bridge.sendDraft(send.session, shown: send.text)
             self.busy = false
             switch result {
             case .done: ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
