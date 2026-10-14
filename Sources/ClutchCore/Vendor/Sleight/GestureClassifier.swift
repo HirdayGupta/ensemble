@@ -65,6 +65,13 @@ public struct GestureClassifier {
     /// up is exempt: the hand is turned edge-on, so its folded fingers project past the knuckles
     /// (1.05–1.43).
     static let fistTipReach: CGFloat = 0.8
+    /// Clutch change: a fist held up close to the camera (extent >= `closeFistExtent`) gets looser limits.
+    /// Measured live on a MacBook camera: a natural fist read tipReach 0.84–0.91 and a tucked-thumb fist span
+    /// 0.63–0.64, both at extent 0.32–0.50. The relaxed closed hand on the desk that the original 0.8 guards
+    /// against (dogfood fixture, tipReach 0.81–0.95) sits at extent 0.12–0.13, so it keeps the strict limits.
+    static let closeFistExtent: CGFloat = 0.2
+    static let closeFistTipReach: CGFloat = 0.95
+    static let closeFistMaxPalmSpan: CGFloat = 0.7
 
     /// An open palm's fingertips reach at most this many palm lengths from the wrist: a finger is
     /// about one palm long, so a camera-facing open hand measures 1.8–2.0 (fixtures at both
@@ -118,14 +125,14 @@ public struct GestureClassifier {
         // Open palm ignores the thumb: a relaxed palm keeps it alongside the index (measured
         // 0.26–0.47 hand-widths from the index MCP, same range as a fist), so it carries no signal.
         if n == 4 && tipReach <= Self.maxOpenTipReach { f.gesture = .openPalm }
-        else if f.curled == 4 && !f.thumb && tipReach < Self.fistTipReach { f.gesture = .fist }
+        else if f.curled == 4 && !f.thumb && tipReach < (f.extent >= Self.closeFistExtent ? Self.closeFistTipReach : Self.fistTipReach) { f.gesture = .fist }
         else if ext[0] && ext[1] && curl[2] && curl[3] { f.gesture = .twoFingers }
         else if f.curled == 4 && f.thumb && f.thumbUp { f.gesture = .thumbsUp }
 
         if let g = f.gesture {
             let floor = (g == .openPalm || g == .twoFingers) ? minOpenExtent : minClosedExtent
             if f.extent < floor { f.tooSmall = true; f.gesture = nil }
-            else if (g != .thumbsUp && f.span > Self.maxPalmSpan) || f.upright < Self.minUpright { f.angled = true; f.gesture = nil }
+            else if (g != .thumbsUp && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || f.upright < Self.minUpright { f.angled = true; f.gesture = nil }
         }
         return f
     }

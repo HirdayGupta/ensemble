@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ClutchCore
 
 struct OverlayBanner: Equatable, Identifiable {
     let id = UUID()
@@ -14,6 +15,7 @@ final class OverlayModel: ObservableObject {
     @Published var listening = false
     @Published var countdown: Countdown?
     @Published var showNoseDot = true
+    @Published var gesture: GestureProgress?
     @Published var showHighlight = true
     @Published var banner: OverlayBanner?
     @Published var cancelHint = "Show an open palm to cancel"
@@ -51,6 +53,10 @@ final class OverlayController {
     }
 
     /// Re-applies visibility toggles between coordinator updates.
+    func setGesture(_ g: GestureProgress?) {
+        setIfChanged(&model.gesture, g)
+    }
+
     func setVisibility(showNoseDot: Bool, showHighlight: Bool) {
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)

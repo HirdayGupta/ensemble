@@ -1,4 +1,5 @@
 import SwiftUI
+import ClutchCore
 
 /// Draws one screen's share of the overlay. Coordinates are global top-left; `screenFrame` is this screen's
 /// frame in that same space, so local = global - screenFrame.origin.
@@ -24,7 +25,7 @@ struct OverlayScreenView: View {
                 CountdownPill(countdown: countdown, hint: model.cancelHint, sessionFrame: local)
             }
             if model.showNoseDot, let nose = model.nose, screenFrame.contains(nose) {
-                NoseDot()
+                NoseDot(gesture: model.gesture)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
                     .animation(.linear(duration: 0.06), value: nose)
             }
@@ -96,14 +97,53 @@ private struct ListeningPill: View {
     }
 }
 
+/// The nose dot. While a gesture is held it grows into a bubble showing what the gesture will do, with a ring
+/// that fills over the hold; dimmed when the hold cannot act, solid red while dictating.
 private struct NoseDot: View {
+    let gesture: GestureProgress?
+
+    private var tint: Color {
+        guard let g = gesture else { return .accentColor }
+        if !g.willAct { return .gray }
+        return g.action == .talk && g.active ? .red : .accentColor
+    }
+
+    private var symbol: String {
+        switch gesture?.action {
+        case .talk: return "mic.fill"
+        case .send: return "paperplane.fill"
+        case .cancel: return "xmark"
+        case .scroll: return "arrow.up.arrow.down"
+        case nil: return ""
+        }
+    }
+
     var body: some View {
-        Circle()
-            .fill(Color.white)
-            .frame(width: 12, height: 12)
-            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 3))
-            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-            .shadow(color: Color.accentColor.opacity(0.6), radius: 8)
+        let size: CGFloat = gesture == nil ? 12 : 40
+        ZStack {
+            Circle()
+                .fill(gesture == nil ? AnyShapeStyle(Color.white) : AnyShapeStyle(.regularMaterial))
+            if let g = gesture {
+                Circle().stroke(tint.opacity(0.25), lineWidth: 3).padding(1.5)
+                Circle()
+                    .trim(from: 0, to: g.progress)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(1.5)
+                    .animation(.linear(duration: 0.08), value: g.progress)
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .symbolEffect(.pulse, isActive: g.active)
+            } else {
+                Circle().strokeBorder(Color.accentColor, lineWidth: 3)
+            }
+        }
+        .frame(width: size, height: size)
+        .opacity(gesture.map { $0.willAct ? 1 : 0.6 } ?? 1)
+        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+        .shadow(color: tint.opacity(0.6), radius: gesture == nil ? 8 : 12)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: gesture == nil)
     }
 }
 

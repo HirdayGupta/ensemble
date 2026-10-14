@@ -84,3 +84,19 @@ public enum BridgeResult: Equatable, Sendable {
     case refused(String)    // a guard said no; nothing was pressed
     case unknown(String)    // pressed, but the outcome could not be confirmed
 }
+
+/// What a held pose will do once its hold completes.
+public enum GestureAction: String, Sendable { case talk, send, cancel, scroll }
+
+/// A pose being held right now: `progress` fills from 0 to 1 over the hold; `willAct` is false when this hold
+/// cannot fire (for example a fist that arrived already closed); `active` is true while it is acting (dictating, scrolling).
+public struct GestureProgress: Equatable, Sendable {
+    public var pose: Pose
+    public var action: GestureAction
+    public var progress: Double
+    public var willAct: Bool
+    public var active: Bool
+    public init(pose: Pose, action: GestureAction, progress: Double, willAct: Bool, active: Bool) {
+        self.pose = pose; self.action = action; self.progress = progress; self.willAct = willAct; self.active = active
+    }
+}

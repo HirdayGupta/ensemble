@@ -154,6 +154,7 @@ final class Coordinator: AppCoordinating {
         if listeningSession != nil, hand.present, hand.pose == settings.mapping.talk { safety.heartbeat() }
         guard !state.calibrating else { return }
         for intent in gestures.push(hand) { apply(intent) }
+        overlay.setGesture(cover.covered || !settings.enabled ? nil : gestures.progress)
     }
 
     private func handle(light: FrameLight) {

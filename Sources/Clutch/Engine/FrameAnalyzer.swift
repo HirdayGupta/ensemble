@@ -15,8 +15,18 @@ final class FrameAnalyzer: @unchecked Sendable {
     static let jpegScale: CGFloat = 0.75      // 640x480 -> 480x360
     static let jpegQuality = 0.6
 
+    private var lastDiag: TimeInterval = 0
+
     func hand(from buffer: CMSampleBuffer, at t: TimeInterval) -> HandObservation {
-        HandClassifierAdapter.observation(from: detector.detect(buffer), at: t, classifier: classifier)
+        let h = detector.detect(buffer)
+        // Twice a second while a hand is in view, log why it was or wasn't read as a pose (numbers only).
+        if let h, t - lastDiag >= 0.5, let f = classifier.features(h) {
+            lastDiag = t
+            ClutchLog.write(String(format: "hand: pose=%@ curled=%d ext=%d tipReach=%.2f thumbStraight=%d thumbClear=%d thumbUp=%d span=%.2f upright=%.2f extent=%.2f tooSmall=%d angled=%d joints=%d",
+                f.gesture?.rawValue ?? "-", f.curled, f.extendedCount, f.tipReach, f.thumbStraight ? 1 : 0, f.thumbClear ? 1 : 0, f.thumbUp ? 1 : 0,
+                f.span, f.upright, f.extent, f.tooSmall ? 1 : 0, f.angled ? 1 : 0, h.points.count))
+        }
+        return HandClassifierAdapter.observation(from: h, at: t, classifier: classifier)
     }
 
     /// Mean and standard deviation of luma over a coarse grid of a BGRA frame.

@@ -47,6 +47,27 @@ public final class GestureMachine {
 
     public init(mapping: GestureMapping = .init()) { self.mapping = mapping }
 
+    /// The pose currently held and how far its hold has progressed toward acting, for on-screen feedback.
+    public var progress: GestureProgress? {
+        guard let r = run else { return nil }
+        let held = r.lastT - r.start
+        func make(_ action: GestureAction, _ need: Double, _ can: Bool) -> GestureProgress {
+            GestureProgress(pose: r.pose, action: action, progress: min(max(held / need, 0), 1), willAct: can, active: false)
+        }
+        if r.pose == mapping.talk {
+            if talking { return GestureProgress(pose: r.pose, action: .talk, progress: 1, willAct: true, active: true) }
+            return make(.talk, Self.talkHold, r.armed)
+        }
+        if talking { return nil }
+        if r.pose == mapping.send { return make(.send, Self.sendHold, !r.startedWhileTalking && !r.fired) }
+        if r.pose == mapping.cancel { return make(.cancel, Self.cancelHold, !r.startedWhileTalking && !r.fired) }
+        if r.pose == mapping.scroll {
+            let p = make(.scroll, Self.scrollHold, true)
+            return GestureProgress(pose: p.pose, action: .scroll, progress: p.progress, willAct: true, active: p.progress >= 1)
+        }
+        return nil
+    }
+
     public func reset() {
         talking = false
         run = nil
