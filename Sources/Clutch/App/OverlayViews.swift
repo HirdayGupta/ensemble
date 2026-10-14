@@ -16,12 +16,15 @@ struct OverlayScreenView: View {
                 // Switching sessions cross-fades in place (the old outline dissolves, the new one condenses on
                 // its window) instead of sliding a rectangle across; the same slow fade as when hands go to the
                 // keyboard or trackpad, in both directions.
+                // One critically damped spring family (SwiftUI's .smooth, the curve macOS uses for its own
+                // fades): it eases in from rest and settles without a visible end, no overshoot.
                 HighlightView(frame: local, listening: model.listening)
                     .opacity(model.handsOnInput && !model.listening ? 0 : 1)
-                    .animation(.easeInOut(duration: 0.9), value: model.handsOnInput)
+                    .animation(.smooth(duration: 0.7), value: model.handsOnInput)
                     .id(highlightKey(target))
-                    .transition(.asymmetric(insertion: .opacity.animation(.easeInOut(duration: 0.55).delay(0.12)),
-                                            removal: .opacity.animation(.easeInOut(duration: 0.45))))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 1.008)).animation(.smooth(duration: 0.5).delay(0.06)),
+                        removal: .opacity.combined(with: .scale(scale: 0.996)).animation(.smooth(duration: 0.4))))
             }
             // While listening there is no dot: a red marker on the session's edge points at where the nose went.
             if model.listening, let nose = model.nose, let target = model.target, let local = local(target) {
@@ -40,7 +43,6 @@ struct OverlayScreenView: View {
             }
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
-        .animation(.easeInOut(duration: 0.5), value: model.target.map(highlightKey))
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
@@ -88,7 +90,6 @@ private struct HighlightView: View {
     let frame: CGRect
     let listening: Bool
     @State private var breathe = false
-    @State private var settled = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -97,13 +98,8 @@ private struct HighlightView: View {
             .strokeBorder(color.opacity(listening ? (breathe ? 0.95 : 0.6) : 0.9), lineWidth: listening ? 3.5 : 3)
             .shadow(color: color.opacity(0.6), radius: listening ? (breathe ? 16 : 8) : 10)
             .frame(width: frame.width, height: frame.height)
-            .scaleEffect(settled ? 1 : 1.012)
-            .blur(radius: settled ? 0 : 3)
             .position(x: frame.midX, y: frame.midY)
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.6)) { settled = true }
-                if listening { startBreathing() }
-            }
+            .onAppear { if listening { startBreathing() } }
             .onChange(of: listening) { _, on in
                 if on { startBreathing() } else { withAnimation(.easeOut(duration: 0.2)) { breathe = false } }
             }

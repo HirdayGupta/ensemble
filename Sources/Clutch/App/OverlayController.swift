@@ -162,12 +162,22 @@ final class OverlayController {
         if slot != value { slot = value }
     }
 
+    private var hideTask: Task<Void, Never>?
+
+    /// Panels leave the screen only after the last fade has played out, so nothing is cut off mid-animation.
     private func syncPanels() {
         if model.hasContent {
+            hideTask?.cancel(); hideTask = nil
             if panels.isEmpty { rebuildPanels() }
             for panel in panels.values where !panel.isVisible { panel.orderFrontRegardless() }
-        } else {
-            for panel in panels.values where panel.isVisible { panel.orderOut(nil) }
+        } else if hideTask == nil, panels.values.contains(where: \.isVisible) {
+            hideTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.hideTask = nil
+                guard !self.model.hasContent else { return }
+                for panel in self.panels.values where panel.isVisible { panel.orderOut(nil) }
+            }
         }
     }
 
