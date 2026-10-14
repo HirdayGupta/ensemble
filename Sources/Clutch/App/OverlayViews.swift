@@ -22,8 +22,8 @@ struct OverlayScreenView: View {
                     .animation(.linear(duration: 0.1), value: nose)
             } else if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
                 GlassSphere()
-                    .frame(width: 20, height: 20)
-                    .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                    .frame(width: 22, height: 22)
+                    .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
                     .animation(.linear(duration: 0.08), value: nose)
             }
@@ -404,25 +404,22 @@ struct SoundWaves: View {
     }
 }
 
-/// A small clear sphere: Liquid Glass on macOS 26, a lensed material with a specular highlight before that.
+/// A clear lens like a hydrocolloid patch made of glass: almost fully transparent, a faint rim, a soft
+/// inner shade at the bottom and a bright specular glint at the top left. Drawn by hand: the system glass
+/// effect has no backdrop to sample in a transparent overlay window and renders dark there.
 private struct GlassSphere: View {
     var body: some View {
-        if #available(macOS 26.0, *) {
-            Circle()
-                .fill(.clear)
-                .glassEffect(.clear, in: Circle())
-                .overlay(highlight)
-        } else {
-            Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(Circle().strokeBorder(.white.opacity(0.55), lineWidth: 0.75))
-                .overlay(highlight)
+        ZStack {
+            Circle().fill(Color.white.opacity(0.06))
+            Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.18)], center: UnitPoint(x: 0.5, y: 0.35), startRadius: 3, endRadius: 12))
+            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.25), .white.opacity(0.55)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            Ellipse()
+                .fill(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 9, height: 5)
+                .offset(x: -3, y: -5)
+            Circle().fill(Color.white.opacity(0.35)).frame(width: 2.5, height: 2.5).offset(x: 4, y: 5)
         }
-    }
-
-    private var highlight: some View {
-        Circle()
-            .fill(RadialGradient(colors: [.white.opacity(0.75), .white.opacity(0)], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 7))
-            .blendMode(.screen)
+        .compositingGroup()
     }
 }
