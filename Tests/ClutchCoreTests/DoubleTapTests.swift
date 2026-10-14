@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import ClutchCore
 
@@ -82,5 +83,26 @@ import Testing
         s.pinch(0.2, for: 1.0)
         #expect(!s.machine.awaitingSecondTap)
         #expect(s.machine.progress == nil)
+    }
+}
+
+@Suite struct PinchArcScrollTests {
+    @Test func anArcScrollsByDistanceTravelled() {
+        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        var t = 10.0, total = 0.0
+        func push(_ x: Double, _ y: Double, _ pinch: Double) {
+            for i in m.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: x, y: y), pinch: pinch)) {
+                if case .dragScroll(let d) = i { total += d }
+            }
+            t += 1.0 / 30
+        }
+        push(0.5, 0.5, 0.2); push(0.5, 0.5, 0.2)
+        for _ in 0..<5 { push(0.5, 0.5, 0.04) }            // pinch closes
+        // A quarter arc: mostly sideways at first, upward at the end. Vertical rise is 0.1; path is about 0.16.
+        for k in 1...30 {
+            let a = Double(k) / 30 * Double.pi / 2
+            push(0.5 + 0.1 * (1 - cos(a)) + 0.0, 0.5 + 0.1 * sin(a), 0.04)
+        }
+        #expect(total > 0.1 * GestureMachine.dragPointsPerFrameHeight)   // more than the vertical rise alone gives
     }
 }

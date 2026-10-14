@@ -34,6 +34,10 @@ public final class GestureMachine {
     private var dragLastY: Double?
     private var dragLastT: Double?
     private var dragFilter = OneEuroFilter(minCutoff: 1.0, beta: 2, dCutoff: 1)
+    private var dragFilterX = OneEuroFilter(minCutoff: 1.0, beta: 2, dCutoff: 1)
+    private var dragOriginX: Double?
+    private var dragLastX: Double?
+    private var dragSign = 1.0                 // direction of the last clearly vertical motion
     public private(set) var isDragging = false
     /// A pinch is closed right now (tap, drag or hold in progress): the coordinator holds focus still meanwhile.
     public var pinchHeld: Bool { pinchIsClosed }
@@ -257,9 +261,10 @@ public final class GestureMachine {
             pinchClosedAt = h.t; pinchMin = d
             pinchToggled = false
             dragging = false; isDragging = false
-            dragFilter.reset()
+            dragFilter.reset(); dragFilterX.reset()
             dragOriginY = h.palmCenter.map { dragFilter.filter(Double($0.y), at: h.t) }
-            dragLastY = dragOriginY
+            dragOriginX = h.palmCenter.map { dragFilterX.filter(Double($0.x), at: h.t) }
+            dragLastY = dragOriginY; dragLastX = dragOriginX
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
             // The second pinch acts the moment it touches; holding it afterwards changes nothing.
             if lastTapEnd != nil, h.t - lastToggleAt >= Self.toggleCooldown {
@@ -270,16 +275,23 @@ public final class GestureMachine {
             }
         } else {
             // Pinch and drag: a held pinch that moves vertically scrolls, with the hand position smoothed.
-            if !pinchToggled, let p = h.palmCenter, let origin = dragOriginY {
+            // Hands move in arcs: the scroll follows the distance the pinch travels, signed by its vertical direction.
+            if !pinchToggled, let p = h.palmCenter, let originY = dragOriginY, let originX = dragOriginX {
                 let y = dragFilter.filter(Double(p.y), at: h.t)
-                if !dragging, abs(y - origin) >= Self.dragStart { dragging = true; isDragging = true; lastTapEnd = nil }
-                if dragging, let last = dragLastY, y != last, let lt = dragLastT, h.t > lt {
-                    let speed = abs(y - last) / (h.t - lt)          // frame heights per second
-                    let gain = 1 + Self.dragAccel * min(speed, 1)
-                    intents.append(.dragScroll(handDy: (y - last) * Self.dragPointsPerFrameHeight * gain))
+                let x = dragFilterX.filter(Double(p.x), at: h.t)
+                if !dragging, hypot(x - originX, y - originY) >= Self.dragStart { dragging = true; isDragging = true; lastTapEnd = nil }
+                if dragging, let ly = dragLastY, let lx = dragLastX, let lt = dragLastT, h.t > lt {
+                    let dy = y - ly, dx = (x - lx) * (640.0 / 480.0)   // frame is 4:3: put both axes in frame-height units
+                    let travel = hypot(dx, dy)
+                    if abs(dy) >= 0.3 * abs(dx), dy != 0 { dragSign = dy > 0 ? 1 : -1 }   // mostly sideways: keep direction
+                    if travel > 0 {
+                        let speed = travel / (h.t - lt)                     // frame heights per second
+                        let gain = 1 + Self.dragAccel * min(speed, 1)
+                        intents.append(.dragScroll(handDy: dragSign * travel * Self.dragPointsPerFrameHeight * gain))
+                    }
                 }
                 dragLastT = h.t
-                dragLastY = y
+                dragLastY = y; dragLastX = x
             }
             pinchMin = min(pinchMin, d)
             edgeCount = d > max(Self.reopenAbove, pinchMin + Self.reopenRise) ? edgeCount + 1 : 0
