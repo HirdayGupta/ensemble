@@ -42,15 +42,17 @@ jobs:
       - name: Test
         run: swift test 2>&1 | tee /tmp/ensemble-ci-test.log
 
-      # The two checks below are written by a different change; until they land the steps pass without running anything.
-      - name: Network check
-        run: '[ ! -x scripts/check-network.sh ] || scripts/check-network.sh 2>&1 | tee /tmp/ensemble-ci-network.log'
+      # An ad-hoc signed bundle, so the checks below read the real app; it is never uploaded or installed.
+      - name: Bundle
+        env:
+          ENSEMBLE_SIGN_IDENTITY: "-"
+        run: zsh scripts/bundle.sh 2>&1 | tee /tmp/ensemble-ci-bundle.log
+
+      - name: Network and privacy check
+        run: scripts/check-network.sh 2>&1 | tee /tmp/ensemble-ci-network.log
 
       - name: Size check
-        run: '[ ! -x scripts/check-size.sh ] || scripts/check-size.sh 2>&1 | tee /tmp/ensemble-ci-size.log'
-
-      # scripts/bundle.sh is not run here: it exits when the keychain has no code-signing identity and has no ad-hoc mode
-      # (docs/RELEASING.md, "What CI does not build").
+        run: scripts/check-size.sh 2>&1 | tee /tmp/ensemble-ci-size.log
 
       - name: Keep the logs
         if: ${{ always() }}

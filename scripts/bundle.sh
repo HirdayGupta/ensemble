@@ -91,6 +91,12 @@ if [ -z "${ENSEMBLE_SIGN_IDENTITY:-}" ]; then
 fi
 ENTITLEMENTS="Sources/Ensemble/Ensemble.entitlements"
 case "$IDENTITY_NAME" in
+  -)
+    # CI only (ENSEMBLE_SIGN_IDENTITY=-): an ad-hoc signature so the size and network checks run on a real bundle.
+    # Such a build is never installed or uploaded: its signature changes every build, which would drop the grants.
+    MODE="adhoc"
+    HASHES="-"
+    ;;
   "Developer ID Application"*)
     MODE="distribution"
     HASHES="$(security find-identity -v -p codesigning 2>/dev/null | grep -F "\"$IDENTITY_NAME" | awk '{print $2}' | sort -u || true)"
@@ -131,6 +137,11 @@ sign --entitlements "$ENTITLEMENTS" "$APP"
 
 codesign --verify --deep --strict "$APP" 2>&1 | tee -a "$LOG"
 
+if [ "$MODE" = "adhoc" ]; then
+  echo "[$(date -u +%FT%TZ)] ad-hoc signed for CI checks only" | tee -a "$LOG"
+  echo "$ROOT/$APP"
+  exit 0
+fi
 REQ="$(codesign -dr - "$APP" 2>&1 | sed -n 's/^designated => //p')"
 if [ -z "$REQ" ]; then
   echo "error: could not read the designated requirement" | tee -a "$LOG" >&2

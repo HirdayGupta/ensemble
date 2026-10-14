@@ -72,9 +72,9 @@ A DMG made with the local identity opens on this Mac only. Gatekeeper rejects it
 
 If the workflow fails after the GitHub Release is created (for example the appcast push), fix the cause and re-run the failed job; do not move the tag.
 
-## What CI does not build
+## What CI builds
 
-`ci.yml` does not run `scripts/bundle.sh`: the script exits when the keychain holds no code-signing identity, and a hosted runner has none. A bundle step in CI would need `bundle.sh` to accept `ENSEMBLE_SIGN_IDENTITY=-` as an explicit ad-hoc mode (skip the identity lookup and the designated-requirement file, run `codesign --sign -` on the same nested-code order). The ad-hoc output would be a build check only and must never be uploaded, since every ad-hoc build is a new identity. Until then, `swift build -c release` in CI proves the code compiles and the Mac that cuts a release proves the bundle.
+`ci.yml` builds the app bundle with `ENSEMBLE_SIGN_IDENTITY=-`, an ad-hoc signature used only so the network, privacy and size checks read the real app. That bundle is never uploaded or installed: every ad-hoc build is a new identity, which would drop a Mac's Camera and Accessibility grants. Releases are cut on a Mac with the stable signing identity.
 
 Every action in the workflows is pinned to a commit SHA with the version in a trailing comment, and Dependabot proposes the bumps weekly. A bump pull request must pass `ci` and `hygiene`, which includes `pinact` checking that each SHA is the commit its comment names. To pin by hand: `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
 
