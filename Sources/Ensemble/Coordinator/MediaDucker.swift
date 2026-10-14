@@ -23,13 +23,13 @@ final class MediaDucker {
     /// Runs before the microphone is pressed; returns once the media is paused (about 0.5 s) or at once when
     /// nothing is playing on speakers.
     func duck() async {
-        guard paused == nil, let dev = Self.defaultOutput(), Self.isPlaying(dev), !Self.isHeadphones(dev) else { return }
+        guard paused == nil, let dev = Self.defaultOutput(), Self.mediaPlaying(dev), !Self.isHeadphones(dev) else { return }
         let volume = Self.volume(dev)
         Self.save(dev, volume)
         if let volume { await Self.ramp(dev, from: volume, to: 0, seconds: 0.25) }
         Self.pressPlayPause()
         try? await Task.sleep(nanoseconds: 250_000_000)
-        let stopped = !Self.isPlaying(dev)
+        let stopped = !Self.mediaPlaying(dev)
         if !stopped { Self.pressPlayPause() }
         if let volume { Self.setVolume(dev, volume) }
         Self.clearSaved()
@@ -92,6 +92,20 @@ final class MediaDucker {
     static func defaultOutput() -> AudioObjectID? {
         guard let d: AudioObjectID = read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, 0), d != 0 else { return nil }
         return d
+    }
+
+    /// Some app other than Claude, Ensemble or the system sound player is sending audio out. Per process, because the
+    /// output device itself stays "running" for a while after any short sound (measured 2026-10-14: Claude's own
+    /// dictation chime read as music playing, and the media key went to the wrong app).
+    static func mediaPlaying(_ dev: AudioObjectID) -> Bool {
+        guard let procs = CoreAudioInput.processes() else { return isPlaying(dev) }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return procs.contains { p in
+            p.isRunningOutput && p.pid != me
+                && !p.bundleID.hasPrefix("com.anthropic.claudefordesktop")
+                && !p.bundleID.localizedCaseInsensitiveContains("systemsound")
+                && !p.bundleID.hasPrefix("com.apple.audio")
+        }
     }
 
     static func isPlaying(_ dev: AudioObjectID) -> Bool {
