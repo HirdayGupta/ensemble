@@ -17,6 +17,8 @@ struct OverlayScreenView: View {
             }
             if model.showHighlight || model.listening, let target = model.target, let local = local(target) {
                 HighlightView(frame: local, listening: model.listening)
+                    .opacity(model.handsOnInput && !model.listening ? 0 : 1)
+                    .animation(model.handsOnInput ? .easeOut(duration: 0.9) : .easeIn(duration: 0.35), value: model.handsOnInput)
                     .transition(.opacity)
             }
             // While listening there is no dot: a red marker on the session's edge points at where the nose went.

@@ -96,6 +96,12 @@ extension ClaudeBridge {
 
     /// Seconds since the user last pressed a key, moved or clicked the mouse, or scrolled.
     /// Typing or clicking only (no pointer motion or scrolling): what ends a dictation, since a nudged mouse should not.
+    /// Hardware input only (keyboard, mouse, trackpad): the HID state ignores events Clutch itself posts.
+    static func secondsSincePhysicalInput() -> Double {
+        let types: [CGEventType] = [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel, .leftMouseDragged]
+        return types.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
+    }
+
     static func secondsSinceTypingOrClick() -> Double {
         let types: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown]
         return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity

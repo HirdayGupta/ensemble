@@ -25,6 +25,8 @@ final class OverlayModel: ObservableObject {
     @Published var banner: OverlayBanner?
     /// A session just brought forward or switched to: drawn as a soft glow that grows in and fades.
     @Published var arrival: Arrival?
+    /// The keyboard, mouse or trackpad is in use: the highlight fades away until they rest.
+    @Published var handsOnInput = false
     @Published var cancelHint = "Show an open palm to cancel"
 
     var hasContent: Bool {
@@ -85,6 +87,10 @@ final class OverlayController {
 
     func setCancelHint(_ text: String) {
         setIfChanged(&model.cancelHint, text)
+    }
+
+    func setHandsOnInput(_ on: Bool) {
+        setIfChanged(&model.handsOnInput, on)
     }
 
     func flashArrival(_ frame: CGRect) {

@@ -428,6 +428,7 @@ final class Coordinator: AppCoordinating {
             else if !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet { pendingFocus = nil; lookedAt(p.session) }
         }
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
+        overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
             scrollRemaining += pendingScroll
