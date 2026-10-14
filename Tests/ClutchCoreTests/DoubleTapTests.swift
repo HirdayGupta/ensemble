@@ -40,6 +40,7 @@ import Testing
 
     @Test func slowPinchesStillCount() {
         let s = sim()
+        s.pinch(0.6, for: 0.5)
         s.tap(closedFor: 1.4); s.tap(closedFor: 1.4)
         #expect(s.count(.talkBegan) == 1)
     }
@@ -49,6 +50,31 @@ import Testing
         s.pinch(0.2, for: 0.2)
         s.pinch(0.07, for: 0.5); s.pinch(0.3, for: 1.0 / 30); s.pinch(0.07, for: 0.5)
         s.pinch(0.2, for: 1)
+        #expect(s.count(.talkBegan) == 0)
+    }
+
+    @Test func tapsMoreThanTheGapApartReset() {
+        let s = sim()
+        s.pinch(0.6, for: 0.5)
+        s.tap(); s.pinch(0.2, for: 0.6); s.tap()
+        #expect(s.count(.talkBegan) == 0)
+    }
+
+    /// 2026-10-14: lowering a thumbs-up after a send brushed thumb and index together twice and started dictation.
+    @Test func loweringAThumbsUpIsNotADoubleTap() {
+        let s = sim()
+        s.pinch(0.6, for: 1.0, pose: .thumbsUp)
+        s.tap(); s.tap()
+        #expect(s.count(.talkBegan) == 0)
+        s.pinch(0.6, for: 1.0)
+        s.tap(); s.tap()
+        #expect(s.count(.talkBegan) == 1)
+    }
+
+    @Test func tapsAsTheHandArrivesDoNotCount() {
+        let s = sim()
+        s.absent(for: 1)
+        s.pinch(0.04, for: 0.15); s.pinch(0.2, for: 0.1); s.tap()
         #expect(s.count(.talkBegan) == 0)
     }
 
@@ -64,6 +90,7 @@ import Testing
 @Suite struct DoubleTapOnTouchTests {
     @Test func secondPinchActsOnTouchEvenIfHeld() {
         let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        s.pinch(0.6, for: 0.5)
         s.tap()
         s.pinch(0.2, for: 0.1)
         s.pinch(0.04, for: 0.1)                 // second pinch just touched
@@ -78,6 +105,7 @@ import Testing
 @Suite struct DoubleTapExpiryTests {
     @Test func halfwayStateExpiresAfterTheGap() {
         let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        s.pinch(0.6, for: 0.5)
         s.tap()
         #expect(s.machine.awaitingSecondTap)
         s.pinch(0.2, for: 1.0)

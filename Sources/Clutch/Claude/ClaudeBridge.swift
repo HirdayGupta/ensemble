@@ -166,7 +166,7 @@ final class ClaudeBridge: @unchecked Sendable {
             let elements = PaneElements(window: window, pane: pane, mic: mic.element, composer: scan.composer,
                                         sendButton: scan.send, stopButton: scan.stop,
                                         modeControl: scan.mode, transcript: scan.transcript)
-            result.append(CachedSession(session: ClaudeSession(id: id, frame: frame, windowNumber: windowNumber), elements: elements))
+            result.append(CachedSession(session: ClaudeSession(id: id, frame: frame, windowNumber: windowNumber, title: scan.title), elements: elements))
         }
         return result
     }
@@ -280,6 +280,7 @@ final class ClaudeBridge: @unchecked Sendable {
         var stop: AXUIElement?
         var mode: AXUIElement?
         var transcript: AXUIElement?
+        var title: String?
     }
 
     static func scanPane(_ pane: AXUIElement, maxNodes: Int = 4_000) -> PaneScan {
@@ -301,6 +302,9 @@ final class ClaudeBridge: @unchecked Sendable {
             case "AXButton":
                 if desc == ClaudeLabels.send || title == ClaudeLabels.send { scan.send = scan.send ?? el }
                 if desc == ClaudeLabels.stop || title == ClaudeLabels.stop { scan.stop = scan.stop ?? el }
+                if scan.title == nil, let desc, desc.hasSuffix(ClaudeLabels.renameSuffix) {
+                    scan.title = String(desc.dropLast(ClaudeLabels.renameSuffix.count))
+                }
             case "AXPopUpButton":
                 if let title, !title.isEmpty {
                     if ClaudeLabels.allModes.contains(title) { scan.mode = scan.mode ?? el }

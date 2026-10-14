@@ -17,7 +17,11 @@ public final class GestureMachine {
     static let edgeFrames = 2
     static let tapMin = 0.05
     static let tapMax = 2.0            // longest a pinch may stay closed and still count as a tap
-    static let tapGap = 0.8            // second pinch must close within this long after the first opened
+    static let tapGap = 0.6            // second pinch must close within this long after the first opened, else the pair resets
+    /// Fingertips brush together while a thumbs-up is lowered or a hand comes into view; a pinch that closes this
+    /// soon after either is not a tap (measured 2026-10-14: a lowered thumbs-up read as a double pinch 2.6 s after a send).
+    static let quietAfterSendPose = 1.0
+    static let quietAfterArrival = 0.35
     static let toggleCooldown = 0.8
     private var pinchIsClosed = false
     private var pinchClosedAt: TimeInterval?
@@ -43,6 +47,10 @@ public final class GestureMachine {
     /// The current pinch already toggled on touch; its release must not start a new pair.
     private var pinchToggled = false
     private var edgeCount = 0
+    /// The current pinch closed during a quiet period: it may still drag, but never counts as a tap.
+    private var pinchSuspect = false
+    private var lastSendPoseT: TimeInterval = -.infinity
+    private var presentSince: TimeInterval?
     private var lastTapEnd: TimeInterval?
     private var lastToggleAt: TimeInterval = -.infinity
     /// gatherBloom: after a start, the hand must first leave the talk pose (or the frame) before a stop counts.
@@ -128,6 +136,7 @@ public final class GestureMachine {
         talking = false
         pinchIsClosed = false; pinchClosedAt = nil; lastTapEnd = nil
         pinchToggled = false; dragging = false; isDragging = false; edgeCount = 0
+        pinchSuspect = false; lastSendPoseT = -.infinity; presentSince = nil
         lastToggleAt = -.infinity
         stopArmed = false
         gatheredForStopAt = nil
@@ -153,6 +162,8 @@ public final class GestureMachine {
     public func push(_ h: HandObservation) -> [GestureIntent] {
         lastPushT = h.t
         var intents: [GestureIntent] = []
+        if h.present { presentSince = presentSince ?? h.t } else { presentSince = nil }
+        if h.present, let send = mapping.send, h.pose == send { lastSendPoseT = h.t }
         if talkStyle == .doubleTap {
             if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
             trackTaps(h, into: &intents)
@@ -266,6 +277,8 @@ public final class GestureMachine {
             dragOriginX = h.palmCenter.map { dragFilterX.filter(Double($0.x), at: h.t) }
             dragLastY = dragOriginY; dragLastX = dragOriginX
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
+            pinchSuspect = h.t - lastSendPoseT < Self.quietAfterSendPose || h.t - (presentSince ?? h.t) < Self.quietAfterArrival
+            if pinchSuspect { lastTapEnd = nil }
             // The second pinch acts the moment it touches; holding it afterwards changes nothing.
             if lastTapEnd != nil, h.t - lastToggleAt >= Self.toggleCooldown {
                 lastTapEnd = nil
@@ -317,9 +330,14 @@ public final class GestureMachine {
             let closedFor = h.t - start
             if pinchToggled { pinchToggled = false; lastTapEnd = nil; return }
             if dragging { dragging = false; isDragging = false; lastTapEnd = nil; intents.append(.dragScrollEnded); return }
-            guard closedFor >= Self.tapMin, closedFor <= Self.tapMax else { lastTapEnd = nil; return }
+            guard closedFor >= Self.tapMin, closedFor <= Self.tapMax, !pinchSuspect else { lastTapEnd = nil; return }
             lastTapEnd = h.t
         }
+    }
+
+    /// One line of machine state for the per-frame trace.
+    public var traceState: String {
+        "talk=\(talking ? 1 : 0) closed=\(pinchIsClosed ? 1 : 0) await=\(awaitingSecondTap ? 1 : 0) drag=\(dragging ? 1 : 0) suspect=\(pinchSuspect ? 1 : 0)"
     }
 
     /// Feedback for the bubble: after one tap, the second tap is awaited.

@@ -105,7 +105,11 @@ public struct ClaudeSession: Equatable, Sendable {
     public var id: String                   // opaque, stable while the pane exists
     public var frame: CGRect                // global, top-left origin
     public var windowNumber: Int
-    public init(id: String, frame: CGRect, windowNumber: Int) { self.id = id; self.frame = frame; self.windowNumber = windowNumber }
+    /// The session's name as Claude shows it in the pane header; nil when it could not be read.
+    public var title: String?
+    public init(id: String, frame: CGRect, windowNumber: Int, title: String? = nil) {
+        self.id = id; self.frame = frame; self.windowNumber = windowNumber; self.title = title
+    }
 }
 
 /// One calibration reading: where the user was asked to point their nose (global, top-left) and the

@@ -108,16 +108,22 @@ private struct HighlightView: View {
 }
 
 /// A Dynamic Island style capsule hanging from the top centre of the screen. It grows and morphs with a
-/// spring between listening, the send countdown and short messages, and folds away when idle.
+/// spring between dictation, gesture feedback and short messages, and folds away when idle. Timed waits
+/// (switching sessions, holding to send) fill the island's own edge, starting the moment the clock starts.
 private struct IslandView: View {
     @ObservedObject var model: OverlayModel
     let notch: CGSize
 
-    private enum Mode: Equatable { case idle, listening, countdown, banner, gesture }
+    private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, otherGesture, countdown, banner }
     private var mode: Mode {
-        if let _ = model.countdown { return .countdown }
-        if let g = model.gesture, !(g.action == .talk && g.active) { return .gesture }
-        if model.listening { return .listening }
+        if model.countdown != nil { return .countdown }
+        if model.listening, model.sessionSwitch != nil { return .switching }
+        if let g = model.gesture {
+            if (g.action == .talk || g.action == .stop) && !g.active { return .firstPinch }
+            if g.action == .send, g.willAct { return .sendHold }
+            if g.action == .scrollUp || g.action == .scrollDown || g.action == .cancel { return .otherGesture }
+        }
+        if model.listening { return .dictating }
         if model.banner != nil { return .banner }
         return .idle
     }
@@ -128,28 +134,46 @@ private struct IslandView: View {
     private var size: CGSize {
         switch mode {
         case .idle: return CGSize(width: 120, height: 0)
-        case .listening: return CGSize(width: 300, height: 38)
+        case .otherGesture: return CGSize(width: 200, height: 36)
         case .countdown: return CGSize(width: 420, height: 112)
-        case .banner: return CGSize(width: 380, height: 64)
-        case .gesture: return CGSize(width: 230, height: 38)
+        case .dictating, .switching, .firstPinch, .sendHold, .banner: return CGSize(width: 360, height: floating ? 46 : 48)
         }
     }
 
+    /// The edge fill for timed waits; nil when this state has no clock.
+    private var edgeProgress: Double? {
+        switch mode {
+        case .switching: return model.sessionSwitch?.progress
+        case .sendHold: return model.gesture?.progress
+        default: return nil
+        }
+    }
+
+    private var name: String { model.sessionName ?? "this session" }
+
     var body: some View {
-        let r: CGFloat = (mode == .listening || mode == .gesture) ? 19 : 26
+        let r: CGFloat = 22
         let shape = UnevenRoundedRectangle(topLeadingRadius: floating ? r : 0, bottomLeadingRadius: r,
                                           bottomTrailingRadius: r, topTrailingRadius: floating ? r : 0, style: .continuous)
         ZStack {
             shape.fill(Color.black)
             content
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
                 .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.85)).animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.08)),
                                         removal: .opacity.animation(.easeOut(duration: 0.12))))
                 .id(mode)
         }
         .padding(.top, mode == .idle ? 0 : notch.height)
         .frame(width: max(size.width, notch.width + (mode == .idle ? 0 : 40)), height: size.height + (mode == .idle ? 0 : notch.height))
+        .overlay {
+            if let p = edgeProgress {
+                IslandEdge(floating: floating, radius: r)
+                    .trim(from: 0, to: min(max(p, 0), 1))
+                    .stroke(Color.clutchBlue, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .animation(.linear(duration: 0.1), value: p)
+            }
+        }
         .background(shape.fill(Color.black))
         .clipShape(shape)
         .shadow(color: .black.opacity(mode == .idle ? 0 : 0.35), radius: 14, y: 6)
@@ -160,20 +184,63 @@ private struct IslandView: View {
         .environment(\.colorScheme, .dark)
     }
 
+    private func lines(_ title: Text, _ sub: Text?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            title.font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+            if let sub { sub.font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.6)).lineLimit(1).truncationMode(.middle) }
+        }
+    }
+
+    private func session(_ n: String) -> Text { Text(n).foregroundColor(Color.clutchSoftBlue) }
+
+    private func hint(_ s: String) -> some View {
+        Text(s).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).fixedSize()
+    }
+
     @ViewBuilder private var content: some View {
         switch mode {
         case .idle:
             EmptyView()
-        case .listening:
-            HStack(spacing: 10) {
+        case .dictating:
+            HStack(spacing: 11) {
                 if model.liveSoundBars {
                     SoundWaves(color: .clutchBlue, level: model.audioLevel).frame(width: 26, height: 16)
                 } else {
                     BlinkingMic()
                 }
-                Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                lines(Text("Claude dictation on"), Text("in ") + session(name))
+                Spacer(minLength: 8)
+                hint("double pinch to stop")
+            }
+        case .switching:
+            HStack(spacing: 11) {
+                SwitchGlyph().frame(width: 26, height: 16)
+                lines(Text("Activating ") + session(model.sessionSwitch?.name ?? "the other session"), Text("Original message unsent"))
+                Spacer(minLength: 8)
+                hint("look back to stay")
+            }
+        case .firstPinch:
+            let stopping = model.gesture?.action == .stop
+            HStack(spacing: 11) {
+                DoublePinchGlyph().frame(width: 26, height: 18)
+                lines(Text(stopping ? "Pinch again to stop dictation" : "Pinch again to dictate"), Text("in ") + session(name))
                 Spacer(minLength: 0)
-                Text("double pinch to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+            }
+        case .sendHold:
+            HStack(spacing: 11) {
+                Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.clutchBlue)
+                    .frame(width: 26)
+                lines(Text("Sending in ") + session(name), nil)
+                Spacer(minLength: 8)
+                hint("lower to cancel")
+            }
+        case .otherGesture:
+            if let g = model.gesture {
+                HStack(spacing: 10) {
+                    Image(systemName: Self.symbol(g.action)).font(.system(size: 12, weight: .bold)).foregroundStyle(Color.clutchBlue)
+                    Text(Self.label(g)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                }
             }
         case .countdown:
             if let c = model.countdown {
@@ -194,28 +261,18 @@ private struct IslandView: View {
                     Spacer(minLength: 0)
                 }
             }
-        case .gesture:
-            if let g = model.gesture {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle().stroke(.white.opacity(0.2), lineWidth: 3)
-                        Circle().trim(from: 0, to: g.progress)
-                            .stroke(Color.clutchBlue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                        Image(systemName: Self.symbol(g.action)).font(.system(size: 10, weight: .bold)).foregroundStyle(Color.clutchBlue)
-                    }
-                    .frame(width: 24, height: 24)
-                    Text(Self.label(g)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                }
-            }
         case .banner:
             if let b = model.banner {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(b.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
-                    Text(b.body).font(.system(size: 13)).foregroundStyle(.white).lineLimit(2)
+                HStack(spacing: 11) {
+                    Image(systemName: Self.bannerSymbol(b.style)).font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Self.bannerTint(b.style)).frame(width: 26)
+                    switch b.style {
+                    case .sent: lines(Text("Sent in ") + session(b.body), nil)
+                    case .stopped: lines(Text(b.title), Text("Text kept in ") + session(b.body) + Text(", thumbs-up to send"))
+                    case .refused, .info: lines(Text(b.title), Text(b.body))
+                    }
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -235,11 +292,106 @@ extension IslandView {
 
     static func label(_ g: GestureProgress) -> String {
         switch g.action {
-        case .talk: return g.progress < 1 ? "Pinch again to listen" : "Listening"
-        case .stop: return "Pinch again to stop"
-        case .send: return "Hold to send"
+        case .talk, .stop: return "Pinch again"
+        case .send: return "Sending"
         case .cancel: return "Cancel"
         case .scrollUp, .scrollDown: return "Scrolling"
+        }
+    }
+
+    static func bannerSymbol(_ s: OverlayBanner.Style) -> String {
+        switch s {
+        case .sent: return "checkmark"
+        case .stopped: return "mic.slash.fill"
+        case .refused, .info: return "exclamationmark.circle.fill"
+        }
+    }
+
+    static func bannerTint(_ s: OverlayBanner.Style) -> Color {
+        switch s {
+        case .sent: return .clutchBlue
+        case .stopped: return .white.opacity(0.55)
+        case .refused, .info: return Color(red: 1.0, green: 0.70, blue: 0.25)
+        }
+    }
+}
+
+/// The island's outline as one stroke for progress: on a notch it runs down the left side, along the bottom
+/// and up the right (the top edge is the screen edge); floating, it runs clockwise from the top centre.
+private struct IslandEdge: Shape {
+    let floating: Bool
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(radius, rect.height / 2), i: CGFloat = 1.25
+        let b = rect.insetBy(dx: i, dy: i)
+        var p = Path()
+        if floating {
+            p.move(to: CGPoint(x: b.midX, y: b.minY))
+            p.addLine(to: CGPoint(x: b.maxX - r, y: b.minY))
+            p.addArc(center: CGPoint(x: b.maxX - r, y: b.minY + r), radius: r, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+            p.addLine(to: CGPoint(x: b.maxX, y: b.maxY - r))
+            p.addArc(center: CGPoint(x: b.maxX - r, y: b.maxY - r), radius: r, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+            p.addLine(to: CGPoint(x: b.minX + r, y: b.maxY))
+            p.addArc(center: CGPoint(x: b.minX + r, y: b.maxY - r), radius: r, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+            p.addLine(to: CGPoint(x: b.minX, y: b.minY + r))
+            p.addArc(center: CGPoint(x: b.minX + r, y: b.minY + r), radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+            p.closeSubpath()
+        } else {
+            p.move(to: CGPoint(x: b.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: b.minX, y: b.maxY - r))
+            p.addArc(center: CGPoint(x: b.minX + r, y: b.maxY - r), radius: r, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
+            p.addLine(to: CGPoint(x: b.maxX - r, y: b.maxY))
+            p.addArc(center: CGPoint(x: b.maxX - r, y: b.maxY - r), radius: r, startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true)
+            p.addLine(to: CGPoint(x: b.maxX, y: rect.minY))
+        }
+        return p
+    }
+}
+
+/// Two white fingertips that tap together twice, then rest: "pinch, pinch".
+private struct DoublePinchGlyph: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4)
+            let gap = Self.gap(t)
+            ZStack {
+                Circle().fill(.white).frame(width: 6, height: 6).offset(y: -gap)
+                Circle().fill(.white).frame(width: 6, height: 6).offset(y: gap)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Half the distance between the tips over one 1.4 s cycle: open, tap, open, tap, rest open.
+    static func gap(_ t: Double) -> CGFloat {
+        let open: CGFloat = 5.5, shut: CGFloat = 3.2
+        func tap(_ t: Double, at c: Double) -> CGFloat {
+            let d = abs(t - c)
+            guard d < 0.11 else { return 0 }
+            return CGFloat(0.5 + 0.5 * cos(d / 0.11 * .pi))
+        }
+        let k = max(tap(t, at: 0.25), tap(t, at: 0.52))
+        return open - (open - shut) * k
+    }
+}
+
+/// Two session tiles side by side; the lit one slides from the first to the second: focus is moving.
+private struct SwitchGlyph: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+            let x = CGFloat(min(max((t - 0.2) / 0.5, 0), 1))
+            let eased = x * x * (3 - 2 * x)
+            GeometryReader { g in
+                let w = (g.size.width - 3) / 2
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.45), lineWidth: 1.2).frame(width: w, height: g.size.height)
+                    RoundedRectangle(cornerRadius: 3).stroke(.white.opacity(0.45), lineWidth: 1.2).frame(width: w, height: g.size.height).offset(x: w + 3)
+                    RoundedRectangle(cornerRadius: 3).fill(Color.clutchBlue).frame(width: w, height: g.size.height).offset(x: (w + 3) * eased)
+                        .opacity(t > 0.92 ? Double((1 - t) / 0.08) : 1)
+                }
+            }
         }
     }
 }
@@ -297,6 +449,8 @@ private struct BlinkingMic: View {
 extension Color {
     /// The listening colour: the highlight while listening, the island's waves and progress rings.
     static let clutchBlue = Color(red: 0.32, green: 0.58, blue: 1.0)
+    /// Session names on the island: a lighter blue that reads as a name on black.
+    static let clutchSoftBlue = Color(red: 0.56, green: 0.72, blue: 1.0)
 }
 
 private struct ListeningView: View {

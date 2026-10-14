@@ -35,7 +35,12 @@ final class Coordinator: AppCoordinating {
     private var target: ClaudeSession?
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
     private var candidate: (session: ClaudeSession?, since: TimeInterval)?
-    private let switchDwell = 0.4
+    /// 0.6 s: long enough that a glance passing over a session does not take focus (intentional dwell
+    /// selection needs roughly 0.5–1 s), short enough to feel like focus follows the eyes.
+    private let switchDwell = 0.6
+    /// Moving from one session to another, the nose must be this far inside the new one: no flip-flopping
+    /// on the border between two panes.
+    private let switchMargin: CGFloat = 28
     /// While dictating, the nose must stay on another session this long before focus moves there.
     private let listeningSwitchDwell = 2.0
     /// A Claude session the nose rests on while another app's window covers it; raised after `raiseDwell`.
@@ -335,7 +340,12 @@ final class Coordinator: AppCoordinating {
         if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
             lastNose = p
             // Claude only: the nose counts only over a Claude session whose window is actually in front there.
-            let under = sessions.first { $0.frame.contains(p) && claudeInFront(at: p, t: head.t) }
+            var under = sessions.first { $0.frame.contains(p) && claudeInFront(at: p, t: head.t) }
+            // Near the border between the current session and another, stay with the current one.
+            if let u = under, let t = target, u.id != t.id, !u.frame.insetBy(dx: switchMargin, dy: switchMargin).contains(p),
+               let still = sessions.first(where: { $0.id == t.id }), still.frame.insetBy(dx: -switchMargin, dy: -switchMargin).contains(p) {
+                under = still
+            }
             if under == nil {
                 dotPoint = nil
             } else if let d = dotPoint {
@@ -376,6 +386,7 @@ final class Coordinator: AppCoordinating {
             } else {
                 covered = nil
             }
+            ClutchTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") target=\(target?.id ?? "-") cand=\(candidate.map { "\($0.session?.id ?? "none")@\(String(format: "%.2f", head.t - $0.since))" } ?? "-") faces=\(head.faceCount)")
         } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 {
             // A hand in front of the face hides it or reads as a second face for a moment: keep the target.
             // face hidden for a moment (hand in front): keep the last target and dot
@@ -390,7 +401,9 @@ final class Coordinator: AppCoordinating {
     private func handle(hand: HandObservation) {
         if listeningSession != nil { safety.heartbeat() }   // a fresh camera frame: the engine is alive
         guard !state.calibrating else { return }
-        for intent in gestures.push(hand) { apply(intent) }
+        let intents = gestures.push(hand)
+        ClutchTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
+        for intent in intents { apply(intent) }
         let onClaude = target != nil || listeningSession != nil || pendingSend != nil
         let progress = cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress
         gestureShowing = progress != nil
@@ -502,7 +515,7 @@ final class Coordinator: AppCoordinating {
         Task { @MainActor in
             defer { self.refreshInFlight = false }
             let found = await self.bridge.refreshSessions()
-            if found.map(\.id) != self.sessions.map(\.id) { ClutchLog.write("Claude sessions found: \(found.count) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
+            if found.map(\.id) != self.sessions.map(\.id) { ClutchLog.write("Claude sessions found: \(found.count) (named \(found.filter { $0.title != nil }.count)) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.sessions = found
             self.updateStatus()
         }
@@ -562,7 +575,7 @@ final class Coordinator: AppCoordinating {
     /// or the next double tap would be read as a stop.
     private func refuseStart(_ why: String) {
         gestures.abortTalk()
-        refuse(why)
+        refuse(why, title: "Dictation not started")
     }
 
     private func beginTalk() {
@@ -598,7 +611,7 @@ final class Coordinator: AppCoordinating {
                 self.safety.episodeEnded()
                 self.gestures.abortTalk()
                 ClutchLog.write("start dictation \(result): \(self.bridge.micSnapshot)")
-                self.refuse("Could not start dictation: \(why)")
+                self.refuse("Could not start dictation: \(why)", title: "Dictation not started")
                 self.checkClaudeUpdate()
             }
             // The hand may already have opened while the press was in flight.
@@ -634,6 +647,9 @@ final class Coordinator: AppCoordinating {
                 }
                 self.settings.lastClaudeVersion = self.bridge.claudeVersion
                 self.lastSpoken = (session, Date())
+                if !self.sendAfterStop {
+                    self.overlay.showBanner(title: "Dictation stopped", body: self.name(of: session), style: .stopped, seconds: 2.5)
+                }
                 if self.sendAfterStop {
                     self.sendAfterStop = false
                     // Claude finalises the transcript a moment after the mic stops.
@@ -679,10 +695,15 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
-                self.overlay.showBanner(title: "Sent", body: "Message sent to Claude", seconds: 1.5)
+                self.overlay.showBanner(title: "Sent", body: self.name(of: session), style: .sent, seconds: 1.5)
             case .refused(let why), .unknown(let why): self.refuse("Not sent: \(why)")
             }
         }
+    }
+
+    /// The session's name as Claude shows it now, for the island.
+    private func name(of session: ClaudeSession) -> String {
+        (sessions.first { $0.id == session.id }?.title ?? session.title) ?? "this session"
     }
 
     private func advanceCountdown(_ send: (session: ClaudeSession, started: Date, text: String)) {
@@ -741,7 +762,7 @@ final class Coordinator: AppCoordinating {
         if let listening = listeningSession {
             guard listening.id != session.id else { return }
             focusAfterStop = session
-            refuse("Looked at another session; dictation stopped and kept")
+            ClutchLog.write("looked at another session; dictation stopped and kept")
             endTalk(reason: "looked at another session")
             return
         }
@@ -854,10 +875,12 @@ final class Coordinator: AppCoordinating {
         Task { await self.safety.launchSweep() }
     }
 
-    private func refuse(_ why: String) {
+    private func refuse(_ why: String, title: String? = nil) {
         state.lastRefusal = why
         if gestureShowing || pendingSend != nil || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
-            overlay.showBanner(title: "Clutch", body: why, seconds: 2.5)
+            let sendRelated = why.hasPrefix("Send") || why.hasPrefix("Not sent")
+            let body = why.hasPrefix("Not sent: ") ? String(why.dropFirst("Not sent: ".count)) : why
+            overlay.showBanner(title: title ?? (sendRelated ? "Not sent" : "Nothing done"), body: body.prefix(1).uppercased() + body.dropFirst(), style: .refused, seconds: 2.5)
         }
         ClutchLog.write("refused: \(why)")
     }
@@ -902,6 +925,16 @@ final class Coordinator: AppCoordinating {
     }
 
     private func pushOverlay() {
+        let acting = listeningSession ?? (gestures.progress?.action == .send ? lastSpoken?.session : nil) ?? target
+        var switching: SessionSwitch?
+        if listeningSession != nil {
+            if let next = focusAfterStop {
+                switching = SessionSwitch(name: name(of: next), progress: 1)
+            } else if let c = candidate, let to = c.session, to.id != listeningSession?.id, let now = latestHead?.t {
+                switching = SessionSwitch(name: name(of: to), progress: min(max((now - c.since) / listeningSwitchDwell, 0), 1))
+            }
+        }
+        overlay.setSession(name: acting.map(name(of:)), switching: switching)
         overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
                        countdown: state.countdown, showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         updateStatus()

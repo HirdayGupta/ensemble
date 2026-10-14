@@ -8,9 +8,17 @@ struct Arrival: Equatable, Identifiable {
 }
 
 struct OverlayBanner: Equatable, Identifiable {
+    enum Style: Equatable { case sent, stopped, refused, info }
     let id = UUID()
     var title: String
     var body: String
+    var style: Style = .info
+}
+
+/// While dictating, the nose rests on another session: focus moves there when `progress` reaches 1.
+struct SessionSwitch: Equatable {
+    var name: String?
+    var progress: Double
 }
 
 @MainActor
@@ -32,6 +40,9 @@ final class OverlayModel: ObservableObject {
     /// Show live sound bars instead of the blinking microphone dot.
     @Published var liveSoundBars = false
     @Published var cancelHint = "Show an open palm to cancel"
+    /// The name of the session a gesture would act on (the dictating one while dictating).
+    @Published var sessionName: String?
+    @Published var sessionSwitch: SessionSwitch?
 
     var hasContent: Bool {
         (showHighlight && target != nil) || (showNoseDot && nose != nil) || listening || countdown != nil || banner != nil || arrival != nil
@@ -89,6 +100,11 @@ final class OverlayController {
         syncGlassDot()
     }
 
+    func setSession(name: String?, switching: SessionSwitch?) {
+        setIfChanged(&model.sessionName, name)
+        setIfChanged(&model.sessionSwitch, switching)
+    }
+
     func setCancelHint(_ text: String) {
         setIfChanged(&model.cancelHint, text)
     }
@@ -115,8 +131,8 @@ final class OverlayController {
         }
     }
 
-    func showBanner(title: String, body: String, seconds: Double = 5) {
-        let banner = OverlayBanner(title: title, body: body)
+    func showBanner(title: String, body: String, style: OverlayBanner.Style = .info, seconds: Double = 5) {
+        let banner = OverlayBanner(title: title, body: body, style: style)
         model.banner = banner
         syncPanels()
         bannerTask?.cancel()

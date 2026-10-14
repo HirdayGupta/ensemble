@@ -47,7 +47,7 @@ import Testing
         s.tap(); s.tap()
         #expect(s.count(.talkBegan) == 1)
         s.machine.reset()
-        s.pinch(0.6, for: 0.2)
+        s.pinch(0.6, for: 0.5)
         s.tap(); s.tap()
         #expect(s.count(.talkBegan) == 2)
     }
