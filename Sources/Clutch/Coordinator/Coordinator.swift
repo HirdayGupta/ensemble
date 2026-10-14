@@ -393,7 +393,7 @@ final class Coordinator: AppCoordinating {
         let now = CACurrentMediaTime()
         // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
         if listeningSession != nil, !busy, now - listeningSince > 1.5 {
-            if ClaudeBridge.secondsSinceUserInput() < 0.3 { refuse("Keyboard or mouse used; dictation stopped"); endTalk(reason: "input"); return }
+            if ClaudeBridge.secondsSinceTypingOrClick() < 0.3 { refuse("Typing or a click; dictation stopped"); endTalk(reason: "input"); return }
             if now - lastOneFaceT > 10 { refuse("No face for 10 seconds; dictation stopped"); endTalk(reason: "away"); return }
         }
         if listeningSession != nil, !busy, now - lastHoldAudioCheck >= 0.5 {

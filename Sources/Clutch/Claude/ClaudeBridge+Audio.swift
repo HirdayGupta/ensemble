@@ -95,6 +95,12 @@ extension ClaudeBridge {
     }
 
     /// Seconds since the user last pressed a key, moved or clicked the mouse, or scrolled.
+    /// Typing or clicking only (no pointer motion or scrolling): what ends a dictation, since a nudged mouse should not.
+    static func secondsSinceTypingOrClick() -> Double {
+        let types: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown]
+        return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+    }
+
     static func secondsSinceUserInput() -> Double {
         let types: [CGEventType] = [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel]
         return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity

@@ -100,7 +100,10 @@ final class OverlayController {
         for (index, screen) in NSScreen.screens.enumerated() {
             guard let id = ScreenGeometry.displayID(of: screen) else { continue }
             let panel = OverlayPanel(screen: screen)
-            let root = OverlayScreenView(model: model, screenFrame: ScreenGeometry.topLeftFrame(of: screen), isPrimary: index == 0)
+            let notchHeight = screen.safeAreaInsets.top
+            let notchWidth = notchHeight > 0 ? max(0, screen.frame.width - (screen.auxiliaryTopLeftArea?.width ?? 0) - (screen.auxiliaryTopRightArea?.width ?? 0)) : 0
+            let root = OverlayScreenView(model: model, screenFrame: ScreenGeometry.topLeftFrame(of: screen), isPrimary: index == 0,
+                                         notch: CGSize(width: notchWidth, height: notchHeight))
             let host = NSHostingView(rootView: root)
             host.sizingOptions = []
             host.frame = NSRect(origin: .zero, size: screen.frame.size)

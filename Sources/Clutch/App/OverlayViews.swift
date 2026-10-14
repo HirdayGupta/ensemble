@@ -7,6 +7,8 @@ struct OverlayScreenView: View {
     @ObservedObject var model: OverlayModel
     let screenFrame: CGRect
     let isPrimary: Bool
+    /// The camera housing on notched displays (zero elsewhere): the island grows out of it, never under it.
+    var notch: CGSize = .zero
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -21,7 +23,7 @@ struct OverlayScreenView: View {
                     .animation(.linear(duration: 0.08), value: nose)
             }
             if showsIsland {
-                IslandView(model: model)
+                IslandView(model: model, notch: notch)
                     .frame(width: screenFrame.width, alignment: .top)
             }
         }
@@ -66,6 +68,7 @@ private struct HighlightView: View {
 /// spring between listening, the send countdown and short messages, and folds away when idle.
 private struct IslandView: View {
     @ObservedObject var model: OverlayModel
+    let notch: CGSize
 
     private enum Mode: Equatable { case idle, listening, countdown, banner }
     private var mode: Mode {
@@ -96,7 +99,9 @@ private struct IslandView: View {
                                         removal: .opacity.animation(.easeOut(duration: 0.12))))
                 .id(mode)
         }
-        .frame(width: size.width, height: size.height)
+        .padding(.top, mode == .idle ? 0 : notch.height)
+        .frame(width: max(size.width, notch.width + (mode == .idle ? 0 : 40)), height: size.height + (mode == .idle ? 0 : notch.height))
+        .background(shape.fill(Color.black))
         .clipShape(shape)
         .shadow(color: .black.opacity(mode == .idle ? 0 : 0.35), radius: 14, y: 6)
         .opacity(mode == .idle ? 0 : 1)
