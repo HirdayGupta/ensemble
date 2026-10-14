@@ -74,7 +74,7 @@ struct SessionColumnsGlyph: View {
                         .offset(x: lit.x)
                 }
             }
-            .animation(.spring(response: 0.42, dampingFraction: 0.78), value: progress)
+            .animation(.smooth(duration: 0.4), value: progress)
         }
     }
 }

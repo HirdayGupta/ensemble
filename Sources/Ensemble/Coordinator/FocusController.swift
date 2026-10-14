@@ -19,8 +19,8 @@ final class FocusController {
     /// Stops the running dictation but keeps its text (wired by the Coordinator).
     var stopDictation: (String) -> Void = { _ in }
     /// `ctx.sessions`, ordered left to right on screen, with a group per screen/window boundary; recomputed
-    /// only when that list changes, never per frame. Feeds the island's session-columns glyph.
-    private var sessionOrderCache: (ids: [String], ordered: [ClaudeSession], groupOf: [String: Int])?
+    /// only when that list or a pane's frame changes, never per frame. Feeds the island's session-columns glyph.
+    private var sessionOrderCache: (sessions: [ClaudeSession], ordered: [ClaudeSession], groupOf: [String: Int])?
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
@@ -79,16 +79,17 @@ final class FocusController {
         return nil
     }
 
-    /// `ctx.sessions`, ordered left to right on screen, recomputed only when that list changed.
+    /// `ctx.sessions`, ordered left to right on screen, recomputed only when that list or a frame changed
+    /// (a moved window reorders the columns even though the same sessions are open).
     private func sessionOrder() -> (ordered: [ClaudeSession], groupOf: [String: Int]) {
-        let ids = ctx.sessions.map(\.id)
-        if let cached = sessionOrderCache, cached.ids == ids { return (cached.ordered, cached.groupOf) }
+        let sessions = ctx.sessions
+        if let cached = sessionOrderCache, cached.sessions == sessions { return (cached.ordered, cached.groupOf) }
         let screens = NSScreen.screens.map { ScreenGeometry.topLeftFrame(of: $0) }
         let pairs = SessionOrdering.ordered(ctx.sessions, screens: screens)
         let ordered = pairs.map(\.session)
         var groupOf: [String: Int] = [:]
         for pair in pairs { groupOf[pair.session.id] = pair.group }
-        sessionOrderCache = (ids, ordered, groupOf)
+        sessionOrderCache = (sessions, ordered, groupOf)
         return (ordered, groupOf)
     }
 
