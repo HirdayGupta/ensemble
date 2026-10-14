@@ -106,3 +106,36 @@ import Testing
         #expect(total > 0.1 * GestureMachine.dragPointsPerFrameHeight)   // more than the vertical rise alone gives
     }
 }
+
+@Suite struct PinchScrollDirectionTests {
+    private func run(_ path: [(Double, Double)]) -> [Double] {
+        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        var t = 10.0, out: [Double] = []
+        func push(_ x: Double, _ y: Double, _ pinch: Double) {
+            for i in m.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: x, y: y), pinch: pinch)) {
+                if case .dragScroll(let d) = i { out.append(d) }
+            }
+            t += 1.0 / 30
+        }
+        push(0.5, 0.5, 0.2); push(0.5, 0.5, 0.2)
+        for _ in 0..<5 { push(0.5, 0.5, 0.04) }
+        for (x, y) in path { push(x, y, 0.04) }
+        return out
+    }
+
+    @Test func jitteryUpwardStrokeNeverScrollsTheOtherWay() {
+        var path: [(Double, Double)] = []
+        for k in 1...40 { path.append((0.5 + (k % 2 == 0 ? 0.01 : -0.01), 0.5 + Double(k) * 0.004 + (k % 3 == 0 ? -0.006 : 0))) }
+        let out = run(path)
+        #expect(!out.isEmpty)
+        #expect(out.allSatisfy { $0 > 0 })
+    }
+
+    @Test func aClearMoveBackReverses() {
+        var path: [(Double, Double)] = []
+        for k in 1...20 { path.append((0.5, 0.5 + Double(k) * 0.005)) }      // up 0.1
+        for k in 1...30 { path.append((0.5, 0.6 - Double(k) * 0.005)) }      // back down 0.15
+        let out = run(path)
+        #expect(out.first! > 0 && out.last! < 0)
+    }
+}
