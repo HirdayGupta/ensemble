@@ -53,6 +53,13 @@ struct MenuPanelView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
+            if state.enabled, case .needsPermission(let what) = state.status {
+                row(symbol: "lock", text: Permissions.guidance(for: what), tint: .orange)
+                Button { Permissions.openSettings(for: what) } label: {
+                    Label("Open \(what) settings", systemImage: "gearshape").frame(maxWidth: .infinity)
+                }
+                .clutchButtonStyle()
+            }
             if state.muted {
                 row(symbol: "speaker.slash", text: "Sounds muted", tint: .secondary)
             }

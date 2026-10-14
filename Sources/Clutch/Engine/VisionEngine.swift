@@ -9,6 +9,7 @@ enum EngineStatus: Equatable {
     case noCamera, permissionDenied
     case error(String)
     case faceTrackerReady
+    case faceTrackerRestarting
     case faceTrackerFailed(String)
 }
 
@@ -23,6 +24,8 @@ final class VisionEngine {
     var onDiagnostic: ((String) -> Void)?
 
     private(set) var isRunning = false
+    /// The face tracker is restarted once after a failure; a good reading re-arms that.
+    private var trackerRestarted = false
 
     private let camera = CameraSession()
     private let face = FaceTracker()
@@ -37,12 +40,24 @@ final class VisionEngine {
             self?.onDiagnostic?("face tracker ready (\(delegate))")
             self?.onStatus?(.faceTrackerReady)
         }
-        face.onFailure = { [weak self] message in self?.onStatus?(.faceTrackerFailed(message)) }
-        face.onHead = { [weak self] head in self?.onHead?(head) }
+        face.onFailure = { [weak self] message in self?.trackerFailed(message) }
+        face.onHead = { [weak self] head in self?.trackerRestarted = false; self?.onHead?(head) }
         face.onDiagnostic = { [weak self] note in self?.onDiagnostic?(note) }
         camera.onFrame = { [weak self] buffer in self?.process(buffer) }
         camera.onInterrupted = { [weak self] message in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(message) } }
+        }
+    }
+
+    private func trackerFailed(_ message: String) {
+        guard isRunning else { return }
+        if trackerRestarted {
+            onStatus?(.faceTrackerFailed(message))
+        } else {
+            trackerRestarted = true
+            onDiagnostic?("face tracker failed (\(message)); restarting it once")
+            onStatus?(.faceTrackerRestarting)
+            face.start()
         }
     }
 
@@ -52,6 +67,7 @@ final class VisionEngine {
     func start(cameraName: String?) {
         if isRunning { halt() }
         isRunning = true
+        trackerRestarted = false
         generation += 1
         fpsWindowStart = 0
         fpsFrames = 0

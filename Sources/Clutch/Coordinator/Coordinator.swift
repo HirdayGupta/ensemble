@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import ClutchCore
 
@@ -45,6 +46,14 @@ final class Coordinator: AppCoordinating {
     private var refreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var running = false
+    /// What the camera engine last reported, kept apart from `state.status` so every pass recomputes the status from facts.
+    private var cameraProblem: String?
+    private var trackerFailure: String?
+    private var trackerReady = false
+    private var accessibilityTrusted = true
+    private var cameraAllowed = true
+    private var lastCameraRestart = Date.distantPast
+    private var calibrationPending = false
     /// Front-window check cache: who owns the window under the nose, refreshed at most every 0.15 s.
     private var topOwner: (at: CGPoint, t: TimeInterval, pid: pid_t?)?
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
@@ -84,6 +93,7 @@ final class Coordinator: AppCoordinating {
         engine.onHead = { [weak self] in self?.handle(head: $0) }
         engine.onLight = { [weak self] in self?.handle(light: $0) }
         engine.onStatus = { [weak self] in self?.handle(status: $0) }
+        engine.onDiagnostic = { note in ClutchLog.write("engine: \(note)") }
         safety.onAlarm = { [weak self] msg in
             self?.refuse("Alarm: \(msg)")
             Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
@@ -114,6 +124,11 @@ final class Coordinator: AppCoordinating {
             ClutchLog.write("accessibility permission missing")
         }
         running = true
+        accessibilityTrusted = Permissions.accessibilityTrusted
+        cameraAllowed = Permissions.cameraAllowed
+        cameraProblem = nil; trackerFailure = nil; trackerReady = false
+        latestHead = nil
+        lastCameraRestart = Date()
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
@@ -143,13 +158,25 @@ final class Coordinator: AppCoordinating {
     }
 
     func calibrate() {
-        ClutchLog.write("calibrate requested (engine running=\(engine.isRunning))")
-        // Calibrating while off turns Clutch on first and waits for the camera's first face reading.
-        if !engine.isRunning || latestHead == nil {
-            if !settings.enabled { settings.enabled = true } else if !running { start() }   // the enabled sink starts it
+        guard !calibrationPending, !state.calibrating else { ClutchLog.write("calibrate ignored: already in progress"); return }
+        ClutchLog.write("calibrate requested (engine running=\(engine.isRunning), face tracker ready=\(trackerReady))")
+        // Calibrating while off, or while the camera is down, turns Clutch on or restarts the camera and waits
+        // (up to 30 s: a first camera prompt plus the model load) for the face tracker to produce a reading.
+        if !engine.isRunning || !trackerReady || latestHead == nil {
+            calibrationPending = true
+            if !settings.enabled { settings.enabled = true } else if !running || !engine.isRunning { start() }   // the enabled sink starts it
             Task { @MainActor in
-                for _ in 0..<50 where self.latestHead?.faceCount != 1 { try? await Task.sleep(nanoseconds: 100_000_000) }
-                guard self.engine.isRunning, self.latestHead != nil else { self.refuse("The camera did not start; check Camera permission"); return }
+                defer { self.calibrationPending = false }
+                for _ in 0..<300 where !(self.engine.isRunning && self.trackerReady && self.latestHead != nil) {
+                    if !self.cameraAllowed || self.cameraProblem != nil || self.trackerFailure != nil { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                guard self.engine.isRunning, self.trackerReady, self.latestHead != nil else {
+                    if !self.cameraAllowed { self.refuse("Calibration needs Camera permission") }
+                    else { self.refuse("The camera did not start: \(self.cameraProblem ?? self.trackerFailure ?? "no reading within 30 s")") }
+                    return
+                }
+                self.calibrationPending = false
                 self.calibrate()
             }
             return
@@ -285,17 +312,26 @@ final class Coordinator: AppCoordinating {
     private func handle(status: EngineStatus) {
         if case .running = status {} else { ClutchLog.write("engine: \(status)") }
         switch status {
+        case .starting:
+            cameraProblem = nil; trackerFailure = nil; trackerReady = false
         case .running(let fps, let camera):
+            cameraProblem = nil
             state.fps = fps
             state.cameraName = camera
         case .permissionDenied:
-            state.status = .needsPermission("Camera")
+            cameraAllowed = false
         case .noCamera:
-            state.status = .error("No camera found")
-        case .error(let msg), .faceTrackerFailed(let msg):
-            state.status = .error(msg)
-        default:
-            break
+            cameraProblem = "No camera found"
+        case .error(let msg):
+            cameraProblem = msg
+        case .faceTrackerReady:
+            trackerReady = true; trackerFailure = nil
+        case .faceTrackerRestarting:
+            trackerReady = false
+        case .faceTrackerFailed(let msg):
+            trackerReady = false; trackerFailure = msg
+        case .stopped:
+            trackerReady = false
         }
         updateStatus()
     }
@@ -316,6 +352,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func refreshSessions() {
+        checkPermissions()
         guard bridge.claudeIsRunning() else {
             sessions = []; target = nil; updateStatus(); return
         }
@@ -545,13 +582,41 @@ final class Coordinator: AppCoordinating {
 
     private func updateStatus() {
         if !settings.enabled || !running { state.status = .off; return }
-        if !AXIsProcessTrusted() { state.status = .needsPermission("Accessibility"); return }
-        if case .needsPermission = state.status { return }
-        if case .error = state.status, !engine.isRunning { return }
+        if !accessibilityTrusted { state.status = .needsPermission("Accessibility"); return }
+        if !cameraAllowed { state.status = .needsPermission("Camera"); return }
+        if let problem = cameraProblem { state.status = .error(problem); return }
+        if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
         if cover.covered { state.status = .cameraCovered; return }
         if !calibratedHere { state.status = .needsCalibration; return }
         if !bridge.claudeIsRunning() { state.status = .claudeNotRunning; return }
         state.status = state.listening ? .listening : .watching
+    }
+
+    /// Re-reads both permissions every second. A grant that arrives while Clutch runs clears the status and
+    /// restarts the camera; a camera that stopped for another reason is retried every 5 s.
+    private func checkPermissions() {
+        guard running else { return }
+        let trusted = Permissions.accessibilityTrusted
+        if trusted != accessibilityTrusted { ClutchLog.write("accessibility permission is now \(trusted ? "granted" : "missing")") }
+        accessibilityTrusted = trusted
+        let allowed = Permissions.cameraAllowed
+        let flippedOn = allowed && !cameraAllowed
+        if allowed != cameraAllowed { ClutchLog.write("camera permission is now \(allowed ? "granted" : "denied")") }
+        cameraAllowed = allowed
+        if flippedOn {
+            restartCamera("camera permission granted")
+        } else if allowed, !engine.isRunning, Date().timeIntervalSince(lastCameraRestart) >= 5 {
+            restartCamera("the camera was not running")
+        }
+        updateStatus()
+    }
+
+    private func restartCamera(_ why: String) {
+        ClutchLog.write("camera restart: \(why)")
+        lastCameraRestart = Date()
+        cameraProblem = nil; trackerFailure = nil; trackerReady = false
+        latestHead = nil
+        engine.start(cameraName: settings.cameraName)
     }
 
     private func pushOverlay() {
