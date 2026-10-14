@@ -375,7 +375,7 @@ import Testing
     }
 
     @Test func eachDirectionCanBeTurnedOffSeparately() {
-        var m = GestureMapping()
+        var m = GestureMapping.holdFist
         m.scrollDown = nil
         let s = GestureSim(mapping: m)
         s.hold(.pointDown, for: 1.5)
