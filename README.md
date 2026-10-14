@@ -61,7 +61,7 @@ Clutch does not ask for the Microphone permission: Claude records, and Clutch on
 - Video is analysed on your Mac. Frames are never written to disk and never sent anywhere.
 - The app makes no network connections. The face tracker is a web page served from inside the app bundle through a custom URL scheme, and the model ships in the bundle.
 - It only acts on Claude. If another app is in front, gestures do nothing.
-- The only files it writes are settings, a small log, and the two safety records described below.
+- The only files it writes are settings, a small log, and the two safety records described below. The log is rolled over at 1 MB (one backup, `clutch.log.1`), so it stays under about 2 MB; per-frame hand-tuning lines are written only when the hidden setting `verboseLog` is on (`defaults write dev.clutch.app verboseLog -bool true`, then restart).
 
 ## Safety design
 
@@ -95,7 +95,7 @@ swift test --enable-swift-testing -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $
 
 ## Architecture
 
-- **`Sources/ClutchCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, and the hand-pose classifier adapted from Sleight (`Vendor/`).
+- **`Sources/ClutchCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, the size-capped log file, and the hand-pose classifier adapted from Sleight (`Vendor/`).
 - **`Sources/Clutch`** is the app:
   - `Engine/` captures camera frames. Hands go to Apple's Vision hand-pose request. Faces go to MediaPipe Face Landmarker running in a hidden `WKWebView` (the MediaPipe runtime, its WebAssembly and the model are bundled in `Resources/web` and served by a custom URL scheme, so nothing touches the network).
   - `Claude/` is the Accessibility bridge: it finds Claude's session panes, reads the state of the dictation, Send and mode controls, presses them, and runs the dictation safety checks.

@@ -21,7 +21,7 @@ final class FrameAnalyzer: @unchecked Sendable {
     func hand(from buffer: CMSampleBuffer, at t: TimeInterval) -> HandObservation {
         let h = detector.detect(buffer)
         // Twice a second while a hand is in view, log why it was or wasn't read as a pose (numbers only).
-        if let h, t - lastDiag >= 0.5, let f = classifier.features(h) {
+        if ClutchLog.verbose, let h, t - lastDiag >= 0.5, let f = classifier.features(h) {
             lastDiag = t
             // Fingertip cluster, for the "gather" (all fingertips pinched together) gesture being tuned.
             let tips: [Joint] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
@@ -42,7 +42,7 @@ final class FrameAnalyzer: @unchecked Sendable {
         }
         let obs = HandClassifierAdapter.observation(from: h, at: t, classifier: classifier)
         // While tuning the double tap: twice a second while the fingertips are near each other.
-        if let p = obs.pinch, p < 0.5, t - lastPinchLog >= 0.5 { lastPinchLog = t; ClutchLog.write(String(format: "pinch: %.2f", p)) }
+        if ClutchLog.verbose, let p = obs.pinch, p < 0.5, t - lastPinchLog >= 0.5 { lastPinchLog = t; ClutchLog.write(String(format: "pinch: %.2f", p)) }
         return obs
     }
 
