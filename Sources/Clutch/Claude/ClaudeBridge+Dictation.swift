@@ -32,7 +32,7 @@ extension ClaudeBridge {
     }
 
     private func startNow(_ s: ClaudeSession) -> BridgeResult {
-        if isShuttingDown { return .refused("Clutch is quitting") }
+        if isShuttingDown { return .refused("Ensemble is quitting") }
         guard let before = liveEntry(s) else { return .refused(self.sessionNotFound) }
         let state = micStateSync(mic: before.elements.mic)
         guard state == .off else { return .refused("mic is not verifiably off: \(describe(state))") }
@@ -44,7 +44,7 @@ extension ClaudeBridge {
         let recheck = micStateSync(mic: entry.elements.mic)
         guard recheck == .off else { return .refused("mic state changed while focusing: \(describe(recheck))") }
 
-        if isShuttingDown { return .refused("Clutch is quitting") }
+        if isShuttingDown { return .refused("Ensemble is quitting") }
         let err = AX.perform(entry.elements.mic, kAXPressAction)
         let last = pollMic(entry.elements.mic, until: .on)
         if last == .on { return .done }

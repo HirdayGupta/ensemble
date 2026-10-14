@@ -36,14 +36,14 @@ struct MenuPanelView: View {
                 .frame(width: 40, height: 40)
                 .glassSurface(Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text("Clutch").font(.headline)
+                Text("Ensemble").font(.headline)
                 Text(settings.enabled ? state.status.title : "Off")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 8)
-            Toggle("Clutch on or off", isOn: $settings.enabled)
+            Toggle("Ensemble on or off", isOn: $settings.enabled)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.large)
@@ -118,7 +118,7 @@ struct MenuPanelView: View {
             HStack {
                 Text("⌥⌘K shows this panel").font(.caption).foregroundStyle(.tertiary)
                 Spacer()
-                Button("Quit Clutch") { actions.quit() }.buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+                Button("Quit Ensemble") { actions.quit() }.buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 4)
             .padding(.top, 2)

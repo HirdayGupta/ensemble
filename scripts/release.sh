@@ -58,7 +58,7 @@ VERSION="${CLUTCH_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVer
 BUILD="${CLUTCH_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 export CLUTCH_VERSION="$VERSION" CLUTCH_BUILD="$BUILD"
 
-APP="build/Clutch.app"
+APP="build/Ensemble.app"
 DMG="build/Clutch-$VERSION.dmg"
 STAGE="build/dmg-stage"
 VOLNAME="Clutch $VERSION"
@@ -109,7 +109,7 @@ fi
 log "step 3/5: create $DMG"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Clutch.app"
+ditto "$APP" "$STAGE/Ensemble.app"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DMG"
 rm -rf "$STAGE"

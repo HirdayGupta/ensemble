@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // One copy only: a second launch (e.g. login agent plus a manual open) exits cleanly.
         let me = NSRunningApplication.current
-        if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.clutch.app")
+        if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.ensemble.app")
             .contains(where: { $0.processIdentifier != me.processIdentifier }) {
             exit(0)
         }
@@ -66,8 +66,8 @@ final class StatusIconModel: ObservableObject {
     /// A drawing-handler image resolves colours at draw time, so it follows light/dark menu bars even though
     /// it is not a template (a template could not carry the red dot).
     private static func render(status: AppStatus, listening: Bool) -> NSImage {
-        let symbol = NSImage(systemSymbolName: status.symbolName, accessibilityDescription: "Clutch")
-            ?? NSImage(systemSymbolName: "hand.raised", accessibilityDescription: "Clutch")
+        let symbol = NSImage(systemSymbolName: status.symbolName, accessibilityDescription: "Ensemble")
+            ?? NSImage(systemSymbolName: "hand.raised", accessibilityDescription: "Ensemble")
         let configured = symbol?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
         let size = NSSize(width: 22, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
@@ -85,7 +85,7 @@ final class StatusIconModel: ObservableObject {
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "Clutch: \(status.title)"
+        image.accessibilityDescription = "Ensemble: \(status.title)"
         return image
     }
 }

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Builds build/Clutch.app from the SwiftPM release build. Safe to run repeatedly.
+# Builds build/Ensemble.app from the SwiftPM release build. Safe to run repeatedly.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP="build/Clutch.app"
+APP="build/Ensemble.app"
 LOG="/tmp/clutch-bundle.log"
 
 echo "[$(date -u +%FT%TZ)] swift build -c release" | tee "$LOG"

@@ -2,7 +2,7 @@ import SwiftUI
 import ServiceManagement
 import ClutchCore
 
-/// User preferences, persisted in the "dev.clutch.app" defaults suite.
+/// User preferences, persisted in the "dev.ensemble.app" defaults suite.
 @MainActor
 final class SettingsStore: ObservableObject {
     private enum Key {
@@ -58,9 +58,9 @@ final class SettingsStore: ObservableObject {
     @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
 
     init(defaults: UserDefaults? = nil) {
-        // In the packaged app the bundle identifier is "dev.clutch.app", so the standard domain already is that
+        // In the packaged app the bundle identifier is "dev.ensemble.app", so the standard domain already is that
         // suite; naming it as a suite is rejected. Outside a bundle (swift run) the suite is used.
-        let suite = "dev.clutch.app"
+        let suite = "dev.ensemble.app"
         let store = defaults ?? (Bundle.main.bundleIdentifier == suite ? .standard : UserDefaults(suiteName: suite) ?? .standard)
         self.defaults = store
         func bool(_ key: String, _ fallback: Bool) -> Bool { store.object(forKey: key) as? Bool ?? fallback }

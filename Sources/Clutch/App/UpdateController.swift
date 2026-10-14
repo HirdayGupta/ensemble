@@ -47,7 +47,7 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "Updates are not set up in this build"
-            alert.informativeText = "This build has no update feed. Download the latest Clutch from the project's GitHub releases page."
+            alert.informativeText = "This build has no update feed. Download the latest Ensemble from the project's GitHub releases page."
             alert.runModal()
             return
         }

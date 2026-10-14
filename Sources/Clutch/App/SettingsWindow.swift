@@ -12,7 +12,7 @@ final class SettingsWindowController {
         if window == nil {
             let host = NSHostingController(rootView: makeContent())
             let window = NSWindow(contentViewController: host)
-            window.title = "Clutch Settings"
+            window.title = "Ensemble Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
             window.center()

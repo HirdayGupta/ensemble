@@ -20,6 +20,6 @@ enum Permissions {
 
     /// What to do next, shown under the status. A grant that is listed but does not work is stale after a rebuild.
     static func guidance(for what: String) -> String {
-        "Turn Clutch on in the \(what) list. If it is already on but this stays, remove Clutch with the minus button and add it again."
+        "Turn Ensemble on in the \(what) list. If it is already on but this stays, remove Ensemble with the minus button and add it again."
     }
 }

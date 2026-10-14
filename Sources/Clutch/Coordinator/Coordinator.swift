@@ -561,7 +561,7 @@ final class Coordinator: AppCoordinating {
 
     /// Shared guards for every gesture that acts on Claude. Returns a refusal reason, or nil when allowed.
     private func commonRefusal() -> String? {
-        if !settings.enabled { return "Clutch is off" }
+        if !settings.enabled { return "Ensemble is off" }
         if cover.covered { return "Camera is covered" }
         // The hand often covers the face as it rises: one face within the last 1.5 s counts. Two faces block only
         // when they persist: a stray two-face reading is a false alarm.
@@ -865,7 +865,7 @@ final class Coordinator: AppCoordinating {
     private func checkClaudeUpdate() {
         guard let now = bridge.claudeVersion, let last = settings.lastClaudeVersion, now != last else { return }
         ClutchLog.write("Claude updated \(last) -> \(now) and a dictation step failed; switching off")
-        Notifier.shared.notify(title: "Clutch switched off", body: "Claude updated to \(now) and its microphone controls did not respond as before.")
+        Notifier.shared.notify(title: "Ensemble switched off", body: "Claude updated to \(now) and its microphone controls did not respond as before.")
         settings.enabled = false
     }
 

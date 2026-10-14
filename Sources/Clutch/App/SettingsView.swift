@@ -32,7 +32,7 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Enable Clutch", isOn: $settings.enabled)
+                Toggle("Enable Ensemble", isOn: $settings.enabled)
                 Picker("Camera", selection: $settings.cameraName) {
                     Text("Automatic").tag(String?.none)
                     ForEach(cameraChoices, id: \.self) { Text($0).tag(String?.some($0)) }
@@ -139,7 +139,7 @@ private struct DisplaySettings: View {
                 }))
                 Text(settings.liveSoundBars
                      ? "The bars follow how loudly you speak. Audio is never recorded, stored or sent."
-                     : "A blinking microphone shows Claude is listening. Clutch never uses the microphone.")
+                     : "A blinking microphone shows Claude is listening. Ensemble never uses the microphone.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Scrolling") {
@@ -206,7 +206,7 @@ private struct AboutSettings: View {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 84, height: 84)
-            Text("Clutch").font(.title.weight(.semibold))
+            Text("Ensemble").font(.title.weight(.semibold))
             Text(version).font(.callout).foregroundStyle(.secondary)
             Text("Hands-free control for Claude on your Mac. Video is analysed on this Mac and never stored or sent.")
                 .font(.callout)

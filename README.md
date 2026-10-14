@@ -1,8 +1,8 @@
 <!-- TODO(owner): LICENSE says "Clutch contributors"; put your legal name or organisation there before the first release. -->
 <!-- TODO(owner): replace OWNER/REPO in the links below once the repository exists. -->
-<p align="center"><img src="Assets/logo.png" width="112" alt="Clutch app icon"></p>
+<p align="center"><img src="Assets/logo.png" width="112" alt="Ensemble app icon"></p>
 
-# Clutch
+# Ensemble
 
 **Drive Claude desktop's Code sessions from across the room: look at a session to focus it, pinch twice to dictate, hold a thumbs-up to send, pinch and drag to scroll. A webcam and your hands, nothing else.**
 
@@ -44,6 +44,16 @@ Gestures can be remapped in Settings, including turning the thumbs-up send off. 
 3. Grant Camera and Accessibility when asked, then choose Calibrate from the menu-bar panel.
 
 Homebrew cask: planned, not available yet.
+
+### Development install, updating itself from main
+
+On a Mac you develop on, this builds the app from source and keeps it on the latest `main`:
+
+```
+gh repo clone oficiallyAkshay/ensemble ~/ensemble && ~/ensemble/scripts/dev-install.sh
+```
+
+It needs Swift (`xcode-select --install`). It creates a self-signed "Ensemble Local Signing" identity once, so the Camera and Accessibility grants survive every rebuild, installs `~/Applications/Ensemble.app`, and loads a launchd agent that checks `main` every 2 minutes, rebuilds when it moved, and relaunches the app. An update waits while Claude is listening. Log: `~/Library/Logs/Ensemble/updater.log`. Stop it with `launchctl bootout "gui/$(id -u)/dev.ensemble.updater"`.
 <!-- TODO(owner): note here whether releases are notarized; if not, add the right-click > Open step for Gatekeeper. -->
 
 ## Permissions
@@ -61,6 +71,7 @@ Clutch does not ask for the Microphone permission: Claude records, and Clutch on
 - Video is analysed on your Mac. Frames are never written to disk and never sent anywhere.
 - The app makes no network connections. The face tracker is a web page served from inside the app bundle through a custom URL scheme, and the model ships in the bundle.
 - It only acts on Claude. If another app is in front, gestures do nothing.
+- A draft sends only in the moment you spoke it, to the session you spoke it to. A thumbs-up sends only within 30 seconds of your dictation ending, only into the session you dictated into, and only if you have not typed or clicked since. A draft you walked away from, in a session you have since left, can never go out later from a stray gesture.
 - The only files it writes are settings, a small log, and the two safety records described below.
 
 ## Safety design

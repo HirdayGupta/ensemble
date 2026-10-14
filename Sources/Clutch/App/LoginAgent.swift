@@ -4,7 +4,7 @@ import Foundation
 /// crashes (KeepAlive on unsuccessful exit), which is what lets the startup sweep switch off a microphone a
 /// crash left on. Quitting from the menu exits cleanly, so launchd leaves it quit.
 enum LoginAgent {
-    static let label = "dev.clutch.app"
+    static let label = "dev.ensemble.app"
     static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
     }
