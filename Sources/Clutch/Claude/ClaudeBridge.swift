@@ -13,6 +13,8 @@ import Foundation
 final class ClaudeBridge: @unchecked Sendable {
     let queue = DispatchQueue(label: "clutch.claude.bridge", qos: .userInitiated)
     let urgentQueue = DispatchQueue(label: "clutch.claude.bridge.urgent", qos: .userInteractive)
+    /// Dictation start has its own queue so a slow session refresh on `queue` cannot delay it.
+    let startQueue = DispatchQueue(label: "clutch.claude.bridge.start", qos: .userInteractive)
     let inFlight = InFlightTracker()
 
     private let lock = NSLock()
@@ -21,6 +23,9 @@ final class ClaudeBridge: @unchecked Sendable {
     private var lastStopPressAt: Date?
     private var scrollMethod: ScrollMethod?
     private var noScrollAreaUntil: [String: Date] = [:]
+    private var shuttingDown = false
+    private var axDisabled = false
+    private var lastMicReading: (text: String, at: Date)?
 
     static let ambientInputAllowlist: Set<String> = []
 
@@ -35,6 +40,32 @@ final class ClaudeBridge: @unchecked Sendable {
     var claudePID: pid_t? { claudeApps.first?.processIdentifier }
 
     func claudeIsRunning() -> Bool { !claudeApps.isEmpty }
+
+    /// Once set, no new dictation can start; the quit path uses it so a start in flight cannot press after the stop.
+    func beginShutdown() { lock.lock(); shuttingDown = true; lock.unlock() }
+    var isShuttingDown: Bool { lock.lock(); defer { lock.unlock() }; return shuttingDown }
+
+    /// True when the last discovery was refused because Accessibility is off or the grant is stale.
+    var accessibilityDisabled: Bool { lock.lock(); defer { lock.unlock() }; return axDisabled }
+
+    /// What a refusal says when a session cannot be found.
+    var sessionNotFound: String {
+        accessibilityDisabled ? "Accessibility is off or stale for Clutch; remove it in Settings and add it again" : "session not found"
+    }
+
+    func noteMic(_ text: String) { lock.lock(); lastMicReading = (text, Date()); lock.unlock() }
+
+    /// Both mic sources as of the last read ("mic AX value=1 label=... capture=true, 2.1 s ago"), for logs.
+    /// Cached from the last bridge call; reading it never touches Accessibility.
+    var micSnapshot: String {
+        lock.lock(); defer { lock.unlock() }
+        guard let r = lastMicReading else { return "mic not read yet" }
+        return "mic \(r.text), \(String(format: "%.1f", Date().timeIntervalSince(r.at))) s ago"
+    }
+
+    private func noteAX(_ error: AXError) {
+        lock.lock(); axDisabled = error == .apiDisabled; lock.unlock()
+    }
 
     func claudeIsFrontmost() -> Bool {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeLabels.bundleID
@@ -55,9 +86,9 @@ final class ClaudeBridge: @unchecked Sendable {
 
     // MARK: Running work
 
-    func run<T>(urgent: Bool = false, _ work: @escaping () -> T) async -> T {
+    func run<T>(urgent: Bool = false, onStartQueue: Bool = false, _ work: @escaping () -> T) async -> T {
         await withCheckedContinuation { cont in
-            (urgent ? urgentQueue : queue).async {
+            (urgent ? urgentQueue : onStartQueue ? startQueue : queue).async {
                 let token = urgent ? nil : self.inFlight.begin()
                 let result = work()
                 if let token { self.inFlight.end(token) }
@@ -87,6 +118,7 @@ final class ClaudeBridge: @unchecked Sendable {
     /// Full discovery; replaces the cache. Runs on a bridge queue.
     func discover() -> [CachedSession] {
         guard let pid = claudePID else {
+            noteAX(.success)
             replaceCache([])
             return []
         }
@@ -99,7 +131,9 @@ final class ClaudeBridge: @unchecked Sendable {
         for attempt in 0..<(justEnabled ? 8 : 1) {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.4) }
             found = []
-            for window in AX.elements(app, kAXWindowsAttribute) {
+            let windows = AX.read(app, kAXWindowsAttribute)
+            noteAX(windows.error)
+            for (windowIndex, window) in ((windows.value as? [AXUIElement]) ?? []).enumerated() {
                 if AX.bool(window, kAXMinimizedAttribute) == true { continue }
                 guard let wf = AX.frame(window), wf.width > 50, wf.height > 50 else { continue }
                 var number = 0
@@ -107,7 +141,7 @@ final class ClaudeBridge: @unchecked Sendable {
                     if !match.onScreen { continue }
                     number = match.number
                 }
-                found += sessions(in: window, windowNumber: number)
+                found += sessions(in: window, windowNumber: number, idKey: number != 0 ? number : -(windowIndex + 1))
             }
             if !found.isEmpty { break }
         }
@@ -120,7 +154,7 @@ final class ClaudeBridge: @unchecked Sendable {
         cache = Dictionary(sessions.map { ($0.session.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
-    private func sessions(in window: AXUIElement, windowNumber: Int) -> [CachedSession] {
+    private func sessions(in window: AXUIElement, windowNumber: Int, idKey: Int) -> [CachedSession] {
         let mics = Self.collectMics(in: window)
         var result: [CachedSession] = []
         for (i, mic) in mics.enumerated() {
@@ -128,7 +162,7 @@ final class ClaudeBridge: @unchecked Sendable {
                   let pane = Optional(mic.path[paneIndex]),
                   let frame = AX.frame(pane) else { continue }
             let scan = Self.scanPane(pane)
-            let id = Self.sessionID(windowNumber: windowNumber, frame: frame)
+            let id = Self.sessionID(windowKey: idKey, micIndex: i)
             let elements = PaneElements(window: window, pane: pane, mic: mic.element, composer: scan.composer,
                                         sendButton: scan.send, stopButton: scan.stop,
                                         modeControl: scan.mode, transcript: scan.transcript)
@@ -137,10 +171,9 @@ final class ClaudeBridge: @unchecked Sendable {
         return result
     }
 
-    static func sessionID(windowNumber: Int, frame: CGRect) -> String {
-        func q(_ v: CGFloat) -> Int { Int((v / 10).rounded()) * 10 }
-        return "w\(windowNumber)@\(q(frame.minX)),\(q(frame.minY))"
-    }
+    /// Keyed on the window and the mic's order in it, never on the frame, so dragging or resizing a window
+    /// mid-hold does not change the id the stop is looked up by.
+    static func sessionID(windowKey: Int, micIndex: Int) -> String { "w\(windowKey)#\(micIndex)" }
 
     /// A cached session whose mic checkbox still answers; otherwise rediscover and match by id, then by overlap.
     func liveEntry(_ s: ClaudeSession, rescanPane: Bool = false) -> CachedSession? {
@@ -179,10 +212,12 @@ final class ClaudeBridge: @unchecked Sendable {
     private func ensureManualAccessibility(app: AXUIElement, pid: pid_t) -> Bool {
         lock.lock()
         let already = flaggedPID == pid
-        flaggedPID = pid
         lock.unlock()
-        AX.set(app, "AXManualAccessibility", kCFBooleanTrue)
-        return !already
+        if already { return false }
+        let error = AX.set(app, "AXManualAccessibility", kCFBooleanTrue)
+        guard error == .success else { noteAX(error); return false }
+        lock.lock(); flaggedPID = pid; lock.unlock()
+        return true
     }
 
     // MARK: Tree scanning

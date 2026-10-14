@@ -32,8 +32,13 @@ struct InputMuter {
                 record = MuteRecord(deviceUID: uid, method: .volume, priorMuted: nil, priorVolume: volume, appliedAt: Date())
             }
             guard let record else { continue }
+            // No durable record, no mute: an unrecorded mute could never be undone by a later launch.
             records.append(record)
-            try? SafetyFiles.writeMutes(records)
+            do { try SafetyFiles.writeMutes(records) } catch {
+                records.removeLast()
+                ClutchLog.write("mute skipped: could not write the mute record (\(error))")
+                continue
+            }
             switch record.method {
             case .mute: CoreAudioInput.setMuted(device, true)
             case .volume: CoreAudioInput.setVolume(device, 0)
@@ -42,27 +47,40 @@ struct InputMuter {
         return isActive
     }
 
-    /// Undo what this app did, but only where its change is still in effect. Returns true if anything was undone.
+    /// Undo what this app did, but only where its change is still in effect. A record stays on disk while its
+    /// device is absent or its restore could not be confirmed, so a later launch can try again.
+    /// Returns true if anything was undone.
     @discardableResult
     mutating func restore() -> Bool {
         var restored = false
+        var remaining: [MuteRecord] = []
         for record in records {
-            guard let device = CoreAudioInput.device(withUID: record.deviceUID) else { continue }
+            guard let device = CoreAudioInput.device(withUID: record.deviceUID) else { remaining.append(record); continue }
             switch record.method {
             case .mute:
-                if CoreAudioInput.isMuted(device) == true {
+                switch CoreAudioInput.isMuted(device) {
+                case true?:
                     CoreAudioInput.setMuted(device, record.priorMuted ?? false)
-                    restored = true
+                    if CoreAudioInput.isMuted(device) == (record.priorMuted ?? false) { restored = true } else { remaining.append(record) }
+                case nil: remaining.append(record)
+                case false?: break
                 }
             case .volume:
-                if let v = CoreAudioInput.volume(device), v < 0.001 {
-                    CoreAudioInput.setVolume(device, record.priorVolume ?? 0.5)
-                    restored = true
+                guard let v = CoreAudioInput.volume(device) else { remaining.append(record); continue }
+                if v < 0.001 {
+                    let prior = record.priorVolume ?? 0.5
+                    CoreAudioInput.setVolume(device, prior)
+                    if let after = CoreAudioInput.volume(device), after > 0.001 { restored = true } else { remaining.append(record) }
                 }
             }
         }
-        records = []
-        SafetyFiles.deleteMutes()
+        records = remaining
+        if remaining.isEmpty {
+            SafetyFiles.deleteMutes()
+        } else {
+            try? SafetyFiles.writeMutes(remaining)
+            ClutchLog.write("mute restore incomplete: \(remaining.count) record(s) kept for a later attempt")
+        }
         return restored
     }
 }

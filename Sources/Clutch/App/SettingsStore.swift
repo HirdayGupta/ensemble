@@ -14,7 +14,6 @@ final class SettingsStore: ObservableObject {
         static let sendCountdownSeconds = "sendCountdownSeconds"
         static let pointerSmoothing = "pointerSmoothing"
         static let playSounds = "playSounds"
-        static let launchAtLogin = "launchAtLogin"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
@@ -64,6 +63,7 @@ final class SettingsStore: ObservableObject {
         showHighlight = bool(Key.showHighlight, true)
         cameraName = store.string(forKey: Key.cameraName)
         playSounds = bool(Key.playSounds, true)
+        LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
@@ -94,7 +94,6 @@ final class SettingsStore: ObservableObject {
             launchAtLoginError = "Could not change open at login: \(error.localizedDescription)"
         }
         launchAtLogin = LoginAgent.isEnabled
-        defaults.set(launchAtLogin, forKey: Key.launchAtLogin)
     }
 
     func assign(_ pose: Pose?, to slot: GestureSlot) {
@@ -109,7 +108,7 @@ final class SettingsStore: ObservableObject {
 }
 
 enum GestureSlot: CaseIterable {
-    case talk, send, scroll, cancel
+    case talk, send, scrollUp, scrollDown, cancel
 }
 
 extension GestureMapping {
@@ -118,7 +117,8 @@ extension GestureMapping {
             switch slot {
             case .talk: return talk
             case .send: return send
-            case .scroll: return scroll
+            case .scrollUp: return scrollUp
+            case .scrollDown: return scrollDown
             case .cancel: return cancel
             }
         }
@@ -126,7 +126,8 @@ extension GestureMapping {
             switch slot {
             case .talk: if let newValue { talk = newValue }
             case .send: send = newValue
-            case .scroll: scroll = newValue
+            case .scrollUp: scrollUp = newValue
+            case .scrollDown: scrollDown = newValue
             case .cancel: if let newValue { cancel = newValue }
             }
         }
@@ -156,6 +157,8 @@ extension Pose {
         case .thumbsUp: return "Thumbs up"
         case .twoFingers: return "Two fingers"
         case .gather: return "Gather (fingertips together)"
+        case .pointUp: return "Point up"
+        case .pointDown: return "Point down"
         }
     }
 
@@ -167,6 +170,8 @@ extension Pose {
         case .thumbsUp: return "hand.thumbsup.fill"
         case .twoFingers: return "hand.point.up.fill"
         case .gather: return "hand.pinch.fill"
+        case .pointUp: return "hand.point.up.left.fill"
+        case .pointDown: return "hand.point.down.fill"
         }
     }
 }
@@ -176,7 +181,8 @@ extension GestureSlot {
         switch self {
         case .talk: return "Talk"
         case .send: return "Send"
-        case .scroll: return "Scroll"
+        case .scrollUp: return "Scroll up"
+        case .scrollDown: return "Scroll down"
         case .cancel: return "Cancel"
         }
     }
@@ -185,10 +191,11 @@ extension GestureSlot {
         switch self {
         case .talk: return "Hold to dictate into the session you are facing. Release to stop."
         case .send: return "Sends the dictated draft after a countdown you can cancel."
-        case .scroll: return "Hold, then move your hand up or down to scroll the session."
+        case .scrollUp: return "Hold to scroll the session up, faster the longer you hold."
+        case .scrollDown: return "Hold to scroll the session down, faster the longer you hold."
         case .cancel: return "Stops a pending send before the countdown ends."
         }
     }
 
-    var allowsOff: Bool { self == .send || self == .scroll }
+    var allowsOff: Bool { self == .send || self == .scrollUp || self == .scrollDown }
 }

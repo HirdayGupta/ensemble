@@ -12,8 +12,11 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     let queue = DispatchQueue(label: "clutch.camera", qos: .userInitiated)
     var onFrame: ((CMSampleBuffer) -> Void)?
     var onInterrupted: ((String) -> Void)?
+    var onNote: ((String) -> Void)?
 
     private var session: AVCaptureSession?
+    /// Token of the start that owns `session`. Queue-confined.
+    private var activeToken = 0
     private var observers: [NSObjectProtocol] = []
 
     private static let deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external, .continuityCamera]
@@ -40,18 +43,19 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 
     /// Builds and starts the session on the camera queue. Returns the camera's name.
-    func start(named name: String?) async throws -> String {
+    func start(named name: String?, token: Int) async throws -> String {
         guard await Self.requestAccess() else { throw CameraError.permissionDenied }
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                do { continuation.resume(returning: try self.startOnQueue(named: name)) }
+                do { continuation.resume(returning: try self.startOnQueue(named: name, token: token)) }
                 catch { continuation.resume(throwing: error) }
             }
         }
     }
 
-    private func startOnQueue(named name: String?) throws -> String {
+    private func startOnQueue(named name: String?, token: Int) throws -> String {
         teardownOnQueue()
+        activeToken = token
         guard let device = Self.pick(named: name) else { throw CameraError.noCamera }
         let session = AVCaptureSession()
         session.beginConfiguration()
@@ -79,6 +83,12 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: nil) { [weak self] _ in
                 self?.onInterrupted?("\(device.localizedName) was disconnected")
             },
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
+                self?.onNote?("camera interrupted; frames pause until it ends")
+            },
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
+                self?.onNote?("camera interruption ended")
+            },
         ]
 
         self.session = session
@@ -91,8 +101,12 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 
     /// Stops and releases the session. Queued behind any start in progress, so it never blocks the caller.
-    func stop() {
-        queue.async { self.teardownOnQueue() }
+    /// With a token, only the session that start created is torn down: a superseded start must not stop a newer one.
+    func stop(token: Int? = nil) {
+        queue.async {
+            if let token, token != self.activeToken { return }
+            self.teardownOnQueue()
+        }
     }
 
     private func teardownOnQueue() {

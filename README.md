@@ -5,7 +5,7 @@ Control Claude desktop's Code-tab sessions hands-free with a webcam. Clutch is a
 - highlights the Claude session you face, driven by your nose (head pose from MediaPipe Face Landmarker, smoothed with a One Euro filter);
 - starts Claude's own dictation while you hold a fist, and stops when you let go;
 - sends the dictated draft with a thumbs-up after a countdown you can cancel;
-- scrolls the session with two fingers and vertical motion.
+- scrolls the session while you point your index finger up or down, faster the longer you hold.
 
 Status: MVP. The app shell (menu bar, settings, overlay, calibration, hotkey, notifications, icon, packaging) is in place; the camera pipeline and the Claude bridge are wired by the coordinator.
 
@@ -15,7 +15,8 @@ Status: MVP. The app shell (menu bar, settings, overlay, calibration, hotkey, no
 |---|---|---|
 | Talk | Fist (hold) | Release to stop. The microphone is never left recording. |
 | Send | Thumbs up | Starts a countdown (1-5 s, default 2 s). Not available in unsafe modes. |
-| Scroll | Two fingers, move up or down | Can be turned off. |
+| Scroll up | Index finger pointing up (hold) | Starts after a quarter second, then scrolls continuously, ramping from about 300 to 1200 points per second over 1.5 s. Stops the moment you change pose. Can be turned off. |
+| Scroll down | Index finger pointing down (hold) | Same as scroll up, the other way. Can be turned off. |
 | Cancel | Open palm | Stops a pending send. Takes the leftover gesture if you remap the others. |
 
 Gestures are remapped in Settings > Gestures. A gesture can only do one thing: picking one that is already in use swaps the two actions.
@@ -39,11 +40,11 @@ Video is analysed on this Mac and is never stored or sent. The camera is used fo
 ```
 swift build            # debug build
 swift test             # core logic tests
-scripts/bundle.sh      # release build -> build/Clutch.app (signed with an Apple Development identity if present, else ad-hoc)
+scripts/bundle.sh      # release build -> build/Clutch.app (signed with the "Clutch Local Signing" identity)
 open build/Clutch.app
 ```
 
-An ad-hoc signature changes on every build, so macOS may ask for camera permission again after each rebuild. Signing with a stable Apple Development identity avoids that.
+`scripts/bundle.sh` signs with the identity named `Clutch Local Signing` (override with `CLUTCH_SIGN_IDENTITY`) and stops with an error if it is missing; it never signs ad-hoc, because an ad-hoc signature is a new identity on every build and macOS then asks for Camera and Accessibility again. Each build writes the signature's designated requirement to `build/designated-requirement.txt` and warns when it changes.
 
 `swift scripts/make-icon.swift` redraws the app icon (`Assets/AppIcon.iconset`, `Assets/AppIcon.icns`, `Assets/logo.png`) from code.
 

@@ -95,10 +95,17 @@ final class DictationSafety: @unchecked Sendable {
         }
     }
 
-    /// Forget everything: delete the episode file, undo our mute, silence the alarm.
-    func clearAndDisarm() {
+    /// Forget everything: delete the episode file, undo our mute, silence the alarm. Refuses (returns false)
+    /// while Claude is still capturing: the episode stays and the standing check keeps trying to stop it.
+    @discardableResult
+    func clearAndDisarm() -> Bool {
         queue.sync {
             holdActive = false
+            if bridge.claudeCaptureActive() == true {
+                holdEndedAt = Date()
+                offSince = nil
+                return false
+            }
             stopInFlight = false
             stopStartedAt = nil
             escalated = false
@@ -107,6 +114,56 @@ final class DictationSafety: @unchecked Sendable {
             SafetyFiles.deleteEpisode()
             stopAlarm()
             restoreMute()
+            return true
+        }
+    }
+
+    /// Quit path: stops Claude's dictation and undoes our mute before the process exits. The caller blocks for at
+    /// most `timeout` seconds. If the stop cannot be confirmed, the input is muted and the episode file is left
+    /// for the next launch's sweep, which restores the mute once capture is off.
+    func stopForTermination(session: ClaudeSession?, timeout: TimeInterval = 2) {
+        timer?.cancel()
+        bridge.beginShutdown()
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInteractive).async {
+            self.terminationStop(session: session, deadline: Date().addingTimeInterval(timeout))
+            finished.signal()
+        }
+        if finished.wait(timeout: .now() + timeout + 0.5) == .timedOut {
+            ClutchLog.write("quit: the microphone stop did not finish within \(timeout) s")
+        }
+    }
+
+    private func terminationStop(session: ClaudeSession?, deadline: Date) {
+        let (episodeOpen, remembered) = queue.sync { (episode != nil || holdActive || stopStartedAt != nil, self.session) }
+        guard session != nil || episodeOpen || SafetyFiles.episodeFileExists() else {
+            queue.sync { restoreMute() }
+            return
+        }
+        var off = bridge.claudeCaptureActive() == false
+        if !off {
+            let left = deadline.timeIntervalSinceNow
+            let result = left > 0.1 ? bridge.stopDictationBlocking(session ?? remembered, timeout: left) : nil
+            var capture = bridge.claudeCaptureActive()
+            while capture == true, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.075)
+                capture = bridge.claudeCaptureActive()
+            }
+            if case .done? = result { off = capture != true } else { off = capture == false }
+        }
+        ClutchLog.write("quit: microphone \(off ? "confirmed off" : "NOT confirmed off; muting the input")")
+        queue.sync {
+            if off {
+                holdActive = false
+                stopStartedAt = nil
+                episode = nil
+                self.session = nil
+                SafetyFiles.deleteEpisode()
+                stopAlarm()
+                restoreMute()
+            } else {
+                _ = muter.apply()
+            }
         }
     }
 
@@ -172,7 +229,12 @@ final class DictationSafety: @unchecked Sendable {
         let target = session
         Task { [weak self] in
             guard let self else { return }
-            if let target { _ = await self.bridge.stopDictation(target) } else { _ = await self.bridge.stopAnyDictation() }
+            if let target {
+                // A refused stop usually means the session moved or went away: try whichever session shows an active mic.
+                if case .refused = await self.bridge.stopDictation(target) { _ = await self.bridge.stopAnyDictation() }
+            } else {
+                _ = await self.bridge.stopAnyDictation()
+            }
             self.queue.async { self.stopInFlight = false }
         }
     }

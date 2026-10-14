@@ -38,7 +38,7 @@ enum ClaudeProbe {
             let e = entry.elements
             line("  mic: \(describe(e.mic, extra: [kAXValueAttribute, kAXEnabledAttribute, kAXSubroleAttribute]))")
             line("       actions: \(AX.actionNames(e.mic))  parent: \(AX.parent(e.mic).map { describe($0, extra: []) } ?? "nil")")
-            line("       checkbox reading: \(ClaudeBridge.readCheckbox(e.mic))")
+            line("       checkbox reading: \(ClaudeBridge.reading(of: ClaudeBridge.checkboxSnapshot(e.mic)))")
             line("  composer: \(e.composer.map { "role \(AX.role($0) ?? "?") desc \(AX.desc($0) ?? "nil") value length \((AX.string($0, kAXValueAttribute) ?? "").count) focused \(AX.bool($0, kAXFocusedAttribute).map(String.init) ?? "nil")" } ?? "NOT FOUND")")
             line("  send button: \(e.sendButton.map { describe($0, extra: [kAXEnabledAttribute]) } ?? "NOT PRESENT")")
             line("  stop button: \(e.stopButton.map { describe($0, extra: [kAXEnabledAttribute]) } ?? "not present")")

@@ -198,7 +198,8 @@ private struct NoseDot: View {
         case .stop: return "stop.fill"
         case .send: return "paperplane.fill"
         case .cancel: return "xmark"
-        case .scroll: return "arrow.up.arrow.down"
+        case .scrollUp: return "arrow.up"
+        case .scrollDown: return "arrow.down"
         case nil: return ""
         }
     }

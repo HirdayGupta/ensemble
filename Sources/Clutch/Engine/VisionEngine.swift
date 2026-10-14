@@ -9,6 +9,7 @@ enum EngineStatus: Equatable {
     case noCamera, permissionDenied
     case error(String)
     case faceTrackerReady
+    case faceTrackerRestarting
     case faceTrackerFailed(String)
 }
 
@@ -23,6 +24,8 @@ final class VisionEngine {
     var onDiagnostic: ((String) -> Void)?
 
     private(set) var isRunning = false
+    /// The face tracker is restarted once after a failure; a good reading re-arms that.
+    private var trackerRestarted = false
 
     private let camera = CameraSession()
     private let face = FaceTracker()
@@ -31,18 +34,38 @@ final class VisionEngine {
     nonisolated(unsafe) private var cameraLabel = ""
     nonisolated(unsafe) private var fpsWindowStart = 0.0
     nonisolated(unsafe) private var fpsFrames = 0
+    nonisolated(unsafe) private var lastFrameAt = 0.0
+    private var cameraStarted = false
+    private var requestedCamera: String?
+    private var watchdog: Timer?
+    private static let noFrameLimit = 3.0
 
     init() {
         face.onReady = { [weak self] delegate in
             self?.onDiagnostic?("face tracker ready (\(delegate))")
             self?.onStatus?(.faceTrackerReady)
         }
-        face.onFailure = { [weak self] message in self?.onStatus?(.faceTrackerFailed(message)) }
-        face.onHead = { [weak self] head in self?.onHead?(head) }
+        face.onFailure = { [weak self] message in self?.trackerFailed(message) }
+        face.onHead = { [weak self] head in self?.trackerRestarted = false; self?.onHead?(head) }
         face.onDiagnostic = { [weak self] note in self?.onDiagnostic?(note) }
         camera.onFrame = { [weak self] buffer in self?.process(buffer) }
+        camera.onNote = { [weak self] note in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onDiagnostic?(note) } }
+        }
         camera.onInterrupted = { [weak self] message in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(message) } }
+        }
+    }
+
+    private func trackerFailed(_ message: String) {
+        guard isRunning else { return }
+        if trackerRestarted {
+            onStatus?(.faceTrackerFailed(message))
+        } else {
+            trackerRestarted = true
+            onDiagnostic?("face tracker failed (\(message)); restarting it once")
+            onStatus?(.faceTrackerRestarting)
+            face.start()
         }
     }
 
@@ -52,6 +75,9 @@ final class VisionEngine {
     func start(cameraName: String?) {
         if isRunning { halt() }
         isRunning = true
+        cameraStarted = false
+        requestedCamera = cameraName
+        trackerRestarted = false
         generation += 1
         fpsWindowStart = 0
         fpsFrames = 0
@@ -60,9 +86,12 @@ final class VisionEngine {
         face.start()
         Task { @MainActor in
             do {
-                let name = try await camera.start(named: cameraName)
-                guard mine == generation, isRunning else { camera.stop(); return }
+                let name = try await camera.start(named: cameraName, token: mine)
+                guard mine == generation, isRunning else { camera.stop(token: mine); return }
                 cameraLabel = name
+                lastFrameAt = CACurrentMediaTime()
+                cameraStarted = true
+                startWatchdog()
                 onStatus?(.running(fps: 0, camera: name))
             } catch {
                 guard mine == generation else { return }
@@ -89,8 +118,29 @@ final class VisionEngine {
         onStatus?(.error(message))
     }
 
+    /// A camera that stops delivering frames (sleep, an interruption, a USB hiccup) is restarted after 3 s.
+    private func startWatchdog() {
+        watchdog?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkFrames() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdog = timer
+    }
+
+    private func checkFrames() {
+        guard isRunning, cameraStarted else { return }
+        let silent = CACurrentMediaTime() - lastFrameAt
+        guard silent > Self.noFrameLimit else { return }
+        onDiagnostic?("no camera frames for \(Int(silent)) s; restarting the camera")
+        start(cameraName: requestedCamera)
+    }
+
     private func halt() {
         isRunning = false
+        cameraStarted = false
+        watchdog?.invalidate()
+        watchdog = nil
         generation += 1
         camera.stop()
         face.stop()
@@ -101,6 +151,7 @@ final class VisionEngine {
     nonisolated private func process(_ buffer: CMSampleBuffer) {
         guard let pixels = CMSampleBufferGetImageBuffer(buffer) else { return }
         let t = CACurrentMediaTime()
+        lastFrameAt = t
         let mine = generation
 
         let hand = analyzer.hand(from: buffer, at: t)

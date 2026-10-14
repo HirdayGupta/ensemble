@@ -9,11 +9,21 @@ extension ClaudeBridge {
         case on, off, unreadable, conflict
     }
 
-    /// The mic checkbox's own view of itself: AXValue (1/0) and its label ("Stop dictation" while recording).
-    static func readCheckbox(_ el: AXUIElement) -> CheckboxReading {
+    /// What the mic checkbox reports about itself: AXValue (1/0) and its label ("Stop dictation" while recording).
+    struct CheckboxSnapshot {
+        var value: Int?
+        var label: String?
+        var text: String { "AX value=\(value.map(String.init) ?? "none") label=\(label.map { "\"\($0)\"" } ?? "none")" }
+    }
+
+    static func checkboxSnapshot(_ el: AXUIElement) -> CheckboxSnapshot {
         let v = AX.multi(el, [kAXValueAttribute, kAXDescriptionAttribute])
-        let byValue: Bool? = (v[0] as? NSNumber).flatMap { $0.intValue == 1 ? true : ($0.intValue == 0 ? false : nil) }
-        let byLabel: Bool? = (v[1] as? String).flatMap {
+        return CheckboxSnapshot(value: (v[0] as? NSNumber)?.intValue, label: v[1] as? String)
+    }
+
+    static func reading(of snapshot: CheckboxSnapshot) -> CheckboxReading {
+        let byValue: Bool? = snapshot.value.flatMap { $0 == 1 ? true : ($0 == 0 ? false : nil) }
+        let byLabel: Bool? = snapshot.label.flatMap {
             $0 == ClaudeLabels.micActive ? true : ($0 == ClaudeLabels.micIdle ? false : nil)
         }
         switch (byValue, byLabel) {
@@ -37,8 +47,11 @@ extension ClaudeBridge {
     }
 
     func micStateSync(mic: AXUIElement) -> MicState {
-        guard let capture = claudeCaptureActive() else { return .unknown("CoreAudio process list unreadable") }
-        switch Self.readCheckbox(mic) {
+        let snapshot = Self.checkboxSnapshot(mic)
+        let captureReading = claudeCaptureActive()
+        noteMic("\(snapshot.text) capture=\(captureReading.map(String.init) ?? "unreadable")")
+        guard let capture = captureReading else { return .unknown("CoreAudio process list unreadable") }
+        switch Self.reading(of: snapshot) {
         case .on:
             return capture ? .on : .unknown("checkbox says recording but Claude is not capturing audio")
         case .off:
@@ -56,7 +69,7 @@ extension ClaudeBridge {
     }
 
     func micStateNow(_ s: ClaudeSession) -> MicState {
-        guard let entry = liveEntry(s) else { return .unknown("session not found") }
+        guard let entry = liveEntry(s) else { return .unknown(self.sessionNotFound) }
         return micStateSync(mic: entry.elements.mic)
     }
 

@@ -22,7 +22,6 @@ struct Countdown: Equatable {
 /// Read by the UI, written by the coordinator. Screen-space values are global, top-left origin.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var enabled = true
     @Published var status: AppStatus = .off
     @Published var lastRefusal: String?
     @Published var targetFrame: CGRect?

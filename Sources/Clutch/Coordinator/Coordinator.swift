@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import ClutchCore
 
@@ -26,8 +27,7 @@ final class Coordinator: AppCoordinating {
     private let dotLeash: CGFloat = 24
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
-    private var lastManyFacesT: TimeInterval = -.infinity
-    private var manyFaceTimes: [TimeInterval] = []
+    private var multiFace = MultiFaceDetector()
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
@@ -39,12 +39,23 @@ final class Coordinator: AppCoordinating {
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
     private var busy = false                 // a start/stop/send is in flight
+    private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
     private var sendAfterStop = false
     private var tickTimer: Timer?
     private var refreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var running = false
+    /// What the camera engine last reported, kept apart from `state.status` so every pass recomputes the status from facts.
+    private var cameraProblem: String?
+    private var trackerFailure: String?
+    private var trackerReady = false
+    private var accessibilityTrusted = true
+    private var cameraAllowed = true
+    private var lastCameraRestart = Date.distantPast
+    private var calibrationPending = false
+    private var refreshInFlight = false
+    private var promptedAccessibility = false
     /// Front-window check cache: who owns the window under the nose, refreshed at most every 0.15 s.
     private var topOwner: (at: CGPoint, t: TimeInterval, pid: pid_t?)?
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
@@ -58,6 +69,7 @@ final class Coordinator: AppCoordinating {
     private let sendWindow = 30.0
     /// Wait this long after the hand opens before stopping, so the last word is caught.
     private let stopTail = 0.4
+    private static let staleHeadSeconds = 2.0
 
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
@@ -66,6 +78,7 @@ final class Coordinator: AppCoordinating {
         self.settings = settings
         self.overlay = overlay
         if let data = settings.calibration { pointer.calibration = data }
+        if pointer.isCalibrated, settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
         gestures.mapping = settings.mapping
         pointer.setSmoothing(settings.pointerSmoothing)
         gestures.sendHold = settings.sendCountdownSeconds
@@ -73,12 +86,12 @@ final class Coordinator: AppCoordinating {
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
         settings.$sendCountdownSeconds.dropFirst().sink { [weak self] v in self?.gestures.sendHold = v }.store(in: &cancellables)
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.pointer.setSmoothing(k) }.store(in: &cancellables)
-        settings.$enabled.dropFirst().removeDuplicates().sink { [weak self] on in
+        settings.$enabled.removeDuplicates().dropFirst().sink { [weak self] on in
             guard let self else { return }
             // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
             DispatchQueue.main.async { on ? self.start() : self.stop() }
         }.store(in: &cancellables)
-        settings.$cameraName.dropFirst().removeDuplicates().sink { [weak self] _ in
+        settings.$cameraName.removeDuplicates().dropFirst().sink { [weak self] _ in
             guard let self, self.running else { return }
             DispatchQueue.main.async { self.stop(); self.start() }
         }.store(in: &cancellables)
@@ -87,6 +100,7 @@ final class Coordinator: AppCoordinating {
         engine.onHead = { [weak self] in self?.handle(head: $0) }
         engine.onLight = { [weak self] in self?.handle(light: $0) }
         engine.onStatus = { [weak self] in self?.handle(status: $0) }
+        engine.onDiagnostic = { note in ClutchLog.write("engine: \(note)") }
         safety.onAlarm = { [weak self] msg in
             self?.refuse("Alarm: \(msg)")
             Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
@@ -113,21 +127,33 @@ final class Coordinator: AppCoordinating {
         state.cameraNames = cameraNames
         sweep()
         guard settings.enabled else { state.status = .off; return }
-        if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
-            ClutchLog.write("accessibility permission missing")
+        if !Permissions.accessibilityTrusted {
+            ClutchLog.write("accessibility permission missing (if Clutch is already listed in Settings, remove it and add it again)")
+            if !promptedAccessibility {
+                promptedAccessibility = true
+                _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+            }
         }
         running = true
+        accessibilityTrusted = Permissions.accessibilityTrusted
+        cameraAllowed = Permissions.cameraAllowed
+        cameraProblem = nil; trackerFailure = nil; trackerReady = false
+        latestHead = nil
+        lastCameraRestart = Date()
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
+        tickTimer = commonModeTimer(1.0 / 20.0) { [weak self] in self?.tick() }
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshSessions() }
-        }
+        refreshTimer = commonModeTimer(1.0) { [weak self] in self?.refreshSessions() }
         refreshSessions()
         updateStatus()
+    }
+
+    /// Common run-loop mode keeps the timers firing while a slider is dragged or a menu is open.
+    private func commonModeTimer(_ interval: TimeInterval, _ fire: @escaping @MainActor () -> Void) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in MainActor.assumeIsolated { fire() } }
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
     }
 
     func stop() {
@@ -146,27 +172,50 @@ final class Coordinator: AppCoordinating {
     }
 
     func calibrate() {
-        ClutchLog.write("calibrate requested (engine running=\(engine.isRunning))")
-        // Calibrating while off turns Clutch on first and waits for the camera's first face reading.
-        if !engine.isRunning || latestHead == nil {
-            if !settings.enabled { settings.enabled = true } else if !running { start() }   // the enabled sink starts it
+        guard !calibrationPending, !state.calibrating else { ClutchLog.write("calibrate ignored: already in progress"); return }
+        ClutchLog.write("calibrate requested (engine running=\(engine.isRunning), face tracker ready=\(trackerReady))")
+        // Calibrating while off, or while the camera is down, turns Clutch on or restarts the camera and waits
+        // (up to 30 s: a first camera prompt plus the model load) for the face tracker to produce a reading.
+        if !engine.isRunning || !trackerReady || latestHead == nil {
+            calibrationPending = true
+            if !settings.enabled { settings.enabled = true } else if !running || !engine.isRunning { start() }   // the enabled sink starts it
             Task { @MainActor in
-                for _ in 0..<50 where self.latestHead?.faceCount != 1 { try? await Task.sleep(nanoseconds: 100_000_000) }
-                guard self.engine.isRunning, self.latestHead != nil else { self.refuse("The camera did not start; check Camera permission"); return }
+                defer { self.calibrationPending = false }
+                for _ in 0..<300 where !(self.engine.isRunning && self.trackerReady && self.latestHead != nil) {
+                    if !self.cameraAllowed || self.cameraProblem != nil || self.trackerFailure != nil { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                guard self.engine.isRunning, self.trackerReady, self.latestHead != nil else {
+                    if !self.cameraAllowed { self.refuse("Calibration needs Camera permission") }
+                    else { self.refuse("The camera did not start: \(self.cameraProblem ?? self.trackerFailure ?? "no reading within 30 s")") }
+                    return
+                }
+                self.calibrationPending = false
                 self.calibrate()
             }
             return
         }
+        // Calibration owns the hands and the head: end any dictation and drop any pending send first, because
+        // gesture events are ignored while it runs and a held talk pose would never be seen released.
+        pendingSend = nil; state.countdown = nil; sendAfterStop = false
+        gestures.reset()
+        if listeningSession != nil { endTalkWhenIdle(reason: "calibrating") }
+        let fingerprint = ScreenFacts.displayFingerprint()
+        let camera = state.cameraName
         state.calibrating = true
         CalibrationController.shared.run(headSource: { [weak self] in self?.latestHead }) { [weak self] samples in
             guard let self else { return }
             self.state.calibrating = false
             ClutchLog.write("calibration samples: \(samples.count)")
             guard !samples.isEmpty else { return }
+            guard ScreenFacts.displayFingerprint() == fingerprint, self.state.cameraName == camera else {
+                self.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
+                return
+            }
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
                 self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = ScreenFacts.displayFingerprint()
+                self.settings.calibrationDisplays = fingerprint
                 self.pointer.resetFilter()
             } else {
                 self.refuse("Calibration did not fit; try again sitting where you normally work")
@@ -175,12 +224,57 @@ final class Coordinator: AppCoordinating {
         }
     }
 
-    func clearAndDisarm() {
-        safety.clearAndDisarm()
-        pendingSend = nil
+    private func endTalkWhenIdle(reason: String) {
+        Task { @MainActor in
+            for _ in 0..<30 where self.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
+            if self.listeningSession != nil { self.endTalk(reason: reason) }
+        }
+    }
+
+    /// Quit path: blocks (at most about two seconds) until Claude's microphone is confirmed off and our mute is undone.
+    func shutdown() {
+        ClutchLog.write("shutdown")
+        running = false
+        tickTimer?.invalidate(); tickTimer = nil
+        refreshTimer?.invalidate(); refreshTimer = nil
+        bridge.beginShutdown()
+        engine.stop()
+        let session = listeningSession
         listeningSession = nil
-        state.listening = false
-        settings.enabled = false
+        pendingSend = nil
+        safety.stopForTermination(session: session)
+        ClutchLog.flush()
+    }
+
+    func clearAndDisarm() {
+        guard !disarming else { return }
+        disarming = true
+        pendingSend = nil
+        sendAfterStop = false
+        state.countdown = nil
+        gestures.reset()
+        ClutchLog.write("clear and disarm requested")
+        Task { @MainActor in
+            for _ in 0..<30 where self.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
+            let result = await self.bridge.stopAnyDictation()
+            var capture = self.bridge.claudeCaptureActive()
+            for _ in 0..<15 where capture == true {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                capture = self.bridge.claudeCaptureActive()
+            }
+            self.disarming = false
+            self.listeningSession = nil
+            self.state.listening = false
+            if capture == true || !self.safety.clearAndDisarm() {
+                ClutchLog.write("clear and disarm: microphone still recording (stop \(result)); the safety check keeps watching")
+                self.safety.episodeEnded()
+                self.refuse("Could not confirm the microphone is off; the safety check keeps watching")
+            } else {
+                ClutchLog.write("clear and disarm: microphone confirmed off")
+            }
+            self.pushOverlay()
+            self.settings.enabled = false
+        }
     }
 
     // MARK: - Inputs
@@ -189,14 +283,11 @@ final class Coordinator: AppCoordinating {
         latestHead = head
         faceCount = head.faceCount
         if head.faceCount == 1 { lastOneFaceT = head.t }
-        // A second face counts only when it persists: 5 or more of the readings in the last second.
-        manyFaceTimes.append(contentsOf: head.faceCount > 1 ? [head.t] : [])
-        manyFaceTimes.removeAll { head.t - $0 > 1.0 }
-        if manyFaceTimes.count >= 5 { lastManyFacesT = head.t }
+        multiFace.record(faceCount: head.faceCount, at: head.t)
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
         if head.t - headStats.since >= 5 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
-            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil)")
+            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
             headStats = (head.t, 0, [0, 0, 0])
         }
         guard !state.calibrating else { return }
@@ -254,22 +345,32 @@ final class Coordinator: AppCoordinating {
     private func handle(status: EngineStatus) {
         if case .running = status {} else { ClutchLog.write("engine: \(status)") }
         switch status {
+        case .starting:
+            cameraProblem = nil; trackerFailure = nil; trackerReady = false
         case .running(let fps, let camera):
+            cameraProblem = nil
             state.fps = fps
             state.cameraName = camera
         case .permissionDenied:
-            state.status = .needsPermission("Camera")
+            cameraAllowed = false
         case .noCamera:
-            state.status = .error("No camera found")
-        case .error(let msg), .faceTrackerFailed(let msg):
-            state.status = .error(msg)
-        default:
-            break
+            cameraProblem = "No camera found"
+        case .error(let msg):
+            cameraProblem = msg
+        case .faceTrackerReady:
+            trackerReady = true; trackerFailure = nil
+        case .faceTrackerRestarting:
+            trackerReady = false
+        case .faceTrackerFailed(let msg):
+            trackerReady = false; trackerFailure = msg
+        case .stopped:
+            trackerReady = false
         }
         updateStatus()
     }
 
     private func tick() {
+        dropStaleReadings()
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
@@ -289,11 +390,26 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
+    private func dropStaleReadings() {
+        guard let head = latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
+        guard target != nil || dotPoint != nil || candidate != nil || state.nosePoint != nil else { return }
+        ClutchLog.write("head readings stopped; clearing the highlight")
+        target = nil; candidate = nil; dotPoint = nil
+        updateDot()
+        pushOverlay()
+    }
+
     private func refreshSessions() {
+        checkPermissions()
         guard bridge.claudeIsRunning() else {
             sessions = []; target = nil; updateStatus(); return
         }
+        // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
+        guard !refreshInFlight, listeningSession == nil else { return }
+        refreshInFlight = true
         Task { @MainActor in
+            defer { self.refreshInFlight = false }
             let found = await self.bridge.refreshSessions()
             if found.map(\.id) != self.sessions.map(\.id) { ClutchLog.write("Claude sessions found: \(found.count) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.sessions = found
@@ -319,16 +435,17 @@ final class Coordinator: AppCoordinating {
     private func commonRefusal() -> String? {
         if !settings.enabled { return "Clutch is off" }
         if cover.covered { return "Camera is covered" }
-        // The hand often covers the face as it rises: one face within the last 1.5 s counts, two never do.
+        // The hand often covers the face as it rises: one face within the last 1.5 s counts. Two faces block only
+        // when they persist: a stray two-face reading is a false alarm.
         let now = CACurrentMediaTime()
-        if now - lastManyFacesT < 1.5 { return "More than one face in view" }
+        if multiFace.isActive(now: now) { return "More than one face in view" }
         if now - lastOneFaceT > 1.5 { return "No face in view" }
         if ClaudeBridge.secondsSinceUserInput() < inputQuiet { return "Keyboard or mouse was just used" }
         return nil
     }
 
     private func beginTalk() {
-        guard listeningSession == nil, !busy else { return }
+        guard listeningSession == nil, !busy, !disarming else { return }
         if let why = commonRefusal() { refuse(why); return }
         guard calibratedHere else { refuse("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = target else { refuse("Your nose is not on a Claude session"); return }
@@ -353,6 +470,7 @@ final class Coordinator: AppCoordinating {
                 self.listeningSession = nil
                 self.state.listening = false
                 self.safety.episodeEnded()
+                ClutchLog.write("start dictation \(result): \(self.bridge.micSnapshot)")
                 self.refuse("Could not start dictation: \(why)")
                 self.checkClaudeUpdate()
             }
@@ -386,6 +504,7 @@ final class Coordinator: AppCoordinating {
                 }
                 Notifier.shared.playCue(.listenEnd)
             case .refused(let why), .unknown(let why):
+                ClutchLog.write("stop dictation \(result): \(self.bridge.micSnapshot)")
                 self.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
                 self.checkClaudeUpdate()
             }
@@ -408,14 +527,14 @@ final class Coordinator: AppCoordinating {
                 self.refuse("The draft is empty"); return
             }
             ClutchLog.write("sending (\(text.count) characters)")
-            self.sendNow(session)
+            self.sendNow(session, shown: text)
         }
     }
 
-    private func sendNow(_ session: ClaudeSession) {
+    private func sendNow(_ session: ClaudeSession, shown: String) {
         busy = true
         Task { @MainActor in
-            let result = await self.bridge.sendDraft(session)
+            let result = await self.bridge.sendDraft(session, shown: shown)
             self.busy = false
             switch result {
             case .done:
@@ -445,7 +564,7 @@ final class Coordinator: AppCoordinating {
         pushOverlay()
         busy = true
         Task { @MainActor in
-            let result = await self.bridge.sendDraft(send.session)
+            let result = await self.bridge.sendDraft(send.session, shown: send.text)
             self.busy = false
             switch result {
             case .done: ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
@@ -491,7 +610,6 @@ final class Coordinator: AppCoordinating {
     /// The calibration is usable only on the screen arrangement it was made on.
     private var calibratedHere: Bool {
         guard pointer.isCalibrated else { return false }
-        if settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
         return settings.calibrationDisplays == ScreenFacts.displayFingerprint()
     }
 
@@ -505,6 +623,7 @@ final class Coordinator: AppCoordinating {
     private func screensChanged() {
         ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
         if listeningSession != nil { endTalk(reason: "screens changed") }
+        if state.calibrating { CalibrationController.shared.cancel() }
         pendingSend = nil
         target = nil
         updateStatus()
@@ -534,13 +653,41 @@ final class Coordinator: AppCoordinating {
 
     private func updateStatus() {
         if !settings.enabled || !running { state.status = .off; return }
-        if !AXIsProcessTrusted() { state.status = .needsPermission("Accessibility"); return }
-        if case .needsPermission = state.status { return }
-        if case .error = state.status, !engine.isRunning { return }
+        if !accessibilityTrusted { state.status = .needsPermission("Accessibility"); return }
+        if !cameraAllowed { state.status = .needsPermission("Camera"); return }
+        if let problem = cameraProblem { state.status = .error(problem); return }
+        if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
         if cover.covered { state.status = .cameraCovered; return }
         if !calibratedHere { state.status = .needsCalibration; return }
         if !bridge.claudeIsRunning() { state.status = .claudeNotRunning; return }
         state.status = state.listening ? .listening : .watching
+    }
+
+    /// Re-reads both permissions every second. A grant that arrives while Clutch runs clears the status and
+    /// restarts the camera; a camera that stopped for another reason is retried every 5 s.
+    private func checkPermissions() {
+        guard running else { return }
+        let trusted = Permissions.accessibilityTrusted && !bridge.accessibilityDisabled
+        if trusted != accessibilityTrusted { ClutchLog.write("accessibility permission is now \(trusted ? "granted" : "missing")") }
+        accessibilityTrusted = trusted
+        let allowed = Permissions.cameraAllowed
+        let flippedOn = allowed && !cameraAllowed
+        if allowed != cameraAllowed { ClutchLog.write("camera permission is now \(allowed ? "granted" : "denied")") }
+        cameraAllowed = allowed
+        if flippedOn {
+            restartCamera("camera permission granted")
+        } else if allowed, !engine.isRunning, Date().timeIntervalSince(lastCameraRestart) >= 5 {
+            restartCamera("the camera was not running")
+        }
+        updateStatus()
+    }
+
+    private func restartCamera(_ why: String) {
+        ClutchLog.write("camera restart: \(why)")
+        lastCameraRestart = Date()
+        cameraProblem = nil; trackerFailure = nil; trackerReady = false
+        latestHead = nil
+        engine.start(cameraName: settings.cameraName)
     }
 
     private func pushOverlay() {
