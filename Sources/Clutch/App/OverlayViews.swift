@@ -204,10 +204,13 @@ private struct NoseDot: View {
     }
 
     var body: some View {
-        let size: CGFloat = gesture == nil ? 12 : 40
+        let size: CGFloat = gesture == nil ? 20 : 40
         ZStack {
-            Circle()
-                .fill(gesture == nil ? AnyShapeStyle(Color.white) : AnyShapeStyle(.regularMaterial))
+            if gesture == nil {
+                GlassSphere()
+            } else {
+                Circle().fill(.regularMaterial)
+            }
             if let g = gesture {
                 Circle().stroke(tint.opacity(0.25), lineWidth: 3).padding(1.5)
                 Circle()
@@ -223,14 +226,12 @@ private struct NoseDot: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(tint)
                 }
-            } else {
-                Circle().strokeBorder(Color.accentColor, lineWidth: 3)
             }
         }
         .frame(width: size, height: size)
         .opacity(gesture.map { $0.willAct ? 1 : 0.6 } ?? 1)
         .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-        .shadow(color: tint.opacity(0.6), radius: gesture == nil ? 8 : 12)
+        .shadow(color: tint.opacity(gesture == nil ? 0 : 0.6), radius: 12)
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: gesture == nil)
     }
 }
@@ -303,5 +304,28 @@ struct SoundWaves: View {
                 }
             }
         }
+    }
+}
+
+/// A small clear sphere: Liquid Glass on macOS 26, a lensed material with a specular highlight before that.
+private struct GlassSphere: View {
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            Circle()
+                .fill(.clear)
+                .glassEffect(.clear, in: Circle())
+                .overlay(highlight)
+        } else {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay(Circle().strokeBorder(.white.opacity(0.55), lineWidth: 0.75))
+                .overlay(highlight)
+        }
+    }
+
+    private var highlight: some View {
+        Circle()
+            .fill(RadialGradient(colors: [.white.opacity(0.75), .white.opacity(0)], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 7))
+            .blendMode(.screen)
     }
 }
