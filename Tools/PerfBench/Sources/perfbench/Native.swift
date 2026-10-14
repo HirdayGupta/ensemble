@@ -39,7 +39,7 @@ func visionPerform(_ pb: CVPixelBuffer, request: VNDetectHumanHandPoseRequest) -
 
 func runNative() {
     let frames = Synthetic.frames(count: 60)
-    Synthetic.writePNG(frames[0], to: "/tmp/clutch-perfbench-frame.png")
+    Synthetic.writePNG(frames[0], to: "/tmp/ensemble-perfbench-frame.png")
     let noHand = Synthetic.frames(count: 60, face: true, hand: false)
     let none = Synthetic.frames(count: 60, face: false, hand: false)
     let ci = CIContext(options: [.cacheIntermediates: false])

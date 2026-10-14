@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dev.ensemble.app</string>
+    <key>CFBundleName</key><string>Ensemble</string>
+    <key>CFBundleDisplayName</key><string>Ensemble</string>
+    <key>CFBundleExecutable</key><string>Ensemble</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>14.2</string>
+    <key>LSUIElement</key><true/>
+    <!-- Sparkle. The feed URL is UpdateConfig.feedURL in UpdateController.swift (single source of truth). -->
+    <!-- TODO(owner): run Sparkle's generate_keys once and paste the printed public key here (docs/RELEASING.md). -->
+    <key>SUPublicEDKey</key><string>TODO-REPLACE-WITH-SPARKLE-PUBLIC-ED-KEY</string>
+    <!-- Automatic checks are off until the user turns them on in Settings > About; once on, at most one check a day. -->
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+    <key>NSCameraUsageDescription</key><string>Ensemble watches your head direction and hand gestures to control Claude. Video is analysed on this Mac and never stored or sent.</string>
+    <key>NSMicrophoneUsageDescription</key><string>While Claude is listening, Ensemble reads how loud you are speaking to animate the sound bars. Audio is never recorded, stored or sent.</string>
+    <key>NSCameraReactionEffectGesturesEnabledDefault</key><false/>
+</dict>
+</plist>

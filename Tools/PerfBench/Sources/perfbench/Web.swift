@@ -8,7 +8,7 @@ let benchPage = #"""
 <script type="module">
 import { FilesetResolver, FaceLandmarker } from './vision_bundle.mjs';
 const post = (m) => window.webkit.messageHandlers.head.postMessage(m);
-const BASE = 'clutch-asset://local';
+const BASE = 'ensemble-asset://local';
 const q = new URLSearchParams(location.search);
 const delegate = q.get('delegate') || 'GPU';
 let landmarker = null, lastTs = 0;
@@ -45,7 +45,7 @@ async function run(source, t) {
 window.frameB64 = async (b64, t) => { const bmp = await decode(b64); await run(bmp, t); bmp.close(); };
 window.framePull = async (kind, w, h, t) => {
   try {
-    const res = await fetch('clutch-asset://local/frame');
+    const res = await fetch('ensemble-asset://local/frame');
     const buf = await res.arrayBuffer();
     if (kind === 'jpeg') { const bmp = await createImageBitmap(new Blob([buf], { type: 'image/jpeg' })); await run(bmp, t); bmp.close(); }
     else if (kind === 'rgba') { await run(new ImageData(new Uint8ClampedArray(buf), w, h), t); }
@@ -117,12 +117,12 @@ final class WebBench: NSObject, WKScriptMessageHandler {
         scheme = BenchScheme(root: root)
         super.init()
         let conf = WKWebViewConfiguration()
-        conf.setURLSchemeHandler(scheme, forURLScheme: "clutch-asset")
+        conf.setURLSchemeHandler(scheme, forURLScheme: "ensemble-asset")
         conf.userContentController.add(self, name: "head")
         view = WKWebView(frame: NSRect(x: 0, y: 0, width: 1, height: 1), configuration: conf)
         window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 1, height: 1), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.alphaValue = 0; window.contentView = view; window.orderFrontRegardless()
-        view.load(URLRequest(url: URL(string: "clutch-asset://local/bench.html?delegate=\(cfg.delegate)&running=\(cfg.running)")!))
+        view.load(URLRequest(url: URL(string: "ensemble-asset://local/bench.html?delegate=\(cfg.delegate)&running=\(cfg.running)")!))
     }
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -234,7 +234,7 @@ final class WebBench: NSObject, WKScriptMessageHandler {
 @MainActor
 func runWeb(_ cfg: WebConfig) {
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Sources/Clutch/Resources/web")
+        .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Sources/Ensemble/Resources/web")
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
     let bench = WebBench(cfg: cfg, root: root)

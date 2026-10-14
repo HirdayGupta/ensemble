@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required under the hardened runtime for AVCaptureDevice (head and hand tracking). -->
+    <key>com.apple.security.device.camera</key><true/>
+    <!-- Deliberately absent: audio-input (Ensemble never records; it only mutes the input device), apple-events
+         (no AppleScript), allow-jit and allow-unsigned-executable-memory (WebKit runs the MediaPipe WASM in its own
+         WebContent process; confirm on the first Developer ID build and add allow-jit only if MediaPipe fails to start),
+         disable-library-validation (Sparkle is re-signed with the same identity), app-sandbox (controlling another
+         app through Accessibility is not possible inside the sandbox). -->
+</dict>
+</plist>
