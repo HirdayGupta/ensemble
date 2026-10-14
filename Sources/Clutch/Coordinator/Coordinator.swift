@@ -21,6 +21,8 @@ final class Coordinator: AppCoordinating {
     private var faceCount = 0
     /// The drawn dot: follows the filtered nose on a leash so small head wobble never moves it.
     private var dotPoint: CGPoint?
+    /// The latest smoothed nose point, wherever it is (also off Claude): drives the edge marker while listening.
+    private var lastNose: CGPoint?
     /// Where the gesture bubble sits while a gesture is held or dictation runs; it does not move meanwhile.
     private var frozenPoint: CGPoint?
     private var gestureShowing = false
@@ -33,7 +35,9 @@ final class Coordinator: AppCoordinating {
     private var target: ClaudeSession?
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
     private var candidate: (session: ClaudeSession?, since: TimeInterval)?
-    private let switchDwell = 0.25
+    private let switchDwell = 0.4
+    /// While dictating, the nose must stay on another session this long before focus moves there.
+    private let listeningSwitchDwell = 2.0
     /// A Claude session the nose rests on while another app's window covers it; raised after `raiseDwell`.
     private var covered: (id: String, since: TimeInterval)?
     private let raiseDwell = 1.0
@@ -297,6 +301,7 @@ final class Coordinator: AppCoordinating {
         }
         guard !state.calibrating else { return }
         if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
+            lastNose = p
             // Claude only: the nose counts only over a Claude session whose window is actually in front there.
             let under = sessions.first { $0.frame.contains(p) && claudeInFront(at: p, t: head.t) }
             if under == nil {
@@ -310,7 +315,8 @@ final class Coordinator: AppCoordinating {
             if under?.id == target?.id {
                 candidate = nil
             } else if let c = candidate, c.session?.id == under?.id {
-                if head.t - c.since >= switchDwell { target = under; candidate = nil; if let t = under { lookedAt(t) } }
+                let dwell = listeningSession != nil && under != nil ? listeningSwitchDwell : switchDwell
+                if head.t - c.since >= dwell { target = under; candidate = nil; if let t = under { lookedAt(t) } }
             } else {
                 candidate = (under, head.t)
             }
@@ -444,6 +450,9 @@ final class Coordinator: AppCoordinating {
             if listeningSession != nil || busy { sendAfterStop = true; ClutchLog.write("send after stop") } else { requestSend() }
         case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
+        case .dragScroll(let handDy):
+            // Natural scrolling: the content follows the hand, so a hand moving up shows later content (scrolls down).
+            scroll(handDy * SystemPointer.speedFactor * (SystemPointer.naturalScrolling ? 1 : -1))
         }
     }
 
@@ -594,9 +603,10 @@ final class Coordinator: AppCoordinating {
     }
 
     private func scroll(_ dy: Double) {
-        guard listeningSession == nil, pendingSend == nil, commonRefusal() == nil else { return }
+        guard pendingSend == nil, commonRefusal() == nil else { return }
         let session: ClaudeSession
-        if let s = scrollSession { session = s.session } else if let t = target { session = t } else { return }
+        if let s = scrollSession { session = s.session } else if let t = listeningSession ?? target { session = t } else { return }
+        if scrollSession == nil { ClutchLog.write("scroll started (last method: \(bridge.lastScrollMethod))") }
         scrollSession = (session, Date())
         bridge.scroll(session, dy: dy)
     }
@@ -623,7 +633,7 @@ final class Coordinator: AppCoordinating {
     private func updateDot() {
         if let session = listeningSession {
             frozenPoint = nil
-            if let d = dotPoint {
+            if let d = lastNose {
                 let inner = session.frame.insetBy(dx: session.frame.width * 0.15, dy: session.frame.height * 0.15)
                 state.nosePoint = inner.contains(d) ? nil : d
             } else {

@@ -22,6 +22,15 @@ public final class GestureMachine {
     private var pinchIsClosed = false
     private var pinchClosedAt: TimeInterval?
     private var pinchMin = 1.0
+    /// Pinch and drag scrolls: once a held pinch moves this far (frame heights), it is a drag, never a tap.
+    public static let dragStart = 0.03
+    /// Scroll points per frame height of hand travel, before the system speed factor the coordinator applies.
+    public static let dragPointsPerFrameHeight = 2400.0
+    private var dragging = false
+    private var dragOriginY: Double?
+    private var dragLastY: Double?
+    private var dragFilter = OneEuroFilter(minCutoff: 1.0, beta: 2, dCutoff: 1)
+    public private(set) var isDragging = false
     /// The current pinch already toggled on touch; its release must not start a new pair.
     private var pinchToggled = false
     private var edgeCount = 0
@@ -218,6 +227,7 @@ public final class GestureMachine {
     private func trackTaps(_ h: HandObservation, into intents: inout [GestureIntent]) {
         guard h.present, let d = h.pinch else {
             pinchIsClosed = false; pinchClosedAt = nil; edgeCount = 0
+            dragging = false; isDragging = false
             return
         }
         if !pinchIsClosed {
@@ -226,6 +236,10 @@ public final class GestureMachine {
             pinchIsClosed = true; edgeCount = 0
             pinchClosedAt = h.t; pinchMin = d
             pinchToggled = false
+            dragging = false; isDragging = false
+            dragFilter.reset()
+            dragOriginY = h.palmCenter.map { dragFilter.filter(Double($0.y), at: h.t) }
+            dragLastY = dragOriginY
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
             // The second pinch acts the moment it touches; holding it afterwards changes nothing.
             if lastTapEnd != nil, h.t - lastToggleAt >= Self.toggleCooldown {
@@ -235,6 +249,13 @@ public final class GestureMachine {
                 if talking { endTalk(.released, at: h.t, into: &intents) } else { talking = true; intents.append(.talkBegan) }
             }
         } else {
+            // Pinch and drag: a held pinch that moves vertically scrolls, with the hand position smoothed.
+            if !pinchToggled, let p = h.palmCenter, let origin = dragOriginY {
+                let y = dragFilter.filter(Double(p.y), at: h.t)
+                if !dragging, abs(y - origin) >= Self.dragStart { dragging = true; isDragging = true; lastTapEnd = nil }
+                if dragging, let last = dragLastY, y != last { intents.append(.dragScroll(handDy: (y - last) * Self.dragPointsPerFrameHeight)) }
+                dragLastY = y
+            }
             pinchMin = min(pinchMin, d)
             edgeCount = d > max(Self.reopenAbove, pinchMin + Self.reopenRise) ? edgeCount + 1 : 0
             if let start = pinchClosedAt, h.t - start > Self.tapMax { lastTapEnd = nil }   // held: not a tap
@@ -244,6 +265,7 @@ public final class GestureMachine {
             pinchClosedAt = nil
             let closedFor = h.t - start
             if pinchToggled { pinchToggled = false; lastTapEnd = nil; return }
+            if dragging { dragging = false; isDragging = false; lastTapEnd = nil; return }
             guard closedFor >= Self.tapMin, closedFor <= Self.tapMax else { lastTapEnd = nil; return }
             lastTapEnd = h.t
         }

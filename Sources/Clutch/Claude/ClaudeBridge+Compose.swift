@@ -108,6 +108,12 @@ extension ClaudeBridge {
         }
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.location = CGPoint(x: s.frame.midX, y: s.frame.midY)
+        // Route to the session's window even when the pointer is elsewhere: AppKit picks the target window from
+        // these fields for events posted to the process.
+        if s.windowNumber > 0 {
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(s.windowNumber))
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(s.windowNumber))
+        }
         event.postToPid(pid)
         setScrollMethod(.wheelEvent)
     }

@@ -49,8 +49,8 @@ public struct FrameLight: Sendable {
 public struct GestureMapping: Codable, Equatable, Sendable {
     public var talk: Pose = .gather             // used by the gather style; the double tap needs no pose
     public var send: Pose? = .thumbsUp          // nil = sending by gesture is off
-    public var scrollUp: Pose? = .pointUp       // nil = scrolling up by gesture is off; held, scrolls continuously
-    public var scrollDown: Pose? = .pointDown   // nil = scrolling down by gesture is off
+    public var scrollUp: Pose? = nil            // optional pose scroll (off by default: pinch and drag scrolls)
+    public var scrollDown: Pose? = nil
     public var cancel: Pose = .openPalm         // cancels a pending send
     public init() {}
 
@@ -94,6 +94,7 @@ public enum GestureIntent: Equatable, Sendable {
     case sendRequested
     case cancelRequested
     case scroll(dy: Double)                 // points for this frame; negative = up the transcript, positive = down
+    case dragScroll(handDy: Double)         // pinch and drag: points of hand travel this frame, positive = hand moved up
 }
 
 public enum TalkEndReason: String, Sendable { case released, handLost, stale }

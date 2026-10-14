@@ -16,9 +16,14 @@ struct OverlayScreenView: View {
                 HighlightView(frame: local, listening: model.listening)
                     .transition(.opacity)
             }
-            // The dot shows when the setting is on, and always while a gesture is being made.
-            if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
-                NoseDot(gesture: model.gesture)
+            // While listening there is no dot: a red marker on the session's edge points at where the nose went.
+            if model.listening, let nose = model.nose, let target = model.target, let local = local(target) {
+                EdgeIndicator(frame: local, toward: CGPoint(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY))
+                    .animation(.linear(duration: 0.1), value: nose)
+            } else if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
+                GlassSphere()
+                    .frame(width: 20, height: 20)
+                    .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
                     .animation(.linear(duration: 0.08), value: nose)
             }
@@ -54,7 +59,7 @@ private struct HighlightView: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        let color: Color = listening ? .teal : .accentColor
+        let color: Color = listening ? .clutchBlue : .accentColor
         shape
             .strokeBorder(color.opacity(listening ? (breathe ? 0.95 : 0.6) : 0.9), lineWidth: listening ? 3.5 : 3)
             .shadow(color: color.opacity(0.6), radius: listening ? (breathe ? 16 : 8) : 10)
@@ -70,13 +75,17 @@ private struct IslandView: View {
     @ObservedObject var model: OverlayModel
     let notch: CGSize
 
-    private enum Mode: Equatable { case idle, listening, countdown, banner }
+    private enum Mode: Equatable { case idle, listening, countdown, banner, gesture }
     private var mode: Mode {
         if let _ = model.countdown { return .countdown }
+        if let g = model.gesture, !(g.action == .talk && g.active) { return .gesture }
         if model.listening { return .listening }
         if model.banner != nil { return .banner }
         return .idle
     }
+    /// Screens without a camera notch (external displays, a closed MacBook) get a floating capsule below the
+    /// menu bar instead of one growing out of the notch.
+    private var floating: Bool { notch.height == 0 }
 
     private var size: CGSize {
         switch mode {
@@ -84,12 +93,14 @@ private struct IslandView: View {
         case .listening: return CGSize(width: 300, height: 38)
         case .countdown: return CGSize(width: 420, height: 112)
         case .banner: return CGSize(width: 380, height: 64)
+        case .gesture: return CGSize(width: 230, height: 38)
         }
     }
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: mode == .listening ? 19 : 26,
-                                          bottomTrailingRadius: mode == .listening ? 19 : 26, topTrailingRadius: 0, style: .continuous)
+        let r: CGFloat = (mode == .listening || mode == .gesture) ? 19 : 26
+        let shape = UnevenRoundedRectangle(topLeadingRadius: floating ? r : 0, bottomLeadingRadius: r,
+                                          bottomTrailingRadius: r, topTrailingRadius: floating ? r : 0, style: .continuous)
         ZStack {
             shape.fill(Color.black)
             content
@@ -105,6 +116,8 @@ private struct IslandView: View {
         .clipShape(shape)
         .shadow(color: .black.opacity(mode == .idle ? 0 : 0.35), radius: 14, y: 6)
         .opacity(mode == .idle ? 0 : 1)
+        .scaleEffect(floating && mode == .idle ? 0.85 : 1, anchor: .top)
+        .padding(.top, floating ? NSStatusBar.system.thickness + 8 : 0)
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: mode)
         .environment(\.colorScheme, .dark)
     }
@@ -115,10 +128,10 @@ private struct IslandView: View {
             EmptyView()
         case .listening:
             HStack(spacing: 10) {
-                SoundWaves(color: .teal).frame(width: 26, height: 16)
+                SoundWaves(color: .clutchBlue).frame(width: 26, height: 16)
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
-                Text("double-tap to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                Text("double pinch to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
             }
         case .countdown:
             if let c = model.countdown {
@@ -139,6 +152,21 @@ private struct IslandView: View {
                     Spacer(minLength: 0)
                 }
             }
+        case .gesture:
+            if let g = model.gesture {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle().stroke(.white.opacity(0.2), lineWidth: 3)
+                        Circle().trim(from: 0, to: g.progress)
+                            .stroke(Color.clutchBlue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        Image(systemName: Self.symbol(g.action)).font(.system(size: 10, weight: .bold)).foregroundStyle(Color.clutchBlue)
+                    }
+                    .frame(width: 24, height: 24)
+                    Text(Self.label(g)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                }
+            }
         case .banner:
             if let b = model.banner {
                 VStack(alignment: .leading, spacing: 2) {
@@ -149,6 +177,69 @@ private struct IslandView: View {
             }
         }
     }
+}
+
+extension IslandView {
+    static func symbol(_ a: GestureAction) -> String {
+        switch a {
+        case .talk: return "mic.fill"
+        case .stop: return "stop.fill"
+        case .send: return "paperplane.fill"
+        case .cancel: return "xmark"
+        case .scrollUp: return "arrow.up"
+        case .scrollDown: return "arrow.down"
+        }
+    }
+
+    static func label(_ g: GestureProgress) -> String {
+        switch g.action {
+        case .talk: return g.progress < 1 ? "Pinch again to listen" : "Listening"
+        case .stop: return "Pinch again to stop"
+        case .send: return "Hold to send"
+        case .cancel: return "Cancel"
+        case .scrollUp, .scrollDown: return "Scrolling"
+        }
+    }
+}
+
+/// The FPS-style hit marker: a red wedge on the session border, on the side the nose went, fading toward the centre.
+private struct EdgeIndicator: View {
+    let frame: CGRect
+    let toward: CGPoint
+
+    var body: some View {
+        let c = CGPoint(x: frame.midX, y: frame.midY)
+        let dx = toward.x - c.x, dy = toward.y - c.y
+        // Where the line from the centre toward the nose meets the border.
+        let sx = dx == 0 ? CGFloat.infinity : (frame.width / 2) / abs(dx)
+        let sy = dy == 0 ? CGFloat.infinity : (frame.height / 2) / abs(dy)
+        let k = min(sx, sy, 1)
+        let edge = CGPoint(x: c.x + dx * k, y: c.y + dy * k)
+        let angle = Angle(radians: atan2(dy, dx))
+        return Wedge()
+            .fill(LinearGradient(colors: [.red.opacity(0.85), .red.opacity(0)], startPoint: .trailing, endPoint: .leading))
+            .frame(width: 90, height: 70)
+            .rotationEffect(angle)
+            .position(x: edge.x - cos(angle.radians) * 45, y: edge.y - sin(angle.radians) * 45)
+            .opacity(hypot(dx, dy) < 1 ? 0 : 1)
+    }
+}
+
+/// A triangle pointing right: its tip touches the border, its base fades inward.
+private struct Wedge: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.maxX, y: r.midY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+extension Color {
+    /// The listening colour: the highlight while listening, the island's waves and progress rings.
+    static let clutchBlue = Color(red: 0.32, green: 0.58, blue: 1.0)
 }
 
 private struct ListeningView: View {
@@ -176,7 +267,7 @@ private struct ListeningView: View {
 private struct ListeningPill: View {
     var body: some View {
         HStack(spacing: 8) {
-            SoundWaves(color: .teal).frame(width: 22, height: 16)
+            SoundWaves(color: .clutchBlue).frame(width: 22, height: 16)
             Text("Listening").fontWeight(.semibold)
         }
         .font(.callout)
@@ -194,7 +285,7 @@ private struct NoseDot: View {
     private var tint: Color {
         guard let g = gesture else { return .accentColor }
         if !g.willAct { return .gray }
-        return g.action == .talk && g.active ? .teal : .accentColor
+        return g.action == .talk && g.active ? .clutchBlue : .accentColor
     }
 
     private var symbol: String {

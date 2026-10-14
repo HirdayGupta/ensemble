@@ -3,7 +3,7 @@ import Testing
 
 extension GestureMapping {
     /// The original hold-a-fist mapping, used by the rule and fixture tests written for it.
-    static var holdFist: GestureMapping { var m = GestureMapping(); m.talk = .fist; return m }
+    static var holdFist: GestureMapping { var m = GestureMapping(); m.talk = .fist; m.scrollUp = .pointUp; m.scrollDown = .pointDown; return m }
 }
 
 @Suite struct GatherBloomTests {

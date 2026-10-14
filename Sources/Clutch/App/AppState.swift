@@ -66,7 +66,7 @@ extension AppStatus {
         switch self {
         case .off: return .secondary
         case .watching: return .green
-        case .listening: return .teal
+        case .listening: return .clutchBlue
         case .cameraCovered, .needsCalibration, .needsPermission, .claudeNotRunning: return .orange
         case .error: return .red
         }
