@@ -57,9 +57,9 @@ public struct ScrollGlide {
 
     /// One frame: the distance to deliver now, or nil when nothing is left (the loop should stop). Momentum is
     /// stopped by a held pinch, by hands on the keyboard, mouse or trackpad, or when it dies out.
-    public mutating func nextStep(pinchHeld: Bool, secondsSinceInput: TimeInterval, hasTarget: Bool) -> Double? {
+    public mutating func nextStep(pinchHeld: Bool, secondsSinceInput: @autoclosure () -> TimeInterval, hasTarget: Bool) -> Double? {
         if inertia != 0 {
-            if pinchHeld || secondsSinceInput < 0.2 || abs(inertia) < Self.coastFloor { inertia = 0 }
+            if pinchHeld || secondsSinceInput() < 0.2 || abs(inertia) < Self.coastFloor { inertia = 0 }
             else { remaining += inertia / Self.frameRate; inertia *= Self.friction }
         }
         guard abs(remaining) >= 0.5 || inertia != 0, hasTarget else {
