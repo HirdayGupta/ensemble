@@ -456,7 +456,7 @@ final class Coordinator: AppCoordinating {
         let now = CACurrentMediaTime()
         if multiFace.isActive(now: now) { return "More than one face in view" }
         if now - lastOneFaceT > 1.5 { return "No face in view" }
-        if ClaudeBridge.secondsSinceUserInput() < inputQuiet { return "Keyboard or mouse was just used" }
+        if ClaudeBridge.secondsSinceTypingOrClick() < inputQuiet { return "You just typed or clicked" }
         return nil
     }
 
