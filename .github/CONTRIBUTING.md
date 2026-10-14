@@ -3,7 +3,7 @@
 Thank you for helping. Ensemble drives Claude desktop with a webcam and a user's hands, and it is installed on people's
 own Macs, so the bar is trust first, features second. Read the trust rules below before you write code.
 
-Coding agents read `AGENTS.md`; it holds the same commands and rules in a denser form. This file is for people.
+Coding agents read `AGENTS.md`, which points here and to the pages under `docs/`. This file is for people. The product overview is the [README](../README.md).
 
 ## What you need
 
@@ -55,8 +55,20 @@ trace for tuning gestures:
 defaults write dev.ensemble.app detailedTrace -bool true    # then restart the app
 ```
 
-For a Mac you develop on, `scripts/dev-install.sh` builds from source, installs the app and keeps it on the latest `main`
-(see the README).
+### Developer auto-update install
+
+For developers only. Friends install the disk image from the releases page, as the README says. On a Mac you develop on,
+this builds the app from source and keeps it on the latest `main`:
+
+```
+gh repo clone oficiallyAkshay/ensemble ~/ensemble && ~/ensemble/scripts/dev-install.sh
+```
+
+It needs Swift 6.2 or newer, which comes with Apple's 2025 developer tools. It creates a self-signed
+`Ensemble Local Signing` identity once, so the Camera and Accessibility grants survive every rebuild, installs
+`~/Applications/Ensemble.app`, and loads a launchd agent that checks `main` every 2 minutes, rebuilds when it moved and
+relaunches the app. An update waits while Claude is listening. The log is `~/Library/Logs/Ensemble/updater.log`. Stop it
+with `launchctl bootout "gui/$(id -u)/dev.ensemble.updater"`.
 
 ## Repository checks
 
@@ -90,7 +102,7 @@ These are not style preferences. A pull request that breaks one will not be merg
    a push whose newest commit carries a private address, and it does not check older commits in the same push, so check
    `git log --format=%ae origin/main..HEAD` before you push. A wrong address in public history stays there.
 6. **Dictation is never left recording because of Ensemble.** Anything that touches dictation or sending must keep the
-   safety design in the README intact (written before pressed, dead-man check, standing check, narrow send rules, stop on
+   safety design in [docs/safety.md](../docs/safety.md) intact (written before pressed, dead-man check, standing check, narrow send rules, stop on
    typing or clicking). Say in the pull request how your change preserves it.
 7. **Ensemble acts only on Claude.** With another app in front, gestures do nothing.
 8. **Pin everything the build runs.** Every GitHub Action is a full commit SHA with the version in a trailing comment;
@@ -128,8 +140,18 @@ SwiftPM package with two targets plus a separate benchmark package.
 | `Tests/EnsembleCoreTests` | Swift Testing tests and the recorded gesture fixtures. |
 | `Tools/PerfBench` | Separate package of camera-free micro-benchmarks (synthetic frames). |
 | `scripts/` | `bundle.sh`, `release.sh`, `appcast.sh`, `dev-install.sh`, `dev-update.sh`, `make-icon.swift`. |
-| `docs/RELEASING.md` | How a release is signed, notarized, published and delivered. |
+| `docs/` | Guides and references: [gestures](../docs/gestures.md), [safety](../docs/safety.md), [workflows](../docs/workflows.md), [performance](../docs/performance.md), [gotchas](../docs/gotchas.md), [RELEASING.md](../docs/RELEASING.md) and the [changelog](../docs/CHANGELOG.md). |
 | `.github/workflows` | `ci.yml` (build and test), `hygiene.yml` (workflow and secrets checks), `release.yml` (tag-triggered release, disabled until Developer ID signing exists). |
+
+### How the pieces fit
+
+```
+camera -> Engine (hand pose: Apple Vision, face: MediaPipe in a hidden web view)
+       -> EnsembleCore (gesture state machine, nose pointer, detectors)
+       -> Coordinator (every safety guard must agree)
+       -> Claude bridge (Accessibility: dictation, Send, scroll)
+       -> status capsule and overlay (App)
+```
 
 Rules of thumb: logic that can be tested without a camera belongs in `EnsembleCore`; only `Coordinator` decides to press
 Claude's controls; frame scheduling stays in `Engine`.
@@ -137,7 +159,7 @@ Claude's controls; frame scheduling stays in `Engine`.
 ## Lessons that were paid for
 
 Ensemble has been broken in specific, repeatable ways, and the fixes are not obvious from the code. They are written down
-in `AGENTS.md`, section "Gotchas that have cost incidents". Read it before you touch any of these:
+in [docs/gotchas.md](../docs/gotchas.md). Read it before you touch any of these:
 
 - the signing identity and the Camera and Accessibility permissions;
 - Claude desktop's accessibility labels, which are English strings of one Claude version;
@@ -151,12 +173,51 @@ in `AGENTS.md`, section "Gotchas that have cost incidents". Read it before you t
 Values the owner chose by hand (focus delay, hold-to-send time, the blue outline, the menu bar icon, the motion curve) are
 listed there too; do not change them without asking in an issue.
 
+## Roadmap
+
+- Record and publish a demo recording.
+- A signed and notarized disk image, then a Homebrew cask.
+- Automatic updates.
+- Restrict gesture send to Claude's confirm-before-run permission modes.
+- Intel and older-macOS testing.
+- Rename to Leanback.
+
 ## Reporting problems
 
 A bug: open an issue with your macOS version, Claude desktop version and the lines from the log around the problem (remove
 anything you do not want shared). A security problem: do not open an issue; see `SECURITY.md`.
 
+## Credits
+
+Ensemble includes MediaPipe by Google (Apache-2.0, with the Face Landmarker model), the hand-pose rules of Sleight (MIT,
+adapted in `Sources/EnsembleCore/Vendor/Sleight`), an approach to driving Claude's dictation from claude-dictation-hotkey
+(MIT) and the Sparkle updater. Full notices are in `THIRD_PARTY_NOTICES.md`. Ensemble is an independent project and is not
+affiliated with or endorsed by Anthropic.
+
 ## Licence
 
 By contributing you agree your work is released under the repository's MIT licence (`LICENSE`). Vendored code keeps its
 own licence; see `THIRD_PARTY_NOTICES.md`.
+
+## Badge recipes
+
+The README shows the licence badge and a clone count. Recipes, with `<owner>/<repo>` as this repository:
+
+| Badge | Template |
+|---|---|
+| Licence | `https://img.shields.io/badge/license-MIT-2f6f4e?logo=opensourceinitiative&logoColor=white` |
+| Clones | `https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/<owner>/<repo>/badges/clones.json&query=$.badge&label=clones&logo=github&logoColor=white`, fed by the clonometer workflow, which writes the JSON to the `badges` branch. |
+| Works with | `https://img.shields.io/badge/Claude.ai-1e1b4b?logo=claude&logoColor=white` |
+
+## The README and its checks
+
+The README follows the readmerlin shape: hero, Features, Fit, How it compares, Security and limits. The hero graphic
+`Assets/hero.svg` is drawn from `Assets/hero.hero.json` with figurehead:
+
+```
+node <path-to-figurehead>/scripts/figurehead.mjs render Assets/hero.hero.json --out Assets/hero.svg
+node <path-to-figurehead>/scripts/figurehead.mjs check Assets/hero.hero.json Assets/hero.svg --repo .
+```
+
+Check the pages with `readmerlin check --pages` from the repository root. Every comparison cell in the README was read
+from the other project's own README or support page, so re-read them before changing a cell.

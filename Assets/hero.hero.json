@@ -1,0 +1,54 @@
+{
+  "kind": "fan",
+  "style": "flat",
+  "title": "Your face and your hands feed four gestures, look to focus, double pinch to dictate, thumbs-up to send, pinch and drag to scroll, into one hands-free Claude Code session",
+  "sources": [
+    {
+      "label": "Your face",
+      "icon": "target",
+      "gives": "where you look"
+    },
+    {
+      "label": "Your hands",
+      "icon": "sparkles",
+      "gives": "gestures"
+    }
+  ],
+  "handled": [
+    {
+      "label": "Focus",
+      "icon": "target"
+    },
+    {
+      "label": "Dictate",
+      "icon": "zap"
+    },
+    {
+      "label": "Send",
+      "icon": "mail"
+    },
+    {
+      "label": "Scroll",
+      "icon": "refresh"
+    },
+    {
+      "label": "Pause audio",
+      "icon": "bell"
+    },
+    {
+      "label": "Stop safely",
+      "icon": "shield"
+    },
+    {
+      "label": "Stay local",
+      "icon": "lock"
+    }
+  ],
+  "more": false,
+  "deliverable": {
+    "label": "hands-free Claude",
+    "heading": "Session",
+    "kind": "document",
+    "backing": "focused, dictated, sent"
+  }
+}

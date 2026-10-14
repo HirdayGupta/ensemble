@@ -15,7 +15,7 @@ read, and a confirmed vulnerability is fixed and released before it is described
 ## What counts
 
 - Ensemble acting on something other than Claude, or sending a draft the user did not dictate, to a session the user did
-  not dictate it to, or after the safety rules in the README ("Safety design") should have stopped it.
+  not dictate it to, or after the safety rules in [docs/safety.md](docs/safety.md) should have stopped it.
 - Claude's microphone left recording because of Ensemble.
 - Any network connection other than the update feed, any data leaving the Mac, or any camera frame reaching disk.
 - A way for a web page, another app or a crafted update to make Ensemble run code or press Claude's controls.
