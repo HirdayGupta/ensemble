@@ -2,11 +2,6 @@ import AppKit
 import SwiftUI
 import EnsembleCore
 
-struct Arrival: Equatable, Identifiable {
-    let id = UUID()
-    var frame: CGRect
-}
-
 struct OverlayBanner: Equatable, Identifiable {
     enum Style: Equatable { case sent, stopped, refused, info }
     let id = UUID()
@@ -29,31 +24,27 @@ final class OverlayModel: ObservableObject {
     @Published var nose: CGPoint?
     var hasNose = false
     @Published var listening = false
-    @Published var countdown: Countdown?
     @Published var showNoseDot = true
     @Published var gesture: GestureProgress?
     @Published var showHighlight = true
     @Published var banner: OverlayBanner?
-    /// A session just brought forward or switched to: drawn as a soft glow that grows in and fades.
-    @Published var arrival: Arrival?
     /// The keyboard, mouse or trackpad is in use: the highlight fades away until they rest.
     @Published var handsOnInput = false
     /// Live voice level 0...1 while listening (0 when unavailable).
     @Published var audioLevel = 0.0
     /// Show live sound bars instead of the blinking microphone dot.
     @Published var liveSoundBars = false
-    @Published var cancelHint = "Show an open palm to cancel"
     /// The name of the session a gesture would act on (the dictating one while dictating).
     @Published var sessionName: String?
     @Published var sessionSwitch: SessionSwitch?
 
     var hasContent: Bool {
-        (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || countdown != nil || banner != nil || arrival != nil
+        (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil
     }
 }
 
 /// Click-through, non-activating panels (one per screen) that draw the highlight, nose dot, listening
-/// border, send countdown and banners. They never take focus or intercept clicks.
+/// border, the island and banners. They never take focus or intercept clicks.
 @MainActor
 final class OverlayController {
     private let model = OverlayModel()
@@ -69,13 +60,12 @@ final class OverlayController {
         }
     }
 
-    func update(target: CGRect?, nose: CGPoint?, listening: Bool, countdown: Countdown?, showNoseDot: Bool, showHighlight: Bool) {
+    func update(target: CGRect?, nose: CGPoint?, listening: Bool, showNoseDot: Bool, showHighlight: Bool) {
         setIfChanged(&model.target, target)
         latestNose = nose
         model.hasNose = nose != nil
         setIfChanged(&model.listening, listening)
         setIfChanged(&model.nose, listening || !OverlayScreenView.systemGlassDot ? nose : nil)
-        setIfChanged(&model.countdown, countdown)
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
         syncPanels()
@@ -111,10 +101,6 @@ final class OverlayController {
         setIfChanged(&model.sessionSwitch, switching)
     }
 
-    func setCancelHint(_ text: String) {
-        setIfChanged(&model.cancelHint, text)
-    }
-
     func setLiveSoundBars(_ on: Bool) { setIfChanged(&model.liveSoundBars, on) }
 
     func setAudioLevel(_ v: Double) {
@@ -123,18 +109,6 @@ final class OverlayController {
 
     func setHandsOnInput(_ on: Bool) {
         setIfChanged(&model.handsOnInput, on)
-    }
-
-    func flashArrival(_ frame: CGRect) {
-        let a = Arrival(frame: frame)
-        model.arrival = a
-        syncPanels()
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            guard let self, self.model.arrival?.id == a.id else { return }
-            self.model.arrival = nil
-            self.syncPanels()
-        }
     }
 
     func showBanner(title: String, body: String, style: OverlayBanner.Style = .info, seconds: Double = 5) {

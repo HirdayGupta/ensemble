@@ -57,11 +57,6 @@ final class AppEnvironment {
         Publishers.CombineLatest(settings.$showNoseDot, settings.$showHighlight)
             .sink { [weak self] dot, highlight in self?.overlay.setVisibility(showNoseDot: dot, showHighlight: highlight) }
             .store(in: &cancellables)
-        settings.$mapping
-            .map { "Show \($0.cancel.title.lowercased()) to cancel" }
-            .removeDuplicates()
-            .sink { [weak self] text in self?.overlay.setCancelHint(text) }
-            .store(in: &cancellables)
 
         hotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_K), modifiers: UInt32(cmdKey | optionKey)) { [weak self] in
             MainActor.assumeIsolated { self?.floatingPanel.toggle() }

@@ -35,7 +35,7 @@ extension ClaudeBridge {
     }
 
     /// Presses Claude's own Send button. Refuses unless every guard holds; never types a key.
-    /// `shown` is the draft the countdown displayed: if the composer no longer holds exactly that, nothing is sent.
+    /// `shown` is the draft read just before sending: if the composer no longer holds exactly that, nothing is sent.
     func sendDraft(_ s: ClaudeSession, shown: String) async -> BridgeResult {
         await run { self.sendNow(s, shown: shown) }
     }

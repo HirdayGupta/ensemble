@@ -52,16 +52,15 @@ final class StubCoordinator: AppCoordinating {
         timer?.invalidate()
         timer = nil
         state.status = .off
-        push(target: nil, nose: nil, listening: false, countdown: nil)
+        push(target: nil, nose: nil, listening: false)
     }
 
     func shutdown() { stop() }
 
     func clearAndDisarm() {
         state.listening = false
-        state.countdown = nil
         state.lastRefusal = nil
-        push(target: state.targetFrame, nose: state.nosePoint, listening: false, countdown: nil)
+        push(target: state.targetFrame, nose: state.nosePoint, listening: false)
         started = Date()
     }
 
@@ -94,27 +93,20 @@ final class StubCoordinator: AppCoordinating {
                           width: screen.width * 0.42, height: screen.height * 0.66)
         let nose = CGPoint(x: pane.midX + sin(t * 0.9) * pane.width * 0.3, y: pane.midY + sin(t * 1.3) * pane.height * 0.3)
 
-        var countdown: Countdown?
         let listening = (3..<7).contains(phase)
-        if (8..<10).contains(phase) {
-            countdown = Countdown(progress: (phase - 8) / 2,
-                                  text: "Run the tests again and tell me which ones still fail, then summarise the cause in two lines.",
-                                  sessionFrame: pane)
-        }
         if phase >= 10 { state.lastRefusal = "Not sending: the session is in a mode that asks before acting." }
         if phase < 1 { state.lastRefusal = nil }
 
         state.status = listening ? .listening : .watching
         state.listening = listening
-        state.countdown = countdown
         state.targetFrame = pane
         state.nosePoint = nose
         state.fps = 30
-        push(target: pane, nose: nose, listening: listening, countdown: countdown)
+        push(target: pane, nose: nose, listening: listening)
     }
 
-    private func push(target: CGRect?, nose: CGPoint?, listening: Bool, countdown: Countdown?) {
-        overlay.update(target: target, nose: nose, listening: listening, countdown: countdown,
+    private func push(target: CGRect?, nose: CGPoint?, listening: Bool) {
+        overlay.update(target: target, nose: nose, listening: listening,
                        showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
     }
 }

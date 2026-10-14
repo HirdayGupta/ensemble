@@ -12,13 +12,6 @@ enum AppStatus: Equatable {
     case error(String)
 }
 
-/// A pending send. `progress` runs from 0 (just started) to 1 (sends now).
-struct Countdown: Equatable {
-    var progress: Double
-    var text: String
-    var sessionFrame: CGRect
-}
-
 /// Read by the UI, written by the coordinator. Screen-space values are global, top-left origin.
 @MainActor
 final class AppState: ObservableObject {
@@ -27,7 +20,6 @@ final class AppState: ObservableObject {
     @Published var targetFrame: CGRect?
     @Published var nosePoint: CGPoint?
     @Published var listening = false
-    @Published var countdown: Countdown?
     @Published var muted = false
     @Published var fps = 0
     @Published var cameraName: String?

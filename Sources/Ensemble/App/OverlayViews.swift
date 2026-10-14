@@ -57,8 +57,7 @@ struct OverlayScreenView: View {
     /// The island sits on the screen holding the session in play, else on the primary screen.
     private var showsIsland: Bool {
         if let t = model.target, t.intersects(screenFrame) { return true }
-        if let c = model.countdown, c.sessionFrame.intersects(screenFrame) { return true }
-        return model.target == nil && model.countdown == nil && isPrimary
+        return model.target == nil && isPrimary
     }
 
     /// One identity per session frame: a new frame is a new outline that fades in, never a moving one.
@@ -67,25 +66,6 @@ struct OverlayScreenView: View {
     private func local(_ global: CGRect) -> CGRect? {
         guard global.intersects(screenFrame) else { return nil }
         return global.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
-    }
-}
-
-/// A soft blue glow that swells from slightly inside the session's frame out to it and fades: makes a session
-/// coming forward feel like a deliberate, smooth hand-off rather than a jump.
-private struct ArrivalGlow: View {
-    let frame: CGRect
-    @State private var shown = false
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        shape
-            .fill(Color.ensembleBlue.opacity(shown ? 0 : 0.10))
-            .overlay(shape.strokeBorder(Color.ensembleBlue.opacity(shown ? 0 : 0.9), lineWidth: shown ? 2 : 6))
-            .shadow(color: Color.ensembleBlue.opacity(shown ? 0 : 0.6), radius: 24)
-            .frame(width: frame.width, height: frame.height)
-            .scaleEffect(shown ? 1 : 0.96)
-            .position(x: frame.midX, y: frame.midY)
-            .onAppear { withAnimation(.easeOut(duration: 0.55)) { shown = true } }
     }
 }
 
@@ -121,13 +101,12 @@ private struct IslandView: View {
     @ObservedObject var model: OverlayModel
     let notch: CGSize
 
-    private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, otherGesture, countdown, banner }
+    private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, otherGesture, banner }
     /// What is drawn. It follows `liveMode` only once that has held steady for a moment, so a state that lasts
     /// a frame or two (a dropped hand frame, the gap between a gesture firing and Claude confirming) never flashes.
     @State private var shown: Mode = .idle
     private var mode: Mode { shown }
     private var liveMode: Mode {
-        if model.countdown != nil { return .countdown }
         if model.listening, model.sessionSwitch != nil { return .switching }
         if let g = model.gesture {
             if (g.action == .talk || g.action == .stop) && !g.active { return .firstPinch }
@@ -146,7 +125,6 @@ private struct IslandView: View {
         switch mode {
         case .idle: return CGSize(width: 120, height: 0)
         case .otherGesture: return CGSize(width: 200, height: 36)
-        case .countdown: return CGSize(width: 420, height: 112)
         case .dictating, .switching, .firstPinch, .sendHold, .banner: return CGSize(width: 360, height: floating ? 46 : 48)
         }
     }
@@ -261,25 +239,6 @@ private struct IslandView: View {
                 HStack(spacing: 10) {
                     Image(systemName: Self.symbol(g.action)).font(.system(size: 12, weight: .bold)).foregroundStyle(Color.ensembleBlue)
                     Text(Self.label(g)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                }
-            }
-        case .countdown:
-            if let c = model.countdown {
-                HStack(alignment: .top, spacing: 12) {
-                    ZStack {
-                        Circle().stroke(.white.opacity(0.2), lineWidth: 3.5)
-                        Circle().trim(from: 0, to: min(max(c.progress, 0), 1))
-                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                        Image(systemName: "paperplane.fill").font(.system(size: 12)).foregroundStyle(Color.accentColor)
-                    }
-                    .frame(width: 34, height: 34)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Sending").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                        Text(c.text).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8)).lineLimit(3)
-                        Text(model.cancelHint).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-                    }
                     Spacer(minLength: 0)
                 }
             }
@@ -473,150 +432,6 @@ extension Color {
     static let ensembleBlue = Color(red: 0.32, green: 0.58, blue: 1.0)
     /// Session names on the island: a lighter blue that reads as a name on black.
     static let ensembleSoftBlue = Color(red: 0.56, green: 0.72, blue: 1.0)
-}
-
-private struct ListeningView: View {
-    let frame: CGRect
-    @State private var pulse = false
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        ZStack {
-            shape
-                .strokeBorder(Color.white.opacity(pulse ? 0.75 : 0.4), lineWidth: 2)
-                .shadow(color: Color.black.opacity(0.25), radius: 8)
-                .frame(width: frame.width, height: frame.height)
-            ListeningPill()
-                .position(x: frame.width / 2, y: 30)
-                .frame(width: frame.width, height: frame.height)
-        }
-        .position(x: frame.midX, y: frame.midY)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
-        }
-    }
-}
-
-private struct ListeningPill: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            SoundWaves(color: .ensembleBlue).frame(width: 22, height: 16)
-            Text("Listening").fontWeight(.semibold)
-        }
-        .font(.callout)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassSurface(Capsule())
-    }
-}
-
-/// The nose dot. While a gesture is held it grows into a bubble showing what the gesture will do, with a ring
-/// that fills over the hold; dimmed when the hold cannot act, solid red while dictating.
-private struct NoseDot: View {
-    let gesture: GestureProgress?
-
-    private var tint: Color {
-        guard let g = gesture else { return .accentColor }
-        if !g.willAct { return .gray }
-        return g.action == .talk && g.active ? .ensembleBlue : .accentColor
-    }
-
-    private var symbol: String {
-        switch gesture?.action {
-        case .talk: return "mic.fill"
-        case .stop: return "stop.fill"
-        case .send: return "paperplane.fill"
-        case .cancel: return "xmark"
-        case .scrollUp: return "arrow.up"
-        case .scrollDown: return "arrow.down"
-        case nil: return ""
-        }
-    }
-
-    var body: some View {
-        let size: CGFloat = gesture == nil ? 20 : 40
-        ZStack {
-            if gesture == nil {
-                GlassSphere()
-            } else {
-                Circle().fill(.regularMaterial)
-            }
-            if let g = gesture {
-                Circle().stroke(tint.opacity(0.25), lineWidth: 3).padding(1.5)
-                Circle()
-                    .trim(from: 0, to: g.progress)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .padding(1.5)
-                    .animation(.linear(duration: 0.08), value: g.progress)
-                if g.action == .talk && g.active {
-                    SoundWaves(color: tint).frame(width: 20, height: 16)
-                } else {
-                    Image(systemName: symbol)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(tint)
-                }
-            }
-        }
-        .frame(width: size, height: size)
-        .opacity(gesture.map { $0.willAct ? 1 : 0.6 } ?? 1)
-        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-        .shadow(color: tint.opacity(gesture == nil ? 0 : 0.6), radius: 12)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: gesture == nil)
-    }
-}
-
-private struct CountdownPill: View {
-    let countdown: Countdown
-    let hint: String
-    let sessionFrame: CGRect
-
-    var body: some View {
-        let width = max(220, min(440, sessionFrame.width - 32))
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle().stroke(.secondary.opacity(0.3), lineWidth: 4)
-                Circle()
-                    .trim(from: 0, to: min(max(countdown.progress, 0), 1))
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                Image(systemName: "paperplane.fill").font(.system(size: 13)).foregroundStyle(Color.accentColor)
-            }
-            .frame(width: 34, height: 34)
-            .animation(.linear(duration: 0.1), value: countdown.progress)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(countdown.text)
-                    .font(.callout)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(hint).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .frame(width: width, alignment: .leading)
-        .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .padding(.bottom, 24)
-        .frame(width: sessionFrame.width, height: sessionFrame.height, alignment: .bottom)
-        .position(x: sessionFrame.midX, y: sessionFrame.midY)
-    }
-}
-
-private struct BannerView: View {
-    let banner: OverlayBanner
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(banner.title).font(.headline)
-            Text(banner.body).font(.callout).foregroundStyle(.secondary).lineLimit(3)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .frame(maxWidth: 420, alignment: .leading)
-        .glassSurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
 }
 
 /// Five bars that follow the live voice level (each with its own wobble so they never move in lockstep).

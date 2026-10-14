@@ -54,7 +54,6 @@ final class Coordinator: AppCoordinating {
     private var pendingFocus: (session: ClaudeSession, until: TimeInterval)?   // a look-away focus that was deferred by busy or typing
     private var listeningSession: ClaudeSession?
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
-    private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
     private var pendingScroll = 0.0
     /// Smooth scrolling: hand motion adds distance to `scrollRemaining`; a 60 Hz loop delivers a fixed share of
@@ -240,7 +239,6 @@ final class Coordinator: AppCoordinating {
         engine.stop()
         gestures.reset()
         cancelScroll()
-        pendingSend = nil
         pendingFocus = nil; focusAfterStop = nil; sendAfterStop = false; lastSpoken = nil
         target = nil
         state.status = .off
@@ -271,9 +269,9 @@ final class Coordinator: AppCoordinating {
             }
             return
         }
-        // Calibration owns the hands and the head: end any dictation and drop any pending send first, because
+        // Calibration owns the hands and the head: end any dictation first, because
         // gesture events are ignored while it runs and a held talk pose would never be seen released.
-        pendingSend = nil; state.countdown = nil; sendAfterStop = false
+        sendAfterStop = false
         gestures.reset()
         cancelScroll()
         if listeningSession != nil { endTalkWhenIdle(reason: "calibrating") }
@@ -319,7 +317,6 @@ final class Coordinator: AppCoordinating {
         cancelScroll()
         let session = listeningSession
         listeningSession = nil
-        pendingSend = nil
         ducker.restoreNow()
         safety.stopForTermination(session: session)
         EnsembleLog.flush()
@@ -328,9 +325,7 @@ final class Coordinator: AppCoordinating {
     func clearAndDisarm() {
         guard !disarming else { return }
         disarming = true
-        pendingSend = nil
         sendAfterStop = false
-        state.countdown = nil
         gestures.reset()
         EnsembleLog.write("clear and disarm requested")
         Task { @MainActor in
@@ -411,9 +406,8 @@ final class Coordinator: AppCoordinating {
                     } else {
                         covered = nil
                         EnsembleLog.write("raising Claude: nose rested on a covered session")
-                        overlay.flashArrival(hidden.frame)
                         Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 120_000_000)   // let the glow lead the window
+                            try? await Task.sleep(nanoseconds: 120_000_000)   // a short pause before the raise
                             let r = await self.bridge.focus(hidden, unlessTypedWithin: self.inputQuiet)
                             let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
                             EnsembleLog.write("raise result: \(r), frontmost now \(front)")
@@ -441,7 +435,7 @@ final class Coordinator: AppCoordinating {
         let intents = gestures.push(hand)
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
-        let onClaude = target != nil || listeningSession != nil || pendingSend != nil
+        let onClaude = target != nil || listeningSession != nil
         let progress = cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress
         gestureShowing = progress != nil
         overlay.setGesture(progress)
@@ -453,7 +447,6 @@ final class Coordinator: AppCoordinating {
         guard let covered = cover.push(light) else { return }
         if covered {
             if listeningSession != nil { endTalk(reason: "camera covered") }
-            pendingSend = nil
             sendAfterStop = false
             cancelScroll()
             gestures.reset()
@@ -498,7 +491,6 @@ final class Coordinator: AppCoordinating {
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         engine.setForceFullRate(needsFullRate)
         overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
-        if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
             scrollRemaining += pendingScroll
             scrollVelocity = 0.7 * scrollVelocity + 0.3 * (pendingScroll * 20)     // the tick runs at 20 Hz
@@ -511,7 +503,7 @@ final class Coordinator: AppCoordinating {
         let now = CACurrentMediaTime()
         if now - lastAwayCheck >= 0.5 {
             lastAwayCheck = now
-            if listeningSession != nil ? !busy : (scrollTimer != nil || pendingSend != nil), ScreenFacts.sessionAway() { interrupt("screen locked") }
+            if listeningSession != nil ? !busy : scrollTimer != nil, ScreenFacts.sessionAway() { interrupt("screen locked") }
         }
         // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
         if listeningSession != nil, !busy, now - listeningSince > 1.5 {
@@ -539,9 +531,9 @@ final class Coordinator: AppCoordinating {
         }
     }
 
-    /// Every hand frame is needed while dictating, a send is pending, calibrating, or a gesture is in progress.
+    /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
     private var needsFullRate: Bool {
-        listeningSession != nil || pendingSend != nil || busy || sendAfterStop || state.calibrating || calibrationPending
+        listeningSession != nil || busy || sendAfterStop || state.calibrating || calibrationPending
             || scrollSession != nil || inertia != 0 || gestures.pinchHeld || gestures.progress != nil
     }
 
@@ -598,7 +590,7 @@ final class Coordinator: AppCoordinating {
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
         case .sendRequested:
             if listeningSession != nil || busy { sendAfterStop = true; EnsembleLog.write("send after stop") } else { requestSend() }
-        case .cancelRequested: if pendingSend != nil { EnsembleLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
+        case .cancelRequested: break
         case .scroll(let dy): scroll(dy)
         case .dragScrollEnded:
             // The pinch is gone. A slow release stops dead; a fast flick throws the page with momentum.
@@ -653,7 +645,6 @@ final class Coordinator: AppCoordinating {
         guard calibratedHere else { refuseStart("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = target else { refuseStart("Your nose is not on a Claude session"); return }
         if let other = bridge.otherProcessCapturingInput() { refuseStart("\(other) is using a microphone"); return }
-        pendingSend = nil; state.countdown = nil
         sendAfterStop = false; focusAfterStop = nil; pendingFocus = nil
         guard safety.episodeStarting(session: session) else { refuseStart("Could not write the safety record; not starting"); return }
         busy = true
@@ -737,7 +728,7 @@ final class Coordinator: AppCoordinating {
 
     private func requestSend() {
         guard settings.mapping.send != nil else { return }
-        guard pendingSend == nil, listeningSession == nil, !busy else { refuse("Send ignored: busy (\(pendingSend != nil ? "countdown running" : listeningSession != nil ? "still listening" : "a step in flight"))"); return }
+        guard listeningSession == nil, !busy else { refuse("Send ignored: busy (\(listeningSession != nil ? "still listening" : "a step in flight"))"); return }
         if let why = commonRefusal() { refuse(why); return }
         guard let spoken = lastSpoken, Date().timeIntervalSince(spoken.stoppedAt) <= sendWindow else {
             refuse("Nothing dictated in the last \(Int(sendWindow)) seconds"); return
@@ -749,8 +740,8 @@ final class Coordinator: AppCoordinating {
             guard let text = await self.bridge.draftText(session), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.refuse("The draft is empty"); return
             }
-            // The draft read takes a moment; a new dictation, countdown or keystroke may have started meanwhile.
-            guard self.pendingSend == nil, self.listeningSession == nil, !self.busy else { self.refuse("Send dropped: something else started"); return }
+            // The draft read takes a moment; a new dictation or keystroke may have started meanwhile.
+            guard self.listeningSession == nil, !self.busy else { self.refuse("Send dropped: something else started"); return }
             if ClaudeBridge.secondsSinceTypingOrClick() < Date().timeIntervalSince(spoken.stoppedAt) { self.refuse("Typed or clicked since dictation; not sending"); return }
             EnsembleLog.write("sending (\(text.count) characters)")
             self.sendNow(session, shown: text)
@@ -780,37 +771,8 @@ final class Coordinator: AppCoordinating {
         (sessions.first { $0.id == session.id }?.title ?? session.title) ?? "this session"
     }
 
-    private func advanceCountdown(_ send: (session: ClaudeSession, started: Date, text: String)) {
-        let words = Double(send.text.split(separator: " ").count)
-        let duration = settings.sendCountdownSeconds + words * 0.03
-        let elapsed = Date().timeIntervalSince(send.started)
-        // Cancel on any keyboard or mouse use, or when the nose leaves the session.
-        if ClaudeBridge.secondsSinceTypingOrClick() < elapsed || cover.covered {
-            refuse(cover.covered ? "Send cancelled: camera covered" : "Send cancelled: keyboard or mouse used")
-            pendingSend = nil; state.countdown = nil; pushOverlay(); Notifier.shared.playCue(.refused); return
-        }
-        if elapsed < duration {
-            state.countdown = Countdown(progress: elapsed / duration, text: send.text, sessionFrame: send.session.frame)
-            pushOverlay()
-            return
-        }
-        pendingSend = nil
-        state.countdown = nil
-        pushOverlay()
-        busy = true
-        Task { @MainActor in
-            let result = await self.bridge.sendDraft(send.session, shown: send.text)
-            self.busy = false
-            switch result {
-            case .done: EnsembleLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
-            case .refused(let why): self.refuse("Not sent: \(why)")
-            case .unknown(let why): self.lastSpoken = nil; self.refuse("Not sent: \(why)")
-            }
-        }
-    }
-
     private func scroll(_ dy: Double) {
-        guard dy.isFinite, pendingSend == nil, commonRefusal() == nil else { return }
+        guard dy.isFinite, commonRefusal() == nil else { return }
         let session: ClaudeSession
         if let s = scrollSession { session = s.session } else if let t = listeningSession ?? target { session = t } else { return }
         if scrollSession == nil { EnsembleLog.write("scroll started") }
@@ -823,7 +785,7 @@ final class Coordinator: AppCoordinating {
     /// keeping its text unsent (switching sessions in Claude while recording would discard it).
     private func lookedAt(_ session: ClaudeSession) {
         // Coming back to the session that already has focus (after the target dropped for a moment) is not a
-        // switch: no focus call, no glow.
+        // switch: no focus call.
         if session.id == lastFocusedId, NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.hasPrefix("com.anthropic.claudefordesktop") == true {
             pendingFocus = nil
             return
@@ -841,7 +803,6 @@ final class Coordinator: AppCoordinating {
             endTalk(reason: "looked at another session")
             return
         }
-        overlay.flashArrival(session.frame)
         lastFocusedId = session.id
         EnsembleLog.write("focus moved to a session")
         Task {
@@ -900,7 +861,6 @@ final class Coordinator: AppCoordinating {
     /// tail wait), and forget anything that was about to act. The text stays; nothing is sent.
     private func interrupt(_ reason: String) {
         EnsembleLog.write("interrupt: \(reason)")
-        pendingSend = nil; state.countdown = nil
         sendAfterStop = false; focusAfterStop = nil; pendingFocus = nil
         lastSpoken = nil
         cancelScroll()
@@ -983,7 +943,6 @@ final class Coordinator: AppCoordinating {
         if listeningSession != nil { endTalk(reason: "screens changed") }
         if state.calibrating { CalibrationController.shared.cancel() }
         cancelScroll()
-        pendingSend = nil
         target = nil
         updateStatus()
     }
@@ -1004,7 +963,7 @@ final class Coordinator: AppCoordinating {
 
     private func refuse(_ why: String, title: String? = nil) {
         state.lastRefusal = why
-        if gestureShowing || pendingSend != nil || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
+        if gestureShowing || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
             let sendRelated = why.hasPrefix("Send") || why.hasPrefix("Not sent")
             let body = why.hasPrefix("Not sent: ") ? String(why.dropFirst("Not sent: ".count)) : why
             overlay.showBanner(title: title ?? (sendRelated ? "Not sent" : "Nothing done"), body: body.prefix(1).uppercased() + body.dropFirst(), style: .refused, seconds: 2.5)
@@ -1069,7 +1028,7 @@ final class Coordinator: AppCoordinating {
         }
         overlay.setSession(name: acting.map(name(of:)), switching: switching)
         overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
-                       countdown: state.countdown, showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
+                       showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         updateStatus()
     }
 }
