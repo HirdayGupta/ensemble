@@ -14,7 +14,6 @@ final class SettingsStore: ObservableObject {
         static let sendCountdownSeconds = "sendCountdownSeconds"
         static let pointerSmoothing = "pointerSmoothing"
         static let playSounds = "playSounds"
-        static let launchAtLogin = "launchAtLogin"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
@@ -64,6 +63,7 @@ final class SettingsStore: ObservableObject {
         showHighlight = bool(Key.showHighlight, true)
         cameraName = store.string(forKey: Key.cameraName)
         playSounds = bool(Key.playSounds, true)
+        LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
@@ -89,7 +89,6 @@ final class SettingsStore: ObservableObject {
             launchAtLoginError = "Could not change open at login: \(error.localizedDescription)"
         }
         launchAtLogin = LoginAgent.isEnabled
-        defaults.set(launchAtLogin, forKey: Key.launchAtLogin)
     }
 
     func assign(_ pose: Pose?, to slot: GestureSlot) {
