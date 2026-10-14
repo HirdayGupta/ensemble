@@ -8,13 +8,14 @@ import Foundation
 /// A static hand pose, per frame. Produced by the Sleight classifier (Vendor/Sleight).
 public enum Pose: String, Codable, CaseIterable, Sendable {
     case fist, openPalm, thumbsUp, twoFingers
+    case pointUp, pointDown                 // index finger out, the other three curled, pointing up or down
 }
 
 /// One camera frame's hand reading. `present == false` means no hand was found.
 public struct HandObservation: Sendable {
     public var t: TimeInterval            // seconds, monotonic (CACurrentMediaTime)
     public var present: Bool
-    public var pose: Pose?                // nil = a hand that is not one of the four poses (or gated out)
+    public var pose: Pose?                // nil = a hand that is not one of the known poses (or gated out)
     public var palmCenter: CGPoint?       // normalized image coords, origin bottom-left, 0...1
     public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?) {
         self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter
@@ -43,11 +44,44 @@ public struct FrameLight: Sendable {
 
 /// Which pose does what. User-configurable.
 public struct GestureMapping: Codable, Equatable, Sendable {
-    public var talk: Pose = .fist           // hold to dictate
-    public var send: Pose? = .thumbsUp      // nil = sending by gesture is off
-    public var scroll: Pose? = .twoFingers  // nil = scrolling by gesture is off
-    public var cancel: Pose = .openPalm     // cancels a pending send
+    public var talk: Pose = .fist               // hold to dictate
+    public var send: Pose? = .thumbsUp          // nil = sending by gesture is off
+    public var scrollUp: Pose? = .pointUp       // nil = scrolling up by gesture is off; held, scrolls continuously
+    public var scrollDown: Pose? = .pointDown   // nil = scrolling down by gesture is off
+    public var cancel: Pose = .openPalm         // cancels a pending send
     public init() {}
+
+    private enum CodingKeys: String, CodingKey { case talk, send, scrollUp, scrollDown, cancel, scroll }
+
+    /// Settings saved before pointing scroll have a single `scroll` key (a pose, or null when it was off).
+    /// They get the pointing defaults, or both directions off when scrolling was off.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = GestureMapping()
+        talk = try c.decodeIfPresent(Pose.self, forKey: .talk) ?? d.talk
+        cancel = try c.decodeIfPresent(Pose.self, forKey: .cancel) ?? d.cancel
+        send = c.contains(.send) ? try c.decode(Pose?.self, forKey: .send) : d.send
+        if c.contains(.scrollUp) || c.contains(.scrollDown) {
+            scrollUp = c.contains(.scrollUp) ? try c.decode(Pose?.self, forKey: .scrollUp) : d.scrollUp
+            scrollDown = c.contains(.scrollDown) ? try c.decode(Pose?.self, forKey: .scrollDown) : d.scrollDown
+        } else if c.contains(.scroll), try c.decode(Pose?.self, forKey: .scroll) == nil {
+            scrollUp = nil
+            scrollDown = nil
+        } else {
+            scrollUp = d.scrollUp
+            scrollDown = d.scrollDown
+        }
+    }
+
+    /// Writes nil as an explicit null so "off" survives a round trip.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(talk, forKey: .talk)
+        try c.encode(send, forKey: .send)
+        try c.encode(scrollUp, forKey: .scrollUp)
+        try c.encode(scrollDown, forKey: .scrollDown)
+        try c.encode(cancel, forKey: .cancel)
+    }
 }
 
 /// What the gesture state machine asks for. The coordinator applies the safety guards before acting.
@@ -56,7 +90,7 @@ public enum GestureIntent: Equatable, Sendable {
     case talkEnded(TalkEndReason)
     case sendRequested
     case cancelRequested
-    case scroll(dy: Double)                 // positive = scroll down the transcript
+    case scroll(dy: Double)                 // points for this frame; negative = up the transcript, positive = down
 }
 
 public enum TalkEndReason: String, Sendable { case released, handLost, stale }
@@ -86,7 +120,7 @@ public enum BridgeResult: Equatable, Sendable {
 }
 
 /// What a held pose will do once its hold completes.
-public enum GestureAction: String, Sendable { case talk, send, cancel, scroll }
+public enum GestureAction: String, Sendable { case talk, send, cancel, scrollUp, scrollDown }
 
 /// A pose being held right now: `progress` fills from 0 to 1 over the hold; `willAct` is false when this hold
 /// cannot fire (for example a fist that arrived already closed); `active` is true while it is acting (dictating, scrolling).

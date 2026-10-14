@@ -61,7 +61,7 @@ private struct GestureSettings: View {
     var body: some View {
         Form {
             Section {
-                ForEach([GestureSlot.talk, .send, .scroll], id: \.self) { slot in
+                ForEach([GestureSlot.talk, .send, .scrollUp, .scrollDown], id: \.self) { slot in
                     GestureRow(slot: slot, pose: settings.mapping[slot]) {
                         Picker(slot.title, selection: Binding(
                             get: { settings.mapping[slot] },

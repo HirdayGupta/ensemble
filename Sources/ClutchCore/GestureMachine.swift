@@ -19,13 +19,13 @@ public final class GestureMachine {
     static let stopAndSendHold = 0.35
     static let sendAfterTalkEnd = 0.5
     static let cancelHold = 0.3
-    static let scrollHold = 0.2
+    static let scrollHold = 0.25
 
-    // Scroll: palm speed in frame-heights per second. Above the deadzone the excess is integrated
-    // and scaled so a brisk 0.3-frame motion over ~0.5 s scrolls about 600 points.
-    static let scrollDeadzone = 0.1
-    static let scrollPointsPerFrameHeight = 2400.0
-    static let scrollSmoothing = 0.5
+    // Scroll: while a pointing pose is held, each frame scrolls speed * frame time. The speed ramps from
+    // `scrollMinSpeed` to `scrollMaxSpeed` points per second over `scrollRamp` seconds of scrolling.
+    static let scrollMinSpeed = 300.0
+    static let scrollMaxSpeed = 1200.0
+    static let scrollRamp = 1.5
     static let scrollMaxGap = 0.2
 
     /// A continuous stretch of one pose. `startedWhileTalking` taints it for send/cancel so the pose
@@ -36,9 +36,7 @@ public final class GestureMachine {
         var startedWhileTalking: Bool
         var armed: Bool
         var fired = false
-        var lastPalm: CGPoint?
         var lastT: TimeInterval
-        var velocity = 0.0
     }
 
     private var run: Run?
@@ -64,9 +62,9 @@ public final class GestureMachine {
         if talking { return nil }
         if r.pose == mapping.send { return make(.send, Self.sendHold, !r.startedWhileTalking && !r.fired) }
         if r.pose == mapping.cancel { return make(.cancel, Self.cancelHold, !r.startedWhileTalking && !r.fired) }
-        if r.pose == mapping.scroll {
-            let p = make(.scroll, Self.scrollHold, true)
-            return GestureProgress(pose: p.pose, action: .scroll, progress: p.progress, willAct: true, active: p.progress >= 1)
+        if let direction = scrollDirection(r.pose) {
+            let p = make(direction < 0 ? .scrollUp : .scrollDown, Self.scrollHold, !r.startedWhileTalking)
+            return GestureProgress(pose: p.pose, action: p.action, progress: p.progress, willAct: p.willAct, active: p.willAct && p.progress >= 1)
         }
         return nil
     }
@@ -107,7 +105,7 @@ public final class GestureMachine {
 
         if run?.pose != pose {
             let armed = pose == mapping.talk && (lastOtherPresentT.map { h.t - $0 <= Self.talkArmWindow } ?? false)
-            run = Run(pose: pose, start: h.t, startedWhileTalking: talking, armed: armed, lastPalm: h.palmCenter, lastT: h.t)
+            run = Run(pose: pose, start: h.t, startedWhileTalking: talking, armed: armed, lastT: h.t)
         }
         trackRelease(isTalkPose: pose == mapping.talk, at: h.t, into: &intents)
         guard var r = run else { return intents }
@@ -131,11 +129,15 @@ public final class GestureMachine {
             } else if pose == mapping.cancel, !r.startedWhileTalking, !r.fired, held >= Self.cancelHold {
                 r.fired = true
                 intents.append(.cancelRequested)
-            } else if pose == mapping.scroll {
-                if let dy = scrollDelta(&r, h: h, held: held) { intents.append(.scroll(dy: dy)) }
+            } else if let direction = scrollDirection(pose), !r.startedWhileTalking, held >= Self.scrollHold {
+                let dt = h.t - r.lastT
+                if dt > 0, dt <= Self.scrollMaxGap {
+                    let ramp = min((held - Self.scrollHold) / Self.scrollRamp, 1)
+                    let speed = Self.scrollMinSpeed + (Self.scrollMaxSpeed - Self.scrollMinSpeed) * ramp
+                    intents.append(.scroll(dy: direction * speed * dt))
+                }
             }
         }
-        r.lastPalm = h.palmCenter ?? r.lastPalm
         r.lastT = h.t
         run = r
         return intents
@@ -169,14 +171,10 @@ public final class GestureMachine {
         intents.append(.talkEnded(reason))
     }
 
-    private func scrollDelta(_ r: inout Run, h: HandObservation, held: TimeInterval) -> Double? {
-        guard let palm = h.palmCenter, let prev = r.lastPalm else { return nil }
-        let dt = h.t - r.lastT
-        guard dt > 0, dt <= Self.scrollMaxGap else { return nil }
-        let instant = Double(palm.y - prev.y) / dt
-        r.velocity += Self.scrollSmoothing * (instant - r.velocity)
-        guard held >= Self.scrollHold, abs(r.velocity) > Self.scrollDeadzone else { return nil }
-        let excess = abs(r.velocity) - Self.scrollDeadzone
-        return (r.velocity > 0 ? 1 : -1) * excess * dt * Self.scrollPointsPerFrameHeight
+    /// -1 for the scroll-up pose, +1 for scroll-down, nil for any other pose.
+    private func scrollDirection(_ pose: Pose) -> Double? {
+        if pose == mapping.scrollUp { return -1 }
+        if pose == mapping.scrollDown { return 1 }
+        return nil
     }
 }

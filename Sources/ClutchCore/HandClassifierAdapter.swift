@@ -13,6 +13,8 @@ public enum HandClassifierAdapter {
         case .fist: return .fist
         case .twoFingers: return .twoFingers
         case .thumbsUp: return .thumbsUp
+        case .pointUp: return .pointUp
+        case .pointDown: return .pointDown
         case .swipeLeft, .swipeRight, .none: return nil
         }
     }

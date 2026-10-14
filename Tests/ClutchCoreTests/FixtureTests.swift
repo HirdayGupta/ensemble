@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct FixtureTests {
     private func gestureIntents(_ name: String) throws -> [(t: TimeInterval, intent: GestureIntent)] {
-        try FixtureReplay.intents(name).filter { if case .scroll = $0.intent { return false }; return true }
+        try FixtureReplay.intents(name)
     }
 
     @Test func fistHoldProducesBeganEndedPairs() throws {
@@ -46,10 +46,9 @@ import Testing
         #expect(!intents.contains(.sendRequested))
     }
 
-    @Test func twoFingersHoldScrollsAndNeitherTalksNorSends() throws {
+    @Test func twoFingersHoldNeitherScrollsTalksNorSends() throws {
         let intents = try gestureIntents("twoFingers-hold").map(\.intent)
-        #expect(!intents.contains(.talkBegan))
-        #expect(!intents.contains(.sendRequested))
+        #expect(intents.isEmpty, "\(intents)")
     }
 
     @Test(arguments: [("fist-hold", Pose.fist), ("thumbsUp-hold", Pose.thumbsUp),

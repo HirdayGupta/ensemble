@@ -3,6 +3,7 @@ import Vision
 
 public enum Gesture: String, CaseIterable {
     case openPalm, fist, twoFingers, thumbsUp
+    case pointUp, pointDown      // Clutch change: index finger out, pointing up or down
     case swipeLeft, swipeRight   // dynamic, produced by SwipeDetector
 
     public var isSwipe: Bool { self == .swipeLeft || self == .swipeRight }
@@ -20,6 +21,7 @@ public struct HandFeatures {
     public var upright: CGFloat         // middle knuckle above the wrist, in palm lengths; see `minUpright`
     public var tooSmall: Bool           // pose rejected because the hand is too far away
     public var angled: Bool             // pose rejected because the palm does not face the camera or points down
+    public var indexRise: CGFloat = 0   // Clutch change: index tip above its MCP, in palm lengths (negative = pointing down)
     public var thumb: Bool { thumbStraight && thumbClear }
     public var extendedCount: Int { [index, middle, ring, little].filter { $0 }.count }
     /// Enough fingers extended to count as an open hand; swipes only track open hands.
@@ -86,6 +88,12 @@ public struct GestureClassifier {
     /// a fifth of the idle fixture's hands do too.
     static let minUpright: CGFloat = 0.3
 
+    /// Clutch change: pointing. Index extended, middle/ring/little curled, thumb ignored. The index tip must sit
+    /// at least this many palm lengths above (pointUp) or below (pointDown) its MCP in the image, otherwise the
+    /// finger points at the camera or sideways and there is no pose. Exempt from `minUpright` (a hand pointing
+    /// down is not upright), but not from the extent floor or the span gate.
+    static let pointMinRise: CGFloat = 0.5
+
     public func classify(_ hand: Hand) -> Gesture? { features(hand)?.gesture }
 
     public func features(_ hand: Hand) -> HandFeatures? {
@@ -103,6 +111,7 @@ public struct GestureClassifier {
               let middle = reach(tip: .middleTip, pip: .middlePIP),
               let ring = reach(tip: .ringTip, pip: .ringPIP),
               let little = reach(tip: .littleTip, pip: .littlePIP),
+              let indexTip = hand[.indexTip],
               let thumbTip = hand[.thumbTip], let thumbIP = hand[.thumbIP],
               let indexMCP = hand[.indexMCP], let littleMCP = hand[.littleMCP]
         else { return nil }
@@ -121,6 +130,7 @@ public struct GestureClassifier {
                              thumbUp: thumbTip.y > indexMCP.y + 0.3 * size,
                              extent: hand.extent, palm: size, span: dist(indexMCP, littleMCP) / size,
                              upright: (midMCP.y - wrist.y) / size, tooSmall: false, angled: false)
+        f.indexRise = (indexTip.y - indexMCP.y) / size
         let n = f.extendedCount
         // Open palm ignores the thumb: a relaxed palm keeps it alongside the index (measured
         // 0.26–0.47 hand-widths from the index MCP, same range as a fist), so it carries no signal.
@@ -128,11 +138,15 @@ public struct GestureClassifier {
         else if f.curled == 4 && !f.thumb && tipReach < (f.extent >= Self.closeFistExtent ? Self.closeFistTipReach : Self.fistTipReach) { f.gesture = .fist }
         else if ext[0] && ext[1] && curl[2] && curl[3] { f.gesture = .twoFingers }
         else if f.curled == 4 && f.thumb && f.thumbUp { f.gesture = .thumbsUp }
+        else if ext[0] && curl[1] && curl[2] && curl[3] {
+            if f.indexRise > Self.pointMinRise { f.gesture = .pointUp }
+            else if f.indexRise < -Self.pointMinRise { f.gesture = .pointDown }
+        }
 
         if let g = f.gesture {
             let floor = (g == .openPalm || g == .twoFingers) ? minOpenExtent : minClosedExtent
             if f.extent < floor { f.tooSmall = true; f.gesture = nil }
-            else if (g != .thumbsUp && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || f.upright < Self.minUpright { f.angled = true; f.gesture = nil }
+            else if (g != .thumbsUp && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || (f.upright < Self.minUpright && g != .pointUp && g != .pointDown) { f.angled = true; f.gesture = nil }
         }
         return f
     }
