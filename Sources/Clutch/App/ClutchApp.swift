@@ -10,7 +10,7 @@ struct ClutchApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuPanelView(state: env.state, settings: env.settings, actions: env.panelActions)
+            MenuPanelView(state: env.state, settings: env.settings, updates: env.updates, actions: env.panelActions)
         } label: {
             Image(nsImage: icon.image)
         }

@@ -4,6 +4,7 @@ struct PanelActions {
     var calibrate: () -> Void
     var openSettings: () -> Void
     var clearAndDisarm: () -> Void
+    var checkForUpdates: () -> Void
     var quit: () -> Void
 }
 
@@ -11,6 +12,7 @@ struct PanelActions {
 struct MenuPanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var updates: UpdateController
     let actions: PanelActions
 
     var body: some View {
@@ -106,6 +108,13 @@ struct MenuPanelView: View {
             Button(role: .destructive) { actions.clearAndDisarm() } label: {
                 Label("Clear and disarm", systemImage: "xmark.circle").frame(maxWidth: .infinity)
             }
+            HStack {
+                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { actions.checkForUpdates() }
+                    .buttonStyle(.plain).font(.callout).foregroundStyle(updates.availableVersion == nil ? .secondary : .primary)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
             HStack {
                 Text("⌥⌘K shows this panel").font(.caption).foregroundStyle(.tertiary)
                 Spacer()

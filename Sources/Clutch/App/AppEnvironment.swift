@@ -12,23 +12,25 @@ final class AppEnvironment {
     let settings = SettingsStore()
     let overlay = OverlayController()
     let notifier = Notifier.shared
+    let updates = UpdateController()
 
     private(set) lazy var coordinator: AppCoordinating = makeCoordinator(state: state, settings: settings, overlay: overlay)
     private(set) lazy var panelActions = PanelActions(
         calibrate: { [weak self] in self?.dismissMenuPanel(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
         clearAndDisarm: { [weak self] in self?.coordinator.clearAndDisarm() },
+        checkForUpdates: { [weak self] in self?.dismissMenuPanel(); self?.updates.checkForUpdates() },
         quit: { NSApp.terminate(nil) }
     )
     private(set) lazy var floatingPanel = FloatingPanelController { [unowned self] in
         AnyView(
-            MenuPanelView(state: state, settings: settings, actions: floatingActions)
+            MenuPanelView(state: state, settings: settings, updates: updates, actions: floatingActions)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(.white.opacity(0.12)))
         )
     }
     private(set) lazy var settingsWindow = SettingsWindowController { [unowned self] in
-        AnyView(SettingsView(state: state, settings: settings, calibrate: { [weak self] in self?.coordinator.calibrate() }))
+        AnyView(SettingsView(state: state, settings: settings, updates: updates, calibrate: { [weak self] in self?.coordinator.calibrate() }))
     }
 
     private var hotKey: GlobalHotKey?
@@ -40,6 +42,7 @@ final class AppEnvironment {
             calibrate: { [weak self] in self?.floatingPanel.hide(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
             clearAndDisarm: { [weak self] in self?.coordinator.clearAndDisarm() },
+            checkForUpdates: { [weak self] in self?.floatingPanel.hide(); self?.updates.checkForUpdates() },
             quit: { NSApp.terminate(nil) }
         )
     }
