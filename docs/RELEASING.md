@@ -9,7 +9,8 @@ How a release is built, signed, notarized, published, and delivered to installed
 | `scripts/bundle.sh` | Builds the release binary, assembles `build/Ensemble.app` with Sparkle inside, signs it. Local identity by default; `ENSEMBLE_SIGN_IDENTITY="Developer ID Application: ..."` switches to hardened runtime + secure timestamp + `Sources/Ensemble/Ensemble.entitlements`. |
 | `scripts/release.sh` | Runs `bundle.sh`, optionally notarizes and staples the app, builds `build/Ensemble-<version>.dmg` with `hdiutil` (app plus an Applications shortcut), signs/notarizes/staples the DMG, writes the `.sha256`, prints a summary. `--dry-run` prints the Apple-service commands instead of running them. |
 | `scripts/appcast.sh` | Adds a DMG to the Sparkle appcast with Sparkle's `generate_appcast`; refuses to write an appcast whose items lack an EdDSA signature. |
-| `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release, update the appcast on the `gh-pages` branch. |
+| `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release with `gh release create`, update the appcast on the `gh-pages` branch. Hardened like the other workflows (no default permissions, actions pinned to commit SHAs, no stored checkout credentials). Stays disabled on the repository until Developer ID signing exists. |
+| `.github/workflows/ci.yml`, `hygiene.yml` | On every pull request and push to `main`: `ci` builds in release mode, runs the tests and the repository's network and size checks; `hygiene` runs zizmor, pinact and a secrets scan over the whole history. Neither signs or publishes. |
 | `Sources/Ensemble/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
 
 Log of the last `release.sh` run: `/tmp/ensemble-release.log`.
@@ -70,6 +71,14 @@ A DMG made with the local identity opens on this Mac only. Gatekeeper rejects it
 5. Tags with a dash (`v0.2.0-beta.1`) publish a pre-release and are not added to the appcast.
 
 If the workflow fails after the GitHub Release is created (for example the appcast push), fix the cause and re-run the failed job; do not move the tag.
+
+## What CI does not build
+
+`ci.yml` does not run `scripts/bundle.sh`: the script exits when the keychain holds no code-signing identity, and a hosted runner has none. A bundle step in CI would need `bundle.sh` to accept `ENSEMBLE_SIGN_IDENTITY=-` as an explicit ad-hoc mode (skip the identity lookup and the designated-requirement file, run `codesign --sign -` on the same nested-code order). The ad-hoc output would be a build check only and must never be uploaded, since every ad-hoc build is a new identity. Until then, `swift build -c release` in CI proves the code compiles and the Mac that cuts a release proves the bundle.
+
+Every action in the workflows is pinned to a commit SHA with the version in a trailing comment, and Dependabot proposes the bumps weekly. A bump pull request must pass `ci` and `hygiene`, which includes `pinact` checking that each SHA is the commit its comment names. To pin by hand: `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
+
+The secrets listed under "One-time setup" are the only ones any workflow reads beyond the built-in token. They are recorded as owner opt-ins in `.ossemble/state.json`, with the reason for each.
 
 ## How updates reach users
 
