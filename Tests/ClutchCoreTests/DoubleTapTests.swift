@@ -127,8 +127,19 @@ import Testing
         var path: [(Double, Double)] = []
         for k in 1...40 { path.append((0.5 + (k % 2 == 0 ? 0.01 : -0.01), 0.5 + Double(k) * 0.004 + (k % 3 == 0 ? -0.006 : 0))) }
         let out = run(path)
-        #expect(!out.isEmpty)
-        #expect(out.allSatisfy { $0 > 0 })
+        #expect(out.reduce(0, +) > 0)                                   // net: upward
+        let up: Double = out.filter { $0 > 0 }.reduce(0, +)
+        let down: Double = -out.filter { $0 < 0 }.reduce(0, +)
+        #expect(up > 3 * down)
+    }
+
+    @Test func upThenDownPastTheStartEndsBelowWhereItBegan() {
+        var path: [(Double, Double)] = []
+        for k in 1...20 { path.append((0.5, 0.5 + Double(k) * 0.005)) }      // up 0.1
+        for k in 1...40 { path.append((0.5, 0.6 - Double(k) * 0.005)) }      // down 0.2: 0.1 below the start
+        let out = run(path)
+        let total = out.reduce(0, +)
+        #expect(total < 0)                                               // net displacement is downward
     }
 
     @Test func aClearMoveBackReverses() {

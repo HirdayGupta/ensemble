@@ -37,13 +37,6 @@ public final class GestureMachine {
     private var dragFilterX = OneEuroFilter(minCutoff: 1.0, beta: 2, dCutoff: 1)
     private var dragOriginX: Double?
     private var dragLastX: Double?
-    /// Direction of the current stroke, decided once from net vertical travel and then held: per-frame jitter
-    /// never flips it. Only a clear move back (`dragReverse` frame heights past the stroke's furthest point)
-    /// reverses it. 0 = not decided yet (nothing scrolls until it is).
-    private var dragSign = 0.0
-    private var dragExtremeY = 0.0
-    static let dragDecide = 0.025
-    static let dragReverse = 0.06
     public private(set) var isDragging = false
     /// A pinch is closed right now (tap, drag or hold in progress): the coordinator holds focus still meanwhile.
     public var pinchHeld: Bool { pinchIsClosed }
@@ -271,7 +264,6 @@ public final class GestureMachine {
             dragOriginY = h.palmCenter.map { dragFilter.filter(Double($0.y), at: h.t) }
             dragOriginX = h.palmCenter.map { dragFilterX.filter(Double($0.x), at: h.t) }
             dragLastY = dragOriginY; dragLastX = dragOriginX
-            dragSign = 0
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
             // The second pinch acts the moment it touches; holding it afterwards changes nothing.
             if lastTapEnd != nil, h.t - lastToggleAt >= Self.toggleCooldown {
@@ -289,19 +281,15 @@ public final class GestureMachine {
                 if !dragging, hypot(x - originX, y - originY) >= Self.dragStart { dragging = true; isDragging = true; lastTapEnd = nil }
                 if dragging, let ly = dragLastY, let lx = dragLastX, let lt = dragLastT, h.t > lt {
                     let dy = y - ly, dx = (x - lx) * (640.0 / 480.0)   // frame is 4:3: put both axes in frame-height units
-                    let travel = hypot(dx, dy)
-                    if dragSign == 0 {
-                        let net = y - originY
-                        if abs(net) >= Self.dragDecide { dragSign = net > 0 ? 1 : -1; dragExtremeY = y }
-                    } else {
-                        // Track the furthest point in the stroke's direction; reverse only on a clear move back.
-                        if (y - dragExtremeY) * dragSign > 0 { dragExtremeY = y }
-                        else if (dragExtremeY - y) * dragSign >= Self.dragReverse { dragSign = -dragSign; dragExtremeY = y }
-                    }
-                    if travel > 0, dragSign != 0 {
-                        let speed = travel / (h.t - lt)                     // frame heights per second
+                    // Like dragging the page: each frame scrolls by the signed vertical move, so going up and then
+                    // back down past the start scrolls back past where it began. When the move is mainly vertical
+                    // the sideways part of an arc counts too (the full step length, signed by up or down); when it
+                    // is mainly sideways only its small vertical part counts, so sideways jitter cannot drive it.
+                    let step = abs(dy) >= 0.5 * abs(dx) ? (dy >= 0 ? 1.0 : -1.0) * hypot(dx, dy) : dy
+                    if step != 0 {
+                        let speed = abs(step) / (h.t - lt)                  // frame heights per second
                         let gain = 1 + Self.dragAccel * min(speed, 1)
-                        intents.append(.dragScroll(handDy: dragSign * travel * Self.dragPointsPerFrameHeight * gain))
+                        intents.append(.dragScroll(handDy: step * Self.dragPointsPerFrameHeight * gain))
                     }
                 }
                 dragLastT = h.t
