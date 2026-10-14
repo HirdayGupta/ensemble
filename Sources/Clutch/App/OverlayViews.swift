@@ -12,6 +12,9 @@ struct OverlayScreenView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if let a = model.arrival, let local = local(a.frame) {
+                ArrivalGlow(frame: local).id(a.id)
+            }
             if model.showHighlight || model.listening, let target = model.target, let local = local(target) {
                 HighlightView(frame: local, listening: model.listening)
                     .transition(.opacity)
@@ -20,7 +23,7 @@ struct OverlayScreenView: View {
             if model.listening, let nose = model.nose, let target = model.target, let local = local(target) {
                 EdgeIndicator(frame: local, toward: CGPoint(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY))
                     .animation(.linear(duration: 0.1), value: nose)
-            } else if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
+            } else if !Self.systemGlassDot, model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
                 GlassSphere()
                     .frame(width: 18, height: 18)
                     .shadow(color: .black.opacity(0.15), radius: 1.5, y: 0.5)
@@ -33,11 +36,14 @@ struct OverlayScreenView: View {
             }
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
-        .animation(.smooth(duration: 0.25), value: model.target)
+        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: model.target)
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
     }
+
+    /// On macOS 26 the dot is a separate Liquid Glass window (GlassDot), not drawn here.
+    static var systemGlassDot: Bool { if #available(macOS 26.0, *) { return true } else { return false } }
 
     /// The island sits on the screen holding the session in play, else on the primary screen.
     private var showsIsland: Bool {
@@ -49,6 +55,25 @@ struct OverlayScreenView: View {
     private func local(_ global: CGRect) -> CGRect? {
         guard global.intersects(screenFrame) else { return nil }
         return global.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
+    }
+}
+
+/// A soft blue glow that swells from slightly inside the session's frame out to it and fades: makes a session
+/// coming forward feel like a deliberate, smooth hand-off rather than a jump.
+private struct ArrivalGlow: View {
+    let frame: CGRect
+    @State private var shown = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        shape
+            .fill(Color.clutchBlue.opacity(shown ? 0 : 0.10))
+            .overlay(shape.strokeBorder(Color.clutchBlue.opacity(shown ? 0 : 0.9), lineWidth: shown ? 2 : 6))
+            .shadow(color: Color.clutchBlue.opacity(shown ? 0 : 0.6), radius: 24)
+            .frame(width: frame.width, height: frame.height)
+            .scaleEffect(shown ? 1 : 0.96)
+            .position(x: frame.midX, y: frame.midY)
+            .onAppear { withAnimation(.easeOut(duration: 0.55)) { shown = true } }
     }
 }
 

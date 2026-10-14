@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import ClutchCore
 
+struct Arrival: Equatable, Identifiable {
+    let id = UUID()
+    var frame: CGRect
+}
+
 struct OverlayBanner: Equatable, Identifiable {
     let id = UUID()
     var title: String
@@ -18,10 +23,12 @@ final class OverlayModel: ObservableObject {
     @Published var gesture: GestureProgress?
     @Published var showHighlight = true
     @Published var banner: OverlayBanner?
+    /// A session just brought forward or switched to: drawn as a soft glow that grows in and fades.
+    @Published var arrival: Arrival?
     @Published var cancelHint = "Show an open palm to cancel"
 
     var hasContent: Bool {
-        (showHighlight && target != nil) || (showNoseDot && nose != nil) || listening || countdown != nil || banner != nil
+        (showHighlight && target != nil) || (showNoseDot && nose != nil) || listening || countdown != nil || banner != nil || arrival != nil
     }
 }
 
@@ -50,21 +57,46 @@ final class OverlayController {
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
         syncPanels()
+        syncGlassDot()
+    }
+
+    private var glassDotStore: AnyObject?
+    /// On macOS 26 the dot is a separate glass window; the SwiftUI overlay skips drawing it there.
+    private func syncGlassDot() {
+        guard #available(macOS 26.0, *) else { return }
+        let dot = (glassDotStore as? GlassDot) ?? GlassDot()
+        glassDotStore = dot
+        let visible = !model.listening && (model.showNoseDot || model.gesture != nil)
+        dot.show(at: visible ? model.nose : nil)
     }
 
     /// Re-applies visibility toggles between coordinator updates.
     func setGesture(_ g: GestureProgress?) {
         setIfChanged(&model.gesture, g)
+        syncGlassDot()
     }
 
     func setVisibility(showNoseDot: Bool, showHighlight: Bool) {
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
         syncPanels()
+        syncGlassDot()
     }
 
     func setCancelHint(_ text: String) {
         setIfChanged(&model.cancelHint, text)
+    }
+
+    func flashArrival(_ frame: CGRect) {
+        let a = Arrival(frame: frame)
+        model.arrival = a
+        syncPanels()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let self, self.model.arrival?.id == a.id else { return }
+            self.model.arrival = nil
+            self.syncPanels()
+        }
     }
 
     func showBanner(title: String, body: String, seconds: Double = 5) {

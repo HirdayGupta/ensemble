@@ -331,7 +331,9 @@ final class Coordinator: AppCoordinating {
                     } else {
                         covered = nil
                         ClutchLog.write("raising Claude: nose rested on a covered session")
+                        overlay.flashArrival(hidden.frame)
                         Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 120_000_000)   // let the glow lead the window
                             let r = await self.bridge.focus(hidden)
                             let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
                             ClutchLog.write("raise result: \(r), frontmost now \(front)")
@@ -632,6 +634,7 @@ final class Coordinator: AppCoordinating {
             endTalk(reason: "looked at another session")
             return
         }
+        overlay.flashArrival(session.frame)
         Task { _ = await self.bridge.focus(session) }
     }
 
