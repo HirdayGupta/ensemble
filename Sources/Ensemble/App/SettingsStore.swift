@@ -201,8 +201,8 @@ extension GestureSlot {
 
     var detail: String {
         switch self {
-        case .talk: return "Hold to dictate into the session you are facing. Release to stop."
-        case .send: return "Sends the dictated draft after a countdown you can cancel."
+        case .talk: return "Pinch twice to dictate into the session you are facing. Pinch twice again to stop."
+        case .send: return "Hold to send the dictated draft after the hold time set under Sending."
         case .scrollUp: return "Hold to scroll the session up, faster the longer you hold."
         case .scrollDown: return "Hold to scroll the session down, faster the longer you hold."
         case .cancel: return "Stops a pending send before the countdown ends."
