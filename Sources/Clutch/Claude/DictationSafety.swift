@@ -13,10 +13,16 @@ final class DictationSafety: @unchecked Sendable {
     private let callbackLock = NSLock()
     private var alarmHandler: ((String) -> Void)?
     private var mutedHandler: ((Bool) -> Void)?
+    private var holdEndedHandler: ((String) -> Void)?
 
     var onAlarm: ((String) -> Void)? {
         get { callbackLock.lock(); defer { callbackLock.unlock() }; return alarmHandler }
         set { callbackLock.lock(); alarmHandler = newValue; callbackLock.unlock() }
+    }
+    /// The safety check ended the hold itself (no heartbeat, or Accessibility stalled); called on the main queue.
+    var onHoldEnded: ((String) -> Void)? {
+        get { callbackLock.lock(); defer { callbackLock.unlock() }; return holdEndedHandler }
+        set { callbackLock.lock(); holdEndedHandler = newValue; callbackLock.unlock() }
     }
     var onMuted: ((Bool) -> Void)? {
         get { callbackLock.lock(); defer { callbackLock.unlock() }; return mutedHandler }
@@ -186,6 +192,8 @@ final class DictationSafety: @unchecked Sendable {
     private func endHoldAndStop(_ reason: String) {
         holdActive = false
         holdEndedAt = Date()
+        let handler = onHoldEnded
+        DispatchQueue.main.async { handler?(reason) }
         beginStop(reason)
     }
 

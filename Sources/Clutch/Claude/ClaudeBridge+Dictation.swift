@@ -9,8 +9,13 @@ extension ClaudeBridge {
     private static let stopCooldown: TimeInterval = 2.5
 
     /// Brings Claude forward and puts the cursor in the session's composer. Never touches the pointer.
-    func focus(_ s: ClaudeSession) async -> BridgeResult {
-        await run { self.focusNow(s) }
+    /// With `unlessTypedWithin`, the check runs on the bridge queue right before Claude is raised, so a keystroke
+    /// or click that arrived while this call waited behind a slow Accessibility walk still wins.
+    func focus(_ s: ClaudeSession, unlessTypedWithin quiet: TimeInterval = 0) async -> BridgeResult {
+        await run {
+            if quiet > 0, Self.secondsSinceTypingOrClick() < quiet { return .refused("you just typed or clicked") }
+            return self.focusNow(s)
+        }
     }
 
     func focusNow(_ s: ClaudeSession) -> BridgeResult {

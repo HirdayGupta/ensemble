@@ -18,6 +18,15 @@ enum ScreenFacts {
         return nil
     }
 
+    /// True while the screen is locked, the screen saver runs, or another user's session owns the console:
+    /// nothing Clutch does then is something the person at the keyboard asked for.
+    static func sessionAway() -> Bool {
+        guard let info = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        if (info["CGSSessionScreenIsLocked"] as? Bool) == true { return true }
+        if let onConsole = info[kCGSessionOnConsoleKey as String] as? Bool, !onConsole { return true }
+        return false
+    }
+
     /// A stable description of the current screen arrangement (screen ids and frames).
     static func displayFingerprint() -> String {
         NSScreen.screens.map { s in
