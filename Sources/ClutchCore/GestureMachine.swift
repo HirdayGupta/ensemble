@@ -6,7 +6,17 @@ import Foundation
 public final class GestureMachine {
     public var mapping: GestureMapping
     public private(set) var talking = false
-    public var talkStyle: TalkStyle = .gatherBloom
+    public var talkStyle: TalkStyle = .doubleTap
+    /// doubleTap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
+    public var pinchClosed = 0.22
+    public var pinchOpen = 0.38
+    static let tapMax = 0.45           // longest a pinch may stay closed and still count as a tap
+    static let tapGap = 0.7            // second tap must close within this long after the first opened
+    static let toggleCooldown = 0.8
+    private var pinchIsClosed = false
+    private var pinchClosedAt: TimeInterval?
+    private var lastTapEnd: TimeInterval?
+    private var lastToggleAt: TimeInterval = -.infinity
     /// gatherBloom: after a start, the hand must first leave the talk pose (or the frame) before a stop counts.
     private var stopArmed = false
     /// gatherBloom: when the talk pose was last held long enough to begin a stop; an open hand soon after stops.
@@ -60,6 +70,10 @@ public final class GestureMachine {
 
     /// The pose currently held and how far its hold has progressed toward acting, for on-screen feedback.
     public var progress: GestureProgress? {
+        if talkStyle == .doubleTap {
+            if awaitingSecondTap { return GestureProgress(pose: .gather, action: talking ? .stop : .talk, progress: 0.5, willAct: true, active: false) }
+            if talking, run?.pose != mapping.send { return GestureProgress(pose: .gather, action: .talk, progress: 1, willAct: true, active: true) }
+        }
         guard let r = run else { return nil }
         let held = r.lastT - r.start
         func make(_ action: GestureAction, _ need: Double, _ can: Bool) -> GestureProgress {
@@ -69,7 +83,7 @@ public final class GestureMachine {
             if r.pose == mapping.talk && stopArmed { return make(.stop, Self.talkHold, true) }
             if r.pose == mapping.cancel, gatheredForStopAt != nil { return GestureProgress(pose: r.pose, action: .stop, progress: 1, willAct: true, active: true) }
         }
-        if r.pose == mapping.talk {
+        if r.pose == mapping.talk && talkStyle != .doubleTap {
             if talking { return GestureProgress(pose: r.pose, action: .talk, progress: 1, willAct: true, active: true) }
             return make(.talk, Self.talkHold, r.armed)
         }
@@ -85,6 +99,7 @@ public final class GestureMachine {
 
     public func reset() {
         talking = false
+        pinchIsClosed = false; pinchClosedAt = nil; lastTapEnd = nil
         stopArmed = false
         gatheredForStopAt = nil
         run = nil
@@ -98,12 +113,13 @@ public final class GestureMachine {
     public func push(_ h: HandObservation) -> [GestureIntent] {
         lastPushT = h.t
         var intents: [GestureIntent] = []
+        if talkStyle == .doubleTap { trackTaps(h, into: &intents) }
 
         guard h.present else {
             run = nil
             releaseStart = nil
             absentStart = absentStart ?? h.t
-            if talking, talkStyle == .gatherBloom {
+            if talking, talkStyle != .hold {
                 if let since = absentStart, h.t - since >= 0.3 { stopArmed = true }
             } else if talking, let since = absentStart, h.t - since >= Self.handLostHold {
                 endTalk(.handLost, at: h.t, into: &intents)
@@ -117,7 +133,7 @@ public final class GestureMachine {
 
         guard let pose else {
             run = nil
-            if talkStyle == .gatherBloom { if talking { stopArmed = true } } else { trackRelease(isTalkPose: false, at: h.t, into: &intents) }
+            if talkStyle == .gatherBloom { if talking { stopArmed = true } } else if talkStyle == .hold { trackRelease(isTalkPose: false, at: h.t, into: &intents) }
             return intents
         }
 
@@ -145,7 +161,7 @@ public final class GestureMachine {
             return intents
         }
 
-        if pose == mapping.talk {
+        if pose == mapping.talk && talkStyle != .doubleTap {
             if !talking, r.armed, held >= Self.talkHold {
                 talking = true
                 stopArmed = false
@@ -182,6 +198,37 @@ public final class GestureMachine {
         endTalk(.stale, at: now, into: &intents)
         return intents
     }
+
+    /// Two quick thumb-to-index taps toggle dictation. Taps are read from the pinch distance alone, so any hand
+    /// shape works; a pinch held longer than `tapMax` (holding something) never counts.
+    private func trackTaps(_ h: HandObservation, into intents: inout [GestureIntent]) {
+        guard h.present, let d = h.pinch else {
+            pinchIsClosed = false; pinchClosedAt = nil
+            return
+        }
+        if !pinchIsClosed, d < pinchClosed {
+            pinchIsClosed = true
+            pinchClosedAt = h.t
+            if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
+        } else if pinchIsClosed, d > pinchOpen {
+            pinchIsClosed = false
+            guard let start = pinchClosedAt else { return }
+            pinchClosedAt = nil
+            guard h.t - start <= Self.tapMax else { lastTapEnd = nil; return }
+            if let end = lastTapEnd, start - end <= Self.tapGap, h.t - lastToggleAt >= Self.toggleCooldown {
+                lastTapEnd = nil
+                lastToggleAt = h.t
+                if talking { endTalk(.released, at: h.t, into: &intents) } else { talking = true; intents.append(.talkBegan) }
+            } else {
+                lastTapEnd = h.t
+            }
+        } else if pinchIsClosed, let start = pinchClosedAt, h.t - start > Self.tapMax {
+            lastTapEnd = nil      // held pinch: not a tap
+        }
+    }
+
+    /// Feedback for the bubble: after one tap, the second tap is awaited.
+    public var awaitingSecondTap: Bool { talkStyle == .doubleTap && lastTapEnd != nil }
 
     private func trackRelease(isTalkPose: Bool, at t: TimeInterval, into intents: inout [GestureIntent]) {
         guard talking else { releaseStart = nil; return }

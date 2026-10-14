@@ -113,7 +113,7 @@ private struct IslandView: View {
                 SoundWaves(color: .teal).frame(width: 26, height: 16)
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
-                Text("gather, then open to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                Text("double-tap to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
             }
         case .countdown:
             if let c = model.countdown {

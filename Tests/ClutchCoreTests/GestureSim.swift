@@ -36,6 +36,17 @@ final class GestureSim {
         }
     }
 
+    /// Holds an unclassified hand with the thumb and index `pinch` palm lengths apart.
+    func pinch(_ pinch: Double, for duration: Double) {
+        for _ in 0..<Int((duration * fps).rounded()) {
+            record(machine.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: 0.5, y: 0.5), pinch: pinch)))
+            t += 1 / fps
+        }
+    }
+
+    /// One quick tap: open, closed briefly, open.
+    func tap(closedFor: Double = 0.15) { pinch(0.6, for: 0.1); pinch(0.1, for: closedFor); pinch(0.6, for: 0.1) }
+
     func absent(for duration: Double) {
         for _ in 0..<Int((duration * fps).rounded()) {
             record(machine.push(HandObservation(t: t, present: false, pose: nil, palmCenter: nil)))

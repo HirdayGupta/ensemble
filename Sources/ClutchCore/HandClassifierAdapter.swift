@@ -4,7 +4,12 @@ public enum HandClassifierAdapter {
     /// Maps one Sleight hand reading to a `HandObservation`. Swipes are not used by Clutch.
     public static func observation(from hand: Hand?, at t: TimeInterval, classifier: GestureClassifier) -> HandObservation {
         guard let hand else { return HandObservation(t: t, present: false, pose: nil, palmCenter: nil) }
-        return HandObservation(t: t, present: true, pose: pose(for: classifier.classify(hand)), palmCenter: hand.palmCenter)
+        var pinch: Double?
+        if let a = hand[.thumbTip], let b = hand[.indexTip], let w = hand[.wrist], let m = hand[.middleMCP] {
+            let palm = hypot(w.x - m.x, w.y - m.y)
+            if palm > 0.01 { pinch = Double(hypot(a.x - b.x, a.y - b.y) / palm) }
+        }
+        return HandObservation(t: t, present: true, pose: pose(for: classifier.classify(hand)), palmCenter: hand.palmCenter, pinch: pinch)
     }
 
     static func pose(for gesture: Gesture?) -> Pose? {

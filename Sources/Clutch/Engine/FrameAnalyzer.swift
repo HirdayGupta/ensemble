@@ -39,7 +39,10 @@ final class FrameAnalyzer: @unchecked Sendable {
                 f.gesture?.rawValue ?? "-", f.curled, f.extendedCount, f.tipReach, f.thumbStraight ? 1 : 0, f.thumbClear ? 1 : 0, f.thumbUp ? 1 : 0,
                 f.span, f.upright, f.extent, f.tooSmall ? 1 : 0, f.angled ? 1 : 0, h.points.count))
         }
-        return HandClassifierAdapter.observation(from: h, at: t, classifier: classifier)
+        let obs = HandClassifierAdapter.observation(from: h, at: t, classifier: classifier)
+        // While tuning the double tap: every frame where the fingertips are near each other.
+        if let p = obs.pinch, p < 0.5 { ClutchLog.write(String(format: "pinch: %.2f", p)) }
+        return obs
     }
 
     /// Mean and standard deviation of luma over a coarse grid of a BGRA frame.

@@ -17,8 +17,10 @@ public struct HandObservation: Sendable {
     public var present: Bool
     public var pose: Pose?                // nil = a hand that is not one of the four poses (or gated out)
     public var palmCenter: CGPoint?       // normalized image coords, origin bottom-left, 0...1
-    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?) {
-        self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter
+    /// Thumb tip to index tip distance in palm lengths (wrist to middle knuckle); nil when either tip is unseen.
+    public var pinch: Double?
+    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil) {
+        self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter; self.pinch = pinch
     }
 }
 
@@ -91,6 +93,7 @@ public enum GestureAction: String, Sendable { case talk, stop, send, cancel, scr
 
 /// How the talk pose controls dictation.
 public enum TalkStyle: String, Codable, Sendable {
+    case doubleTap     // two quick thumb-to-index taps start, two more stop; the hand may leave in between
     case gatherBloom   // the talk pose starts; the talk pose again then an open hand stops; the hand may leave in between
     case hold          // dictate only while the talk pose is held
 }
