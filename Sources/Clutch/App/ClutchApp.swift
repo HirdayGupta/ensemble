@@ -90,26 +90,27 @@ final class StatusIconModel: ObservableObject {
     /// dark menu bars.
     static func render(_ look: Look) -> NSImage {
         let attention = look == .attention
-        let size = NSSize(width: attention ? 24 : 18, height: 18)
+        let size = NSSize(width: attention ? 20 : 16, height: 18)
         let image = NSImage(size: size, flipped: true) { _ in
-            let r: CGFloat = 3.2
-            let centres = [CGPoint(x: 9, y: 5), CGPoint(x: 4.6, y: 12.6), CGPoint(x: 13.4, y: 12.6)]
+            // A small, airy formation: 70% of a full glyph, dots a further 10% smaller.
+            let r: CGFloat = 2.0
+            let centres = [CGPoint(x: 8, y: 6.2), CGPoint(x: 4.9, y: 11.5), CGPoint(x: 11.1, y: 11.5)]
             for (i, c) in centres.enumerated() {
                 let filled = look != .off && !attention
-                let rr = filled ? r + 0.3 : r
+                let rr = filled ? r + 0.2 : r
                 let path = NSBezierPath(ovalIn: NSRect(x: c.x - rr, y: c.y - rr, width: rr * 2, height: rr * 2))
                 if case .dictating(let bright) = look, i == 0 {
                     NSColor(Color.clutchBlue).withAlphaComponent(bright ? 1 : 0.4).setFill(); path.fill()
                 } else if filled {
                     NSColor.labelColor.setFill(); path.fill()
                 } else {
-                    NSColor.labelColor.setStroke(); path.lineWidth = 1.3; path.stroke()
+                    NSColor.labelColor.setStroke(); path.lineWidth = 1.0; path.stroke()
                 }
             }
             if attention {
                 NSColor.labelColor.setFill()
-                NSBezierPath(roundedRect: NSRect(x: 20.6, y: 3, width: 2, height: 8.5), xRadius: 1, yRadius: 1).fill()
-                NSBezierPath(ovalIn: NSRect(x: 20.5, y: 13, width: 2.2, height: 2.2)).fill()
+                NSBezierPath(roundedRect: NSRect(x: 16.4, y: 4.8, width: 1.6, height: 6), xRadius: 0.8, yRadius: 0.8).fill()
+                NSBezierPath(ovalIn: NSRect(x: 16.3, y: 12.2, width: 1.8, height: 1.8)).fill()
             }
             return true
         }
