@@ -34,6 +34,11 @@ final class Coordinator: AppCoordinating {
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
     private var candidate: (session: ClaudeSession?, since: TimeInterval)?
     private let switchDwell = 0.25
+    /// A Claude session the nose rests on while another app's window covers it; raised after `raiseDwell`.
+    private var covered: (id: String, since: TimeInterval)?
+    private let raiseDwell = 1.0
+    /// Session to focus once a dictation stop (caused by looking at it) completes.
+    private var focusAfterStop: ClaudeSession?
     private var listeningSession: ClaudeSession?
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
@@ -305,9 +310,20 @@ final class Coordinator: AppCoordinating {
             if under?.id == target?.id {
                 candidate = nil
             } else if let c = candidate, c.session?.id == under?.id {
-                if head.t - c.since >= switchDwell { target = under; candidate = nil }
+                if head.t - c.since >= switchDwell { target = under; candidate = nil; if let t = under { lookedAt(t) } }
             } else {
                 candidate = (under, head.t)
+            }
+            // A Claude session hidden behind another app's window: resting the nose on it brings Claude forward.
+            if under == nil, let hidden = sessions.first(where: { $0.frame.contains(p) }) {
+                if covered?.id != hidden.id { covered = (hidden.id, head.t) }
+                else if let c = covered, head.t - c.since >= raiseDwell, !busy, ClaudeBridge.secondsSinceUserInput() >= inputQuiet {
+                    covered = nil
+                    ClutchLog.write("raising Claude: nose rested on a covered session")
+                    Task { _ = await self.bridge.focus(hidden) }
+                }
+            } else {
+                covered = nil
             }
         } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 && head.faceCount == 0 {
             // face hidden for a moment (hand in front): keep the last target and dot
@@ -495,6 +511,10 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation stopped")
+                if let next = self.focusAfterStop {
+                    self.focusAfterStop = nil
+                    Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); _ = await self.bridge.focus(next) }
+                }
                 self.settings.lastClaudeVersion = self.bridge.claudeVersion
                 self.lastSpoken = (session, Date())
                 if self.sendAfterStop {
@@ -579,6 +599,20 @@ final class Coordinator: AppCoordinating {
         if let s = scrollSession { session = s.session } else if let t = target { session = t } else { return }
         scrollSession = (session, Date())
         bridge.scroll(session, dy: dy)
+    }
+
+    /// The nose settled on a different session. Focus follows it; a dictation running elsewhere stops first,
+    /// keeping its text unsent (switching sessions in Claude while recording would discard it).
+    private func lookedAt(_ session: ClaudeSession) {
+        guard !busy, ClaudeBridge.secondsSinceUserInput() >= inputQuiet else { return }
+        if let listening = listeningSession {
+            guard listening.id != session.id else { return }
+            focusAfterStop = session
+            refuse("Looked at another session; dictation stopped and kept")
+            endTalk(reason: "looked at another session")
+            return
+        }
+        Task { _ = await self.bridge.focus(session) }
     }
 
     // MARK: - Dot placement
