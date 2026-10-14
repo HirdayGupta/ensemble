@@ -14,6 +14,7 @@ final class SettingsStore: ObservableObject {
         static let sendCountdownSeconds = "sendCountdownSeconds"
         static let pointerSmoothing = "pointerSmoothing"
         static let reverseScroll = "reverseScroll"
+        static let liveSoundBars = "liveSoundBars"
         static let playSounds = "playSounds"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
@@ -34,6 +35,9 @@ final class SettingsStore: ObservableObject {
     @Published var pointerSmoothing: Double { didSet { defaults.set(pointerSmoothing, forKey: Key.pointerSmoothing) } }
     /// Flips pinch-and-drag scrolling relative to the Mac's own scroll direction.
     @Published var reverseScroll: Bool { didSet { defaults.set(reverseScroll, forKey: Key.reverseScroll) } }
+    /// Off by default: the listening sign is a blinking microphone dot and Clutch never asks for the microphone.
+    /// On: sound bars follow the voice level, which needs microphone permission.
+    @Published var liveSoundBars: Bool { didSet { defaults.set(liveSoundBars, forKey: Key.liveSoundBars) } }
     @Published var sendCountdownSeconds: Double {
         didSet {
             let clamped = min(max(sendCountdownSeconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
@@ -75,6 +79,7 @@ final class SettingsStore: ObservableObject {
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         reverseScroll = store.bool(forKey: Key.reverseScroll)
+        liveSoundBars = store.bool(forKey: Key.liveSoundBars)
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 0.75
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 

@@ -155,7 +155,11 @@ private struct IslandView: View {
             EmptyView()
         case .listening:
             HStack(spacing: 10) {
-                SoundWaves(color: .clutchBlue, level: model.audioLevel).frame(width: 26, height: 16)
+                if model.liveSoundBars {
+                    SoundWaves(color: .clutchBlue, level: model.audioLevel).frame(width: 26, height: 16)
+                } else {
+                    BlinkingMic()
+                }
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
                 Text("double pinch to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -261,6 +265,21 @@ private struct Wedge: Shape {
         p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+/// The default listening sign: a softly blinking blue circle with a microphone in it. Needs no permissions.
+private struct BlinkingMic: View {
+    @State private var on = false
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.clutchBlue.opacity(on ? 0.95 : 0.35))
+            Image(systemName: "mic.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+        }
+        .frame(width: 22, height: 22)
+        .shadow(color: Color.clutchBlue.opacity(on ? 0.8 : 0.2), radius: on ? 6 : 2)
+        .onAppear { withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { on = true } }
     }
 }
 

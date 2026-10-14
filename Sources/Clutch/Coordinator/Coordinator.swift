@@ -132,6 +132,12 @@ final class Coordinator: AppCoordinating {
 
         engine.onHand = { [weak self] in self?.handle(hand: $0) }
         meter.onLevel = { [weak self] v in self?.overlay.setAudioLevel(v) }
+        overlay.setLiveSoundBars(settings.liveSoundBars)
+        settings.$liveSoundBars.dropFirst().sink { [weak self] on in
+            guard let self else { return }
+            self.overlay.setLiveSoundBars(on)
+            if !on { self.meter.stop() } else if self.listeningSession != nil { self.meter.start() }
+        }.store(in: &cancellables)
         engine.onHead = { [weak self] in self?.handle(head: $0) }
         engine.onLight = { [weak self] in self?.handle(light: $0) }
         engine.onStatus = { [weak self] in self?.handle(status: $0) }
@@ -581,7 +587,7 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation started")
-                self.meter.start()
+                if self.settings.liveSoundBars { self.meter.start() }
                 self.listeningSince = CACurrentMediaTime()
                 self.holdInputDevice = self.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()

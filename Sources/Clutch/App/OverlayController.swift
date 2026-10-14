@@ -29,6 +29,8 @@ final class OverlayModel: ObservableObject {
     @Published var handsOnInput = false
     /// Live voice level 0...1 while listening (0 when unavailable).
     @Published var audioLevel = 0.0
+    /// Show live sound bars instead of the blinking microphone dot.
+    @Published var liveSoundBars = false
     @Published var cancelHint = "Show an open palm to cancel"
 
     var hasContent: Bool {
@@ -90,6 +92,8 @@ final class OverlayController {
     func setCancelHint(_ text: String) {
         setIfChanged(&model.cancelHint, text)
     }
+
+    func setLiveSoundBars(_ on: Bool) { setIfChanged(&model.liveSoundBars, on) }
 
     func setAudioLevel(_ v: Double) {
         model.audioLevel = v

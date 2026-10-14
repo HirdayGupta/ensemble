@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import ClutchCore
 
 struct SettingsView: View {
@@ -128,6 +129,18 @@ private struct DisplaySettings: View {
                         Text("Steady").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+            }
+            Section("Listening indicator") {
+                Toggle("Live sound bars (asks for microphone access)", isOn: Binding(get: { settings.liveSoundBars }, set: { on in
+                    settings.liveSoundBars = on
+                    if on, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                    }
+                }))
+                Text(settings.liveSoundBars
+                     ? "The bars follow how loudly you speak. Audio is never recorded, stored or sent."
+                     : "A blinking microphone shows Claude is listening. Clutch never uses the microphone.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Scrolling") {
                 Toggle("Reverse pinch-and-drag direction", isOn: $settings.reverseScroll)
