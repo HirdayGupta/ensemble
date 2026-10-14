@@ -104,6 +104,9 @@ final class Coordinator: AppCoordinating {
     /// Wait this long after the hand opens before stopping, so the last word is caught.
     private let stopTail = 0.4
     private static let staleHeadSeconds = 2.0
+    private static let sessionScanFaceWindow = 5.0
+    private static let sessionScanIdleInterval = 5.0
+    private var lastSessionScan: TimeInterval = 0
 
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
@@ -323,12 +326,16 @@ final class Coordinator: AppCoordinating {
     private func handle(head: HeadObservation) {
         latestHead = head
         faceCount = head.faceCount
-        if head.faceCount == 1 { lastOneFaceT = head.t }
+        if head.faceCount == 1 {
+            let returned = head.t - lastOneFaceT >= Self.sessionScanFaceWindow
+            lastOneFaceT = head.t
+            if returned { refreshSessions() }
+        }
 
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
-        if head.t - headStats.since >= 5 {
+        if head.t - headStats.since >= 30 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
-            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
+            ClutchLog.write("head: \(headStats.n) readings in 30 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
             headStats = (head.t, 0, [0, 0, 0])
         }
         guard !state.calibrating else { return }
@@ -505,6 +512,11 @@ final class Coordinator: AppCoordinating {
         }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
         guard !refreshInFlight, listeningSession == nil else { return }
+        // Nobody in front of the camera for 5 s: the window scan (which also costs Claude's own process) runs
+        // every 5 s instead of every second, and immediately when a face comes back.
+        let now = CACurrentMediaTime()
+        guard now - lastOneFaceT < Self.sessionScanFaceWindow || now - lastSessionScan >= Self.sessionScanIdleInterval else { return }
+        lastSessionScan = now
         refreshInFlight = true
         Task { @MainActor in
             defer { self.refreshInFlight = false }
