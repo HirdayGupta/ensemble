@@ -195,7 +195,8 @@ final class VisionEngine {
         let label = cameraLabel
         if hand == nil, light == nil, jpeg == nil, fps == nil { return }
 
-        DispatchQueue.main.async { [weak self] in
+        // Captured by value: older Swift compilers (6.0, 6.1) reject a captured `var` in this concurrently-executing closure.
+        DispatchQueue.main.async { [weak self, hand, light, jpeg, fps] in
             MainActor.assumeIsolated {
                 guard let self, self.isRunning, self.generation == mine else {
                     if jpeg != nil { self?.face.gate.leave() }
