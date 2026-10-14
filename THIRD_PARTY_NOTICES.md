@@ -5,7 +5,7 @@ Ensemble bundles the following third-party code and models. Each keeps its own l
 | Component | Where it lives | Author | License |
 |---|---|---|---|
 | MediaPipe Tasks Vision (JavaScript runtime and WebAssembly) | `Sources/Ensemble/Resources/web/vision_bundle.mjs`, `Sources/Ensemble/Resources/web/wasm/` | Google | Apache-2.0 |
-| MediaPipe Face Landmarker model (`face_landmarker.task`) | `Sources/Ensemble/Resources/web/face_landmarker.task` | Google | See the note below |
+| MediaPipe Face Landmarker model (`face_landmarker.task`) | `Sources/Ensemble/Resources/web/face_landmarker.task` | Google | Apache-2.0 |
 | Sleight (hand-pose classifier rules, adapted) | `Sources/EnsembleCore/Vendor/Sleight/` | Florian Riquelme | MIT |
 | claude-dictation-hotkey (approach to driving Claude's dictation) | `Sources/EnsembleCore/Vendor/LICENSE-claude-dictation-hotkey` | Rene Banuelos | MIT |
 | Sparkle 2.10.0 (update framework) | `Sparkle.framework` inside the app, fetched by Swift Package Manager | Sparkle Project and the contributors listed below | MIT, plus the bundled-code licenses listed below |
@@ -16,7 +16,7 @@ Apple's Vision, AVFoundation, WebKit and ApplicationServices frameworks are syst
 
 The runtime in `vision_bundle.mjs` and `wasm/` is built from the MediaPipe project, <https://github.com/google-ai-edge/mediapipe>, which is licensed under the Apache License, Version 2.0. The license text is at <https://www.apache.org/licenses/LICENSE-2.0>. The files were vendored from a MediaPipe release and are unmodified. The packaged app stores the larger ones LZMA-compressed (`scripts/pack-web.swift`) and expands them byte for byte when the page asks for them.
 
-## MediaPipe Face Landmarker model
+## MediaPipe Face Landmarker model (Apache-2.0)
 
 `face_landmarker.task` is the model package that Google publishes for the MediaPipe Face Landmarker task. Ensemble's copy holds two of the three models in Google's package, plus Google's face geometry file: the face detector (`face_detector.tflite`, BlazeFace short range) and the landmark model (`face_landmarks_detector.tflite`, Face Mesh V2). The third model, Blendshape V2 (`face_blendshapes.tflite`), was removed because Ensemble reads only head angles and the runtime does not load it; the remaining files are unchanged. The published model cards are:
 
@@ -24,7 +24,7 @@ The runtime in `vision_bundle.mjs` and `wasm/` is built from the MediaPipe proje
 - Face Mesh V2: <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf>
 - Blendshape V2 (not shipped): <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf>
 
-The Face Landmarker documentation page does not state a license for the model file itself, only for the page and its code samples. Not confirmed: the model cards were not read, because the build session that wrote this entry had no network access. TODO(owner): read the cards for BlazeFace and Face Mesh V2, confirm the license that applies to the model file, and replace this paragraph with the confirmed license name and text before the first public release.
+Both model cards state "LICENSED UNDER Apache License, Version 2.0" (read 2026-10-14 from the BlazeFace short-range card and the Face Mesh V2 card linked above). The license text is at <https://www.apache.org/licenses/LICENSE-2.0>.
 
 ## Sleight (MIT)
 
