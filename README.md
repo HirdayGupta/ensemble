@@ -84,7 +84,7 @@ Dictation controls a microphone, so the rule is: Claude's microphone is never le
 - **Standing check.** A timer verifies, even when nothing seems wrong, that Claude's microphone state matches what Clutch believes.
 - **Fallback.** If a stop cannot be confirmed, Clutch sounds an alarm and mutes the input device Claude is using, recording the change so it can be undone later.
 - **Quitting stops dictation** before the process exits.
-- **Dictation stops and gestures are refused** when you type or click, when more than one face is in view, when no face has been seen for 10 seconds, when the camera is covered, when another app starts using a microphone, or when the input device changes.
+- **Dictation stops and gestures are refused** when you type or click, when more than one face is in view, when no face has been seen for 10 seconds, when the camera is covered, when another app starts using a microphone, when the input device changes, when the Mac sleeps, the screen locks or the screen saver starts, or when Claude quits.
 - **Send is narrow.** It needs a non-empty draft, dictation that ended in the last 30 seconds, and no keyboard or mouse use since.
 
 ## Build from source

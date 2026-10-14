@@ -8,8 +8,11 @@ final class AudioLevelMeter {
     private var engine: AVAudioEngine?
     private var smoothed = 0.0
     var onLevel: ((Double) -> Void)?
+    /// False once `stop()` ran: a permission answer that arrives late must not switch the microphone on.
+    private var wanted = false
 
     func start() {
+        wanted = true
         guard engine == nil else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: begin()
@@ -22,6 +25,7 @@ final class AudioLevelMeter {
     }
 
     func stop() {
+        wanted = false
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
@@ -30,7 +34,7 @@ final class AudioLevelMeter {
     }
 
     private func begin() {
-        guard engine == nil else { return }
+        guard wanted, engine == nil else { return }
         let e = AVAudioEngine()
         let input = e.inputNode
         let format = input.outputFormat(forBus: 0)

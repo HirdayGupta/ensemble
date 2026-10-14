@@ -159,7 +159,12 @@ public final class GestureMachine {
         releaseStart = nil
     }
 
-    public func push(_ h: HandObservation) -> [GestureIntent] {
+    public func push(_ observation: HandObservation) -> [GestureIntent] {
+        // A non-finite reading is a missing reading: it must not reach the filters or the pinch hysteresis.
+        var h = observation
+        if let d = h.pinch, !d.isFinite { h.pinch = nil }
+        if let c = h.palmCenter, !(c.x.isFinite && c.y.isFinite) { h.palmCenter = nil }
+        guard h.t.isFinite else { return [] }
         lastPushT = h.t
         var intents: [GestureIntent] = []
         if h.present { presentSince = presentSince ?? h.t } else { presentSince = nil }

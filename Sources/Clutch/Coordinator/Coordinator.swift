@@ -101,6 +101,10 @@ final class Coordinator: AppCoordinating {
     private var calibratedCache: (value: Bool, at: TimeInterval)?
     private var claudeRunningCache: (value: Bool, at: TimeInterval)?
     private var listeningSince: TimeInterval = 0
+    /// Claude's process when the dictation began: a different (or missing) one later means the dictation is gone.
+    private var listeningPID: pid_t?
+    private var lastAwayCheck: TimeInterval = 0
+    private var lastScrollOwnerCheck: TimeInterval = 0
 
     /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
     private let inputQuiet = 1.5
@@ -155,7 +159,24 @@ final class Coordinator: AppCoordinating {
             Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
         }
         safety.onMuted = { [weak self] muted in self?.state.muted = muted }
+        safety.onHoldEnded = { [weak self] why in
+            MainActor.assumeIsolated {
+                guard let self, self.listeningSession != nil else { return }
+                self.refuse("The safety check stopped dictation (\(why))")
+                self.interrupt("safety check: \(why)")
+            }
+        }
         let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated { self?.interrupt("system: \(note.name.rawValue)") }
+            }
+        }
+        for name in ["com.apple.screenIsLocked", "com.apple.screensaver.didstart"] {
+            DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.interrupt("screen locked") }
+            }
+        }
         ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.sweep() }
         }
@@ -214,7 +235,9 @@ final class Coordinator: AppCoordinating {
         if listeningSession != nil { endTalk(reason: "turned off") }
         engine.stop()
         gestures.reset()
+        cancelScroll()
         pendingSend = nil
+        pendingFocus = nil; focusAfterStop = nil; sendAfterStop = false; lastSpoken = nil
         target = nil
         state.status = .off
         pushOverlay()
@@ -248,6 +271,7 @@ final class Coordinator: AppCoordinating {
         // gesture events are ignored while it runs and a held talk pose would never be seen released.
         pendingSend = nil; state.countdown = nil; sendAfterStop = false
         gestures.reset()
+        cancelScroll()
         if listeningSession != nil { endTalkWhenIdle(reason: "calibrating") }
         let fingerprint = ScreenFacts.displayFingerprint()
         let camera = state.cameraName
@@ -273,10 +297,10 @@ final class Coordinator: AppCoordinating {
         }
     }
 
-    private func endTalkWhenIdle(reason: String) {
+    private func endTalkWhenIdle(reason: String, immediate: Bool = false) {
         Task { @MainActor in
             for _ in 0..<30 where self.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
-            if self.listeningSession != nil { self.endTalk(reason: reason) }
+            if self.listeningSession != nil { self.endTalk(reason: reason, immediate: immediate) }
         }
     }
 
@@ -288,6 +312,7 @@ final class Coordinator: AppCoordinating {
         refreshTimer?.invalidate(); refreshTimer = nil
         bridge.beginShutdown()
         engine.stop()
+        cancelScroll()
         let session = listeningSession
         listeningSession = nil
         pendingSend = nil
@@ -384,7 +409,7 @@ final class Coordinator: AppCoordinating {
                         overlay.flashArrival(hidden.frame)
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 120_000_000)   // let the glow lead the window
-                            let r = await self.bridge.focus(hidden)
+                            let r = await self.bridge.focus(hidden, unlessTypedWithin: self.inputQuiet)
                             let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
                             ClutchLog.write("raise result: \(r), frontmost now \(front)")
                         }
@@ -424,6 +449,8 @@ final class Coordinator: AppCoordinating {
         if covered {
             if listeningSession != nil { endTalk(reason: "camera covered") }
             pendingSend = nil
+            sendAfterStop = false
+            cancelScroll()
             gestures.reset()
             Notifier.shared.notify(title: "Camera covered", body: "Gestures are off until the camera is uncovered.")
         }
@@ -470,12 +497,17 @@ final class Coordinator: AppCoordinating {
         if let s = scrollSession, pendingScroll != 0 {
             scrollRemaining += pendingScroll
             scrollVelocity = 0.7 * scrollVelocity + 0.3 * (pendingScroll * 20)     // the tick runs at 20 Hz
-            scrollTarget = CGPoint(x: s.session.frame.midX, y: s.session.frame.midY)
+            let frame = sessions.first { $0.id == s.session.id }?.frame ?? s.session.frame
+            scrollTarget = CGPoint(x: frame.midX, y: frame.midY)
             pendingScroll = 0
             startScrollLoop()
         }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
         let now = CACurrentMediaTime()
+        if now - lastAwayCheck >= 0.5 {
+            lastAwayCheck = now
+            if listeningSession != nil ? !busy : (scrollTimer != nil || pendingSend != nil), ScreenFacts.sessionAway() { interrupt("screen locked") }
+        }
         // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
         if listeningSession != nil, !busy, now - listeningSince > 1.5 {
             if ClaudeBridge.secondsSinceTypingOrClick() < 0.3 { refuse("Typing or a click; dictation stopped"); endTalk(reason: "input"); return }
@@ -520,8 +552,16 @@ final class Coordinator: AppCoordinating {
 
     private func refreshSessions() {
         checkPermissions()
-        guard bridge.claudeIsRunning() else {
-            sessions = []; target = nil; updateStatus(); return
+        let claudeUp = bridge.claudeIsRunning()
+        if listeningSession != nil, !busy, !claudeUp || bridge.claudePID != listeningPID {
+            // Claude quit (or restarted) during the dictation: its microphone went with it, so there is nothing left
+            // to stop. Leaving the flag set would keep the red marker up and feed the safety heartbeat forever.
+            ClutchLog.write("Claude quit or restarted during dictation; clearing the listening state")
+            dropListening()
+            refuse("Claude quit; dictation ended")
+        }
+        guard claudeUp else {
+            sessions = []; target = nil; candidate = nil; covered = nil; lastSpoken = nil; cancelScroll(); updateStatus(); return
         }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
         guard !refreshInFlight, listeningSession == nil else { return }
@@ -582,6 +622,7 @@ final class Coordinator: AppCoordinating {
     private func commonRefusal() -> String? {
         if !settings.enabled { return "Ensemble is off" }
         if cover.covered { return "Camera is covered" }
+        if ScreenFacts.sessionAway() { return "The screen is locked" }
         // The hand often covers the face as it rises: one face within the last 1.5 s counts. Two faces block only
         // when they persist: a stray two-face reading is a false alarm.
         let now = CACurrentMediaTime()
@@ -611,6 +652,7 @@ final class Coordinator: AppCoordinating {
         guard safety.episodeStarting(session: session) else { refuseStart("Could not write the safety record; not starting"); return }
         busy = true
         listeningSession = session
+        listeningPID = bridge.claudePID
         state.listening = true
         pushOverlay()
         Task { @MainActor in
@@ -639,11 +681,11 @@ final class Coordinator: AppCoordinating {
         }
     }
 
-    private func endTalk(reason: String) {
+    private func endTalk(reason: String, immediate: Bool = false) {
         guard let session = listeningSession, !busy else { return }
         busy = true
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(self.stopTail * 1e9))
+            if !immediate { try? await Task.sleep(nanoseconds: UInt64(self.stopTail * 1e9)) }
             let result = await self.bridge.stopDictation(session)
             self.busy = false
             self.listeningSession = nil
@@ -661,11 +703,12 @@ final class Coordinator: AppCoordinating {
                         try? await Task.sleep(nanoseconds: 400_000_000)
                         // Typing or a new dictation during the pause means the user is working here: do not move focus.
                         guard self.listeningSession == nil, !self.busy, ClaudeBridge.secondsSinceTypingOrClick() >= self.inputQuiet else { return }
-                        _ = await self.bridge.focus(next)
+                        _ = await self.bridge.focus(next, unlessTypedWithin: self.inputQuiet)
                     }
                 }
                 self.settings.lastClaudeVersion = self.bridge.claudeVersion
-                self.lastSpoken = (session, Date())
+                // An interrupted dictation (sleep, lock, safety stop) is never sent by a later thumbs-up.
+                if !immediate { self.lastSpoken = (session, Date()) }
                 if !self.sendAfterStop {
                     self.overlay.showBanner(title: "Dictation stopped", body: self.name(of: session), style: .stopped, seconds: 2.5)
                 }
@@ -715,7 +758,11 @@ final class Coordinator: AppCoordinating {
             case .done:
                 ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
                 self.overlay.showBanner(title: "Sent", body: self.name(of: session), style: .sent, seconds: 1.5)
-            case .refused(let why), .unknown(let why): self.refuse("Not sent: \(why)")
+            case .refused(let why): self.refuse("Not sent: \(why)")
+            case .unknown(let why):
+                // Send was pressed but not confirmed: a second thumbs-up must not press it again.
+                self.lastSpoken = nil
+                self.refuse("Not sent: \(why)")
             }
         }
     }
@@ -748,13 +795,14 @@ final class Coordinator: AppCoordinating {
             self.busy = false
             switch result {
             case .done: ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
-            case .refused(let why), .unknown(let why): self.refuse("Not sent: \(why)")
+            case .refused(let why): self.refuse("Not sent: \(why)")
+            case .unknown(let why): self.lastSpoken = nil; self.refuse("Not sent: \(why)")
             }
         }
     }
 
     private func scroll(_ dy: Double) {
-        guard pendingSend == nil, commonRefusal() == nil else { return }
+        guard dy.isFinite, pendingSend == nil, commonRefusal() == nil else { return }
         let session: ClaudeSession
         if let s = scrollSession { session = s.session } else if let t = listeningSession ?? target { session = t } else { return }
         if scrollSession == nil { ClutchLog.write("scroll started") }
@@ -788,7 +836,9 @@ final class Coordinator: AppCoordinating {
         overlay.flashArrival(session.frame)
         lastFocusedId = session.id
         ClutchLog.write("focus moved to a session")
-        Task { _ = await self.bridge.focus(session) }
+        Task {
+            if case .refused = await self.bridge.focus(session, unlessTypedWithin: self.inputQuiet) { self.lastFocusedId = nil }
+        }
     }
 
     private func startScrollLoop() {
@@ -812,10 +862,59 @@ final class Coordinator: AppCoordinating {
             scrollTimer?.invalidate(); scrollTimer = nil
             return
         }
+        // Every 0.15 s: the window under the scroll point must still be Claude's, or the page would scroll
+        // whatever another app has put there since the pinch began.
+        let now = CACurrentMediaTime()
+        if now - lastScrollOwnerCheck >= 0.15 {
+            lastScrollOwnerCheck = now
+            if ScreenFacts.topWindowOwner(at: at) != bridge.claudePID {
+                ClutchLog.write("scroll stopped: Claude is no longer the window under the scroll point")
+                cancelScroll()
+                return
+            }
+        }
         // Whole pixels only; the fraction stays in `scrollRemaining` so nothing is lost.
         let px = step.rounded() != 0 ? step.rounded() : (step > 0 ? 1 : -1)
         scrollRemaining -= px
         ClaudeBridge.postScroll(at: at, dy: px)
+    }
+
+    /// Drops every piece of scrolling state, so nothing glides or coasts after this call.
+    private func cancelScroll() {
+        scrollTimer?.invalidate(); scrollTimer = nil
+        scrollSession = nil
+        pendingScroll = 0; scrollRemaining = 0; scrollVelocity = 0; inertia = 0
+        scrollTarget = nil
+        recentScroll.removeAll()
+    }
+
+    /// The Mac is going to sleep, the screen locked, or the safety check ended the hold: stop dictation now (no
+    /// tail wait), and forget anything that was about to act. The text stays; nothing is sent.
+    private func interrupt(_ reason: String) {
+        ClutchLog.write("interrupt: \(reason)")
+        pendingSend = nil; state.countdown = nil
+        sendAfterStop = false; focusAfterStop = nil; pendingFocus = nil
+        lastSpoken = nil
+        cancelScroll()
+        gestures.reset()
+        guard listeningSession != nil else { pushOverlay(); return }
+        if busy {
+            endTalkWhenIdle(reason: reason, immediate: true)
+        } else {
+            endTalk(reason: reason, immediate: true)
+        }
+    }
+
+    /// Local teardown for a dictation whose Claude process is gone; there is no microphone to press.
+    private func dropListening() {
+        listeningSession = nil
+        listeningPID = nil
+        state.listening = false
+        meter.stop()
+        safety.episodeEnded()
+        sendAfterStop = false; focusAfterStop = nil
+        gestures.reset()
+        pushOverlay()
     }
 
     // MARK: - Dot placement
@@ -875,6 +974,7 @@ final class Coordinator: AppCoordinating {
         ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
         if listeningSession != nil { endTalk(reason: "screens changed") }
         if state.calibrating { CalibrationController.shared.cancel() }
+        cancelScroll()
         pendingSend = nil
         target = nil
         updateStatus()
