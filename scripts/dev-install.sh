@@ -41,7 +41,9 @@ say "building and installing (first build takes a few minutes; macOS may ask onc
 "$ROOT/scripts/dev-update.sh" --force
 LOG="$HOME/Library/Logs/Ensemble/updater.log"
 tail -n 1 "$LOG"
-if tail -n 1 "$LOG" | grep -q "build failed"; then
+if tail -n 1 "$LOG" | grep -q "build skipped"; then
+  exit 1
+elif tail -n 1 "$LOG" | grep -q "build failed"; then
   echo "--- this Mac's compiler: $(swift --version 2>&1 | head -1)"
   echo "--- build errors (paste everything from here to the end into your Claude session):"
   sed -n "/swift build -c release/,\$p" /tmp/clutch-bundle.log | grep -E -A3 "error:" | head -60

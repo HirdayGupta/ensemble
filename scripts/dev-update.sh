@@ -46,6 +46,14 @@ if [ "$HERE" != "$THERE" ]; then
   log "main moved ${HERE:0:7} -> ${THERE:0:7}: $(git log -1 --format=%s)"
 fi
 
+# The app uses macOS 26 APIs (Liquid Glass, renamed AVFoundation notifications): Swift 6.2 or newer is required.
+SWIFT_VER="$(swift --version 2>&1 | sed -nE 's/.*Swift version ([0-9]+)\.([0-9]+).*/\1 \2/p' | head -1)"
+read -r SV_MAJOR SV_MINOR <<< "${SWIFT_VER:-0 0}"
+if [ "$SV_MAJOR" -lt 6 ] || { [ "$SV_MAJOR" -eq 6 ] && [ "$SV_MINOR" -lt 2 ]; }; then
+  log "build skipped: Swift ${SV_MAJOR}.${SV_MINOR} is too old, 6.2 or newer is needed. Fix: sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
+  exit 0
+fi
+
 if ! scripts/bundle.sh >> "$LOG" 2>&1; then log "build failed at $(git rev-parse --short HEAD); the installed app is unchanged"; exit 0; fi
 
 # Quit the running copy cleanly (quitting stops dictation first), swap it, relaunch.

@@ -53,7 +53,7 @@ On a Mac you develop on, this builds the app from source and keeps it on the lat
 gh repo clone oficiallyAkshay/ensemble ~/ensemble && ~/ensemble/scripts/dev-install.sh
 ```
 
-It needs Swift (`xcode-select --install`). It creates a self-signed "Ensemble Local Signing" identity once, so the Camera and Accessibility grants survive every rebuild, installs `~/Applications/Ensemble.app`, and loads a launchd agent that checks `main` every 2 minutes, rebuilds when it moved, and relaunches the app. An update waits while Claude is listening. Log: `~/Library/Logs/Ensemble/updater.log`. Stop it with `launchctl bootout "gui/$(id -u)/dev.ensemble.updater"`.
+It needs Swift 6.2 or newer, which comes with Apple's 2025 developer tools (`xcode-select --install`); older tools lack the macOS 26 interfaces the app uses. It creates a self-signed "Ensemble Local Signing" identity once, so the Camera and Accessibility grants survive every rebuild, installs `~/Applications/Ensemble.app`, and loads a launchd agent that checks `main` every 2 minutes, rebuilds when it moved, and relaunches the app. An update waits while Claude is listening. Log: `~/Library/Logs/Ensemble/updater.log`. Stop it with `launchctl bootout "gui/$(id -u)/dev.ensemble.updater"`.
 <!-- TODO(owner): note here whether releases are notarized; if not, add the right-click > Open step for Gatekeeper. -->
 
 ## Permissions
