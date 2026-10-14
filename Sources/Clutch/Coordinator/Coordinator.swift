@@ -27,6 +27,7 @@ final class Coordinator: AppCoordinating {
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
     private var lastManyFacesT: TimeInterval = -.infinity
+    private var manyFaceTimes: [TimeInterval] = []
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
@@ -184,7 +185,11 @@ final class Coordinator: AppCoordinating {
     private func handle(head: HeadObservation) {
         latestHead = head
         faceCount = head.faceCount
-        if head.faceCount == 1 { lastOneFaceT = head.t } else if head.faceCount > 1 { lastManyFacesT = head.t }
+        if head.faceCount == 1 { lastOneFaceT = head.t }
+        // A second face counts only when it persists: 5 or more of the readings in the last second.
+        manyFaceTimes.append(contentsOf: head.faceCount > 1 ? [head.t] : [])
+        manyFaceTimes.removeAll { head.t - $0 > 1.0 }
+        if manyFaceTimes.count >= 5 { lastManyFacesT = head.t }
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
         if head.t - headStats.since >= 5 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
