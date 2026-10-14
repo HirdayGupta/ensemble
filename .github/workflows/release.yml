@@ -102,8 +102,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            build/Clutch-*.dmg
-            build/Clutch-*.dmg.sha256
+            build/Ensemble-*.dmg
+            build/Ensemble-*.dmg.sha256
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 

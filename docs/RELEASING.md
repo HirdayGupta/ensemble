@@ -101,7 +101,7 @@ cask "clutch" do
   version "0.1.0"
   sha256 "<contents of Ensemble-0.1.0.dmg.sha256, the hash only>"
 
-  url "https://github.com/OWNER/REPO/releases/download/v#{version}/Clutch-#{version}.dmg"
+  url "https://github.com/OWNER/REPO/releases/download/v#{version}/Ensemble-#{version}.dmg"
   name "Clutch"
   desc "Control the Claude desktop app hands-free with a webcam"
   homepage "https://github.com/OWNER/REPO"
