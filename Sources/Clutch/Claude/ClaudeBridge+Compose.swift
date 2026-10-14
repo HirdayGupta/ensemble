@@ -82,6 +82,18 @@ extension ClaudeBridge {
     // MARK: Scrolling
 
     /// Positive dy scrolls down the transcript. Fire and forget; `lastScrollMethod` reports what was used.
+    /// Scrolls whatever is under a screen point right away, without touching the accessibility queue: posts a
+    /// pixel scroll through the session event stream (the only route Claude honours) and restores the pointer.
+    static func postScroll(at point: CGPoint, dy: Double) {
+        let pixels = Int32(max(-6000, min(6000, dy.rounded())))
+        guard pixels != 0, let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.location = point
+        let saved = CGEvent(source: nil)?.location
+        event.post(tap: .cgSessionEventTap)
+        if let saved { CGWarpMouseCursorPosition(saved) }
+    }
+
     func scroll(_ s: ClaudeSession, dy: Double) {
         guard dy != 0 else { return }
         queue.async {

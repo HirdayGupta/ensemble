@@ -25,12 +25,18 @@ public final class GestureMachine {
     /// Pinch and drag scrolls: once a held pinch moves this far (frame heights), it is a drag, never a tap.
     public static let dragStart = 0.03
     /// Scroll points per frame height of hand travel, before the system speed factor the coordinator applies.
-    public static let dragPointsPerFrameHeight = 2400.0
+    public static let dragPointsPerFrameHeight = 5000.0
+    /// Pointer-style acceleration: faster hand motion scrolls disproportionately further (gain 1x at rest,
+    /// up to 1 + dragAccel x at one frame height per second).
+    public static let dragAccel = 3.0
     private var dragging = false
     private var dragOriginY: Double?
     private var dragLastY: Double?
+    private var dragLastT: Double?
     private var dragFilter = OneEuroFilter(minCutoff: 1.0, beta: 2, dCutoff: 1)
     public private(set) var isDragging = false
+    /// A pinch is closed right now (tap, drag or hold in progress): the coordinator holds focus still meanwhile.
+    public var pinchHeld: Bool { pinchIsClosed }
     /// The current pinch already toggled on touch; its release must not start a new pair.
     private var pinchToggled = false
     private var edgeCount = 0
@@ -254,7 +260,12 @@ public final class GestureMachine {
             if !pinchToggled, let p = h.palmCenter, let origin = dragOriginY {
                 let y = dragFilter.filter(Double(p.y), at: h.t)
                 if !dragging, abs(y - origin) >= Self.dragStart { dragging = true; isDragging = true; lastTapEnd = nil }
-                if dragging, let last = dragLastY, y != last { intents.append(.dragScroll(handDy: (y - last) * Self.dragPointsPerFrameHeight)) }
+                if dragging, let last = dragLastY, y != last, let lt = dragLastT, h.t > lt {
+                    let speed = abs(y - last) / (h.t - lt)          // frame heights per second
+                    let gain = 1 + Self.dragAccel * min(speed, 1)
+                    intents.append(.dragScroll(handDy: (y - last) * Self.dragPointsPerFrameHeight * gain))
+                }
+                dragLastT = h.t
                 dragLastY = y
             }
             pinchMin = min(pinchMin, d)

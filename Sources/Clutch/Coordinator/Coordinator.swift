@@ -48,6 +48,7 @@ final class Coordinator: AppCoordinating {
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
+    private var pendingScroll = 0.0
     private var busy = false                 // a start/stop/send is in flight
     private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
@@ -313,7 +314,9 @@ final class Coordinator: AppCoordinating {
             } else {
                 dotPoint = p
             }
-            if under?.id == target?.id {
+            if gestures.pinchHeld || scrollSession != nil {
+                candidate = nil                                   // hand in front of the face: hold everything still
+            } else if under?.id == target?.id {
                 candidate = nil
             } else if let c = candidate, c.session?.id == under?.id {
                 let dwell = listeningSession != nil && under != nil ? listeningSwitchDwell : switchDwell
@@ -322,7 +325,7 @@ final class Coordinator: AppCoordinating {
                 candidate = (under, head.t)
             }
             // A Claude session hidden behind another app's window: resting the nose on it brings Claude forward.
-            if under == nil, let hidden = sessions.first(where: { $0.frame.contains(p) }) {
+            if under == nil, !gestures.pinchHeld, scrollSession == nil, let hidden = sessions.first(where: { $0.frame.contains(p) }) {
                 if covered?.id != hidden.id { covered = (hidden.id, head.t) }
                 else if let c = covered, head.t - c.since >= raiseDwell {
                     let typed = ClaudeBridge.secondsSinceTypingOrClick() < inputQuiet
@@ -407,6 +410,10 @@ final class Coordinator: AppCoordinating {
         dropStaleReadings()
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
+        if let s = scrollSession, pendingScroll != 0 {
+            ClaudeBridge.postScroll(at: CGPoint(x: s.session.frame.midX, y: s.session.frame.midY), dy: pendingScroll)
+            pendingScroll = 0
+        }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
         let now = CACurrentMediaTime()
         // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
@@ -618,9 +625,9 @@ final class Coordinator: AppCoordinating {
         guard pendingSend == nil, commonRefusal() == nil else { return }
         let session: ClaudeSession
         if let s = scrollSession { session = s.session } else if let t = listeningSession ?? target { session = t } else { return }
-        if scrollSession == nil { ClutchLog.write("scroll started (last method: \(bridge.lastScrollMethod))") }
+        if scrollSession == nil { ClutchLog.write("scroll started") }
         scrollSession = (session, Date())
-        bridge.scroll(session, dy: dy)
+        pendingScroll += dy           // flushed on the tick, so the pointer is touched at most 20 times a second
     }
 
     /// The nose settled on a different session. Focus follows it; a dictation running elsewhere stops first,
