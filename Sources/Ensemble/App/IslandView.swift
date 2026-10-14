@@ -104,6 +104,20 @@ struct IslandView: View {
         Text(s).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).fixedSize()
     }
 
+    /// One column per open session when there is more than one to show; the plain two-tile glyph otherwise
+    /// (a single session, or the list not available yet).
+    @ViewBuilder private var switchGlyph: some View {
+        if let sw = model.sessionSwitch, sw.sessionCount > 1 {
+            SessionColumnsGlyph(count: sw.sessionCount, groupBreaks: sw.groupBreaks, from: sw.fromIndex, to: sw.toIndex, progress: sw.progress)
+        } else {
+            SwitchGlyph()
+        }
+    }
+
+    private var switchGlyphWidth: CGFloat {
+        (model.sessionSwitch?.sessionCount ?? 0) > 1 ? 56 : 26
+    }
+
     @ViewBuilder private var content: some View {
         switch mode {
         case .idle:
@@ -121,7 +135,7 @@ struct IslandView: View {
             }
         case .switching:
             HStack(spacing: 11) {
-                SwitchGlyph().frame(width: 26, height: 16)
+                switchGlyph.frame(width: switchGlyphWidth, height: 16)
                 lines(Text("Activating ") + session(model.sessionSwitch?.name ?? "the other session"), Text("Original message unsent"))
                 Spacer(minLength: 8)
                 hint("look back to stay")

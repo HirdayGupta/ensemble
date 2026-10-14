@@ -14,6 +14,14 @@ struct OverlayBanner: Equatable, Identifiable {
 struct SessionSwitch: Equatable {
     var name: String?
     var progress: Double
+    /// Every open session, left to right as they sit on screen; the island falls back to the plain two-tile
+    /// glyph when this is 1 or less.
+    var sessionCount: Int = 0
+    /// Column indices (1..<sessionCount) where a new screen or window group starts.
+    var groupBreaks: Set<Int> = []
+    /// Index, into that same left-to-right order, of the session losing and gaining focus.
+    var fromIndex: Int = 0
+    var toIndex: Int = 0
 }
 
 @MainActor
