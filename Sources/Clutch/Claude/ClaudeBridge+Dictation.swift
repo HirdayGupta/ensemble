@@ -32,6 +32,7 @@ extension ClaudeBridge {
     }
 
     private func startNow(_ s: ClaudeSession) -> BridgeResult {
+        if isShuttingDown { return .refused("Clutch is quitting") }
         guard let before = liveEntry(s) else { return .refused("session not found") }
         let state = micStateSync(mic: before.elements.mic)
         guard state == .off else { return .refused("mic is not verifiably off: \(describe(state))") }
@@ -43,6 +44,7 @@ extension ClaudeBridge {
         let recheck = micStateSync(mic: entry.elements.mic)
         guard recheck == .off else { return .refused("mic state changed while focusing: \(describe(recheck))") }
 
+        if isShuttingDown { return .refused("Clutch is quitting") }
         let err = AX.perform(entry.elements.mic, kAXPressAction)
         let last = pollMic(entry.elements.mic, until: .on)
         if last == .on { return .done }
@@ -79,15 +81,32 @@ extension ClaudeBridge {
 
     /// Stops whichever session shows an active mic. Used when the session that started the recording is gone.
     func stopAnyDictation() async -> BridgeResult {
-        await run(urgent: true) {
-            var worst: BridgeResult = .done
-            for entry in self.discover() {
-                let result = self.stopNow(entry.session)
-                if case .done = result { continue }
-                worst = result
-            }
-            return worst
+        await run(urgent: true) { self.stopAnyNow() }
+    }
+
+    func stopAnyNow() -> BridgeResult {
+        var worst: BridgeResult = .done
+        for entry in discover() {
+            let result = stopNow(entry.session)
+            if case .done = result { continue }
+            worst = result
         }
+        return worst
+    }
+
+    /// For process exit, where nothing can be awaited: stops on the urgent queue and waits at most `timeout`
+    /// seconds. Falls back to any session with an active mic when `s` is nil or its stop is refused.
+    /// nil = it did not finish in time.
+    func stopDictationBlocking(_ s: ClaudeSession?, timeout: TimeInterval) -> BridgeResult? {
+        let finished = DispatchSemaphore(value: 0)
+        let box = BlockingResult()
+        urgentQueue.async {
+            var result: BridgeResult = s.map { self.stopNow($0) } ?? self.stopAnyNow()
+            if s != nil, case .refused = result { result = self.stopAnyNow() }
+            box.value = result
+            finished.signal()
+        }
+        return finished.wait(timeout: .now() + timeout) == .success ? box.value : nil
     }
 
     private func pollMic(_ mic: AXUIElement, until target: MicState) -> MicState {
@@ -107,4 +126,9 @@ extension ClaudeBridge {
         case .unknown(let why): return "unknown (\(why))"
         }
     }
+}
+
+/// Written once before its semaphore is signalled and read only after the wait succeeds.
+private final class BlockingResult: @unchecked Sendable {
+    var value: BridgeResult?
 }

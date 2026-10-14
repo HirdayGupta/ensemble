@@ -71,7 +71,7 @@ final class AppEnvironment {
     }
 
     func stop() {
-        coordinator.stop()
+        coordinator.shutdown()
         CalibrationController.shared.cancel()
     }
 

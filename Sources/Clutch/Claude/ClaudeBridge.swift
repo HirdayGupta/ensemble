@@ -21,6 +21,7 @@ final class ClaudeBridge: @unchecked Sendable {
     private var lastStopPressAt: Date?
     private var scrollMethod: ScrollMethod?
     private var noScrollAreaUntil: [String: Date] = [:]
+    private var shuttingDown = false
 
     static let ambientInputAllowlist: Set<String> = []
 
@@ -35,6 +36,10 @@ final class ClaudeBridge: @unchecked Sendable {
     var claudePID: pid_t? { claudeApps.first?.processIdentifier }
 
     func claudeIsRunning() -> Bool { !claudeApps.isEmpty }
+
+    /// Once set, no new dictation can start; the quit path uses it so a start in flight cannot press after the stop.
+    func beginShutdown() { lock.lock(); shuttingDown = true; lock.unlock() }
+    var isShuttingDown: Bool { lock.lock(); defer { lock.unlock() }; return shuttingDown }
 
     func claudeIsFrontmost() -> Bool {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeLabels.bundleID

@@ -38,6 +38,7 @@ final class Coordinator: AppCoordinating {
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
     private var busy = false                 // a start/stop/send is in flight
+    private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
     private var sendAfterStop = false
     private var tickTimer: Timer?
@@ -171,12 +172,50 @@ final class Coordinator: AppCoordinating {
         }
     }
 
-    func clearAndDisarm() {
-        safety.clearAndDisarm()
-        pendingSend = nil
+    /// Quit path: blocks (at most about two seconds) until Claude's microphone is confirmed off and our mute is undone.
+    func shutdown() {
+        ClutchLog.write("shutdown")
+        running = false
+        tickTimer?.invalidate(); tickTimer = nil
+        refreshTimer?.invalidate(); refreshTimer = nil
+        bridge.beginShutdown()
+        engine.stop()
+        let session = listeningSession
         listeningSession = nil
-        state.listening = false
-        settings.enabled = false
+        pendingSend = nil
+        safety.stopForTermination(session: session)
+        ClutchLog.flush()
+    }
+
+    func clearAndDisarm() {
+        guard !disarming else { return }
+        disarming = true
+        pendingSend = nil
+        sendAfterStop = false
+        state.countdown = nil
+        gestures.reset()
+        ClutchLog.write("clear and disarm requested")
+        Task { @MainActor in
+            for _ in 0..<30 where self.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
+            let result = await self.bridge.stopAnyDictation()
+            var capture = self.bridge.claudeCaptureActive()
+            for _ in 0..<15 where capture == true {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                capture = self.bridge.claudeCaptureActive()
+            }
+            self.disarming = false
+            self.listeningSession = nil
+            self.state.listening = false
+            if capture == true || !self.safety.clearAndDisarm() {
+                ClutchLog.write("clear and disarm: microphone still recording (stop \(result)); the safety check keeps watching")
+                self.safety.episodeEnded()
+                self.refuse("Could not confirm the microphone is off; the safety check keeps watching")
+            } else {
+                ClutchLog.write("clear and disarm: microphone confirmed off")
+            }
+            self.pushOverlay()
+            self.settings.enabled = false
+        }
     }
 
     // MARK: - Inputs
@@ -315,7 +354,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func beginTalk() {
-        guard listeningSession == nil, !busy else { return }
+        guard listeningSession == nil, !busy, !disarming else { return }
         if let why = commonRefusal() { refuse(why); return }
         guard calibratedHere else { refuse("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = target else { refuse("Your nose is not on a Claude session"); return }

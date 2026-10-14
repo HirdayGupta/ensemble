@@ -21,4 +21,7 @@ enum ClutchLog {
             h.seekToEndOfFile(); h.write(Data(text.utf8)); try? h.close()
         }
     }
+
+    /// Waits for queued lines to reach the file; the quit path calls it so the last events are not lost.
+    static func flush() { queue.sync {} }
 }
