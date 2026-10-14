@@ -46,6 +46,8 @@ open build/Clutch.app
 
 `scripts/bundle.sh` signs with the identity named `Clutch Local Signing` (override with `CLUTCH_SIGN_IDENTITY`) and stops with an error if it is missing; it never signs ad-hoc, because an ad-hoc signature is a new identity on every build and macOS then asks for Camera and Accessibility again. Each build writes the signature's designated requirement to `build/designated-requirement.txt` and warns when it changes.
 
+`scripts/release.sh` builds a DMG (`build/Clutch-<version>.dmg`) and, with a Developer ID identity and notarization credentials, signs and notarizes it. Updates use Sparkle 2. Setup, secrets and the release steps are in [docs/RELEASING.md](docs/RELEASING.md). Until the owner adds an update key and feed address, the app's update entry says updates are not set up and nothing contacts the network.
+
 `swift scripts/make-icon.swift` redraws the app icon (`Assets/AppIcon.iconset`, `Assets/AppIcon.icns`, `Assets/logo.png`) from code.
 
 ### Resources in the packaged app
@@ -58,10 +60,11 @@ SwiftPM's generated `Bundle.module` looks in the app's top level, which code sig
 - `Sources/Clutch/App` - the shell: entry point, menu bar, settings, overlay, calibration, hotkey, notifications.
 - `Sources/Clutch/Coordinator` - the coordinator contract (`AppCoordinating`, `makeCoordinator`).
 - `Sources/Clutch/Resources/web` - MediaPipe runtime and face model.
-- `scripts` - packaging and icon generation. `Assets` - icon sources.
+- `scripts` - packaging (`bundle.sh`, `release.sh`, `appcast.sh`) and icon generation. `Assets` - icon sources. `docs` - release guide. `.github/workflows` - the tag-triggered release.
 
 ## Credits
 
 - MediaPipe - Apache-2.0, Google.
+- Sparkle - MIT, Sparkle Project. Auto-updates.
 - Sleight - MIT, Florian Riquelme. Hand-pose classifier, vendored in `Sources/ClutchCore/Vendor/Sleight`.
 - claude-dictation-hotkey - MIT. Dictation approach, license in `Sources/ClutchCore/Vendor`.

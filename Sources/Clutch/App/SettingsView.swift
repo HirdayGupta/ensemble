@@ -4,6 +4,7 @@ import ClutchCore
 struct SettingsView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var updates: UpdateController
     let calibrate: () -> Void
 
     var body: some View {
@@ -16,7 +17,7 @@ struct SettingsView: View {
                 .tabItem { Label("Display", systemImage: "rectangle.on.rectangle") }
             CalibrationSettings(state: state, settings: settings, calibrate: calibrate)
                 .tabItem { Label("Calibration", systemImage: "scope") }
-            AboutSettings()
+            AboutSettings(updates: updates)
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 540, height: 440)
@@ -171,6 +172,8 @@ private struct CalibrationSettings: View {
 }
 
 private struct AboutSettings: View {
+    @ObservedObject var updates: UpdateController
+
     private var version: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "0"
@@ -193,10 +196,17 @@ private struct AboutSettings: View {
                 credit("MediaPipe", "Face landmarks. Apache-2.0, Google.")
                 credit("Sleight", "Hand-pose rules. MIT, Florian Riquelme.")
                 credit("claude-dictation-hotkey", "Dictation approach. MIT.")
+                credit("Sparkle", "Updates. MIT, Sparkle Project.")
             }
             .padding(14)
             .frame(maxWidth: 400, alignment: .leading)
             .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(spacing: 8) {
+                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
+                Toggle("Check for updates automatically (once a day)", isOn: Binding(
+                    get: { updates.automaticChecks }, set: { updates.setAutomaticChecks($0) }))
+                    .toggleStyle(.switch).controlSize(.small).disabled(!updates.isConfigured)
+            }
             Spacer(minLength: 0)
         }
         .padding(.top, 24)

@@ -37,11 +37,53 @@ else
   exit 1
 fi
 
+# Embed Sparkle (a SwiftPM binary framework: the build leaves it next to the binary, the app needs it in Contents/Frameworks;
+# the linker already added the @executable_path/../Frameworks rpath, see Package.swift).
+SPARKLE_SRC="$BIN_DIR/Sparkle.framework"
+if [ ! -d "$SPARKLE_SRC" ]; then
+  echo "error: $SPARKLE_SRC not found (run swift package resolve)" | tee -a "$LOG" >&2
+  exit 1
+fi
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
+# Clutch is not sandboxed, so Sparkle's XPC services are not used (https://sparkle-project.org/documentation/sandboxing/).
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+
+# Optional version stamping for releases (scripts/release.sh). Sparkle compares CFBundleVersion, so it must grow every release.
+if [ -n "${CLUTCH_VERSION:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $CLUTCH_VERSION" "$APP/Contents/Info.plist"
+fi
+if [ -n "${CLUTCH_BUILD:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $CLUTCH_BUILD" "$APP/Contents/Info.plist"
+fi
+
 # Signing uses one pinned identity so the designated requirement (what Camera and Accessibility grants are tied
 # to) is the same on every build. Set CLUTCH_SIGN_IDENTITY to use another identity name; there is no ad-hoc
 # fallback, because an ad-hoc signature is a new identity on every build and silently invalidates the grants.
+#
+# Two modes, chosen by the identity name:
+#   local         "Clutch Local Signing" (default) or any other name: no hardened runtime, no secure timestamp.
+#   distribution  a name starting with "Developer ID Application": hardened runtime + secure timestamp (both required
+#                 for notarization).
 IDENTITY_NAME="${CLUTCH_SIGN_IDENTITY:-Clutch Local Signing}"
-HASHES="$(security find-identity -p codesigning 2>/dev/null | grep -F "\"$IDENTITY_NAME\"" | awk '{print $2}' | sort -u || true)"
+ENTITLEMENTS="Sources/Clutch/Clutch.entitlements"
+case "$IDENTITY_NAME" in
+  "Developer ID Application"*)
+    MODE="distribution"
+    HASHES="$(security find-identity -v -p codesigning 2>/dev/null | grep -F "\"$IDENTITY_NAME" | awk '{print $2}' | sort -u || true)"
+    ;;
+  *)
+    MODE="local"
+    HASHES="$(security find-identity -p codesigning 2>/dev/null | grep -F "\"$IDENTITY_NAME\"" | awk '{print $2}' | sort -u || true)"
+    ;;
+esac
+# A secure timestamp is a request to Apple's timestamp server, so it is only used for distribution signing.
+# Hardened runtime is distribution-only too: with a self-signed identity it cannot load Sparkle (no shared Team ID).
+if [ "$MODE" = "distribution" ]; then
+  SIGN_FLAGS=(--options runtime --timestamp)
+else
+  SIGN_FLAGS=(--timestamp=none)
+fi
 COUNT="$(printf '%s' "$HASHES" | grep -c . || true)"
 if [ "$COUNT" -eq 0 ]; then
   echo "error: no code-signing identity named \"$IDENTITY_NAME\" in the keychain." | tee -a "$LOG" >&2
@@ -53,22 +95,32 @@ elif [ "$COUNT" -gt 1 ]; then
   exit 1
 fi
 IDENTITY="$HASHES"
-echo "[$(date -u +%FT%TZ)] signing with \"$IDENTITY_NAME\" ($IDENTITY)" | tee -a "$LOG"
-codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | tee -a "$LOG"
+echo "[$(date -u +%FT%TZ)] signing ($MODE) with \"$IDENTITY_NAME\" ($IDENTITY) flags: ${SIGN_FLAGS[*]}" | tee -a "$LOG"
 
-codesign --verify --strict "$APP" 2>&1 | tee -a "$LOG"
+# Inside-out: nested code first, then the framework, then the app. No --deep (it is deprecated for signing and
+# would also overwrite entitlements that nested code ships with).
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+sign() { codesign --force --sign "$IDENTITY" "${SIGN_FLAGS[@]}" "$@" 2>&1 | tee -a "$LOG"; }
+sign "$SPARKLE/Autoupdate"
+sign "$SPARKLE/Updater.app"
+sign "$APP/Contents/Frameworks/Sparkle.framework"
+sign --entitlements "$ENTITLEMENTS" "$APP"
 
-REQ_FILE="build/designated-requirement.txt"
+codesign --verify --deep --strict "$APP" 2>&1 | tee -a "$LOG"
+
 REQ="$(codesign -dr - "$APP" 2>&1 | sed -n 's/^designated => //p')"
 if [ -z "$REQ" ]; then
   echo "error: could not read the designated requirement" | tee -a "$LOG" >&2
   exit 1
 fi
-if [ -f "$REQ_FILE" ] && [ "$(cat "$REQ_FILE")" != "$REQ" ]; then
-  echo "WARNING: the designated requirement changed since the last build; macOS will ask for Camera and Accessibility again." | tee -a "$LOG" >&2
-  echo "  was: $(cat "$REQ_FILE")" | tee -a "$LOG" >&2
-  echo "  now: $REQ" | tee -a "$LOG" >&2
+if [ "$MODE" = "local" ]; then
+  REQ_FILE="build/designated-requirement.txt"
+  if [ -f "$REQ_FILE" ] && [ "$(cat "$REQ_FILE")" != "$REQ" ]; then
+    echo "WARNING: the designated requirement changed since the last build; macOS will ask for Camera and Accessibility again." | tee -a "$LOG" >&2
+    echo "  was: $(cat "$REQ_FILE")" | tee -a "$LOG" >&2
+    echo "  now: $REQ" | tee -a "$LOG" >&2
+  fi
+  printf '%s\n' "$REQ" > "$REQ_FILE"
 fi
-printf '%s\n' "$REQ" > "$REQ_FILE"
 echo "[$(date -u +%FT%TZ)] designated requirement: $REQ" | tee -a "$LOG"
 echo "$ROOT/$APP"
