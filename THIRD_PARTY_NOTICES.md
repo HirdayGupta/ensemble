@@ -1,13 +1,13 @@
 # Third-party notices
 
-Clutch bundles the following third-party code and models. Each keeps its own license.
+Ensemble bundles the following third-party code and models. Each keeps its own license.
 
 | Component | Where it lives | Author | License |
 |---|---|---|---|
-| MediaPipe Tasks Vision (JavaScript runtime and WebAssembly) | `Sources/Clutch/Resources/web/vision_bundle.mjs`, `Sources/Clutch/Resources/web/wasm/` | Google | Apache-2.0 |
-| MediaPipe Face Landmarker model (`face_landmarker.task`) | `Sources/Clutch/Resources/web/face_landmarker.task` | Google | See the note below |
-| Sleight (hand-pose classifier rules, adapted) | `Sources/ClutchCore/Vendor/Sleight/` | Florian Riquelme | MIT |
-| claude-dictation-hotkey (approach to driving Claude's dictation) | `Sources/ClutchCore/Vendor/LICENSE-claude-dictation-hotkey` | Rene Banuelos | MIT |
+| MediaPipe Tasks Vision (JavaScript runtime and WebAssembly) | `Sources/Ensemble/Resources/web/vision_bundle.mjs`, `Sources/Ensemble/Resources/web/wasm/` | Google | Apache-2.0 |
+| MediaPipe Face Landmarker model (`face_landmarker.task`) | `Sources/Ensemble/Resources/web/face_landmarker.task` | Google | See the note below |
+| Sleight (hand-pose classifier rules, adapted) | `Sources/EnsembleCore/Vendor/Sleight/` | Florian Riquelme | MIT |
+| claude-dictation-hotkey (approach to driving Claude's dictation) | `Sources/EnsembleCore/Vendor/LICENSE-claude-dictation-hotkey` | Rene Banuelos | MIT |
 
 Apple's Vision, AVFoundation, WebKit and ApplicationServices frameworks are system frameworks and are not redistributed.
 
@@ -27,7 +27,7 @@ The Face Landmarker documentation page does not state a license for the model fi
 
 ## Sleight (MIT)
 
-Source: Florian Riquelme's Sleight, the hand-pose rules adapted in `Sources/ClutchCore/Vendor/Sleight/`. Clutch adds the gather, point-up and point-down poses. The original license is kept in `Sources/ClutchCore/Vendor/Sleight/LICENSE-sleight`:
+Source: Florian Riquelme's Sleight, the hand-pose rules adapted in `Sources/EnsembleCore/Vendor/Sleight/`. Ensemble adds the gather, point-up and point-down poses. The original license is kept in `Sources/EnsembleCore/Vendor/Sleight/LICENSE-sleight`:
 
 ```
 MIT License
@@ -55,7 +55,7 @@ SOFTWARE.
 
 ## claude-dictation-hotkey (MIT)
 
-Clutch's way of starting and stopping Claude's own dictation follows the approach of claude-dictation-hotkey. The original license is kept in `Sources/ClutchCore/Vendor/LICENSE-claude-dictation-hotkey`:
+Ensemble's way of starting and stopping Claude's own dictation follows the approach of claude-dictation-hotkey. The original license is kept in `Sources/EnsembleCore/Vendor/LICENSE-claude-dictation-hotkey`:
 
 ```
 MIT License

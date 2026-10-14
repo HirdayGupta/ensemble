@@ -1,4 +1,4 @@
-<!-- TODO(owner): LICENSE says "Clutch contributors"; put your legal name or organisation there before the first release. -->
+<!-- TODO(owner): LICENSE says "Ensemble contributors"; put your legal name or organisation there before the first release. -->
 <!-- TODO(owner): replace OWNER/REPO in the links below once the repository exists. -->
 <p align="center"><img src="Assets/logo.png" width="112" alt="Ensemble app icon"></p>
 
@@ -9,7 +9,7 @@
 <!-- TODO(owner): record a 10-15 second GIF (look at a session, double pinch, speak, thumbs-up) and put it at docs/demo.gif, then replace this line with: ![Demo](docs/demo.gif) -->
 > Demo GIF coming: a session lights up as you look at it, two pinches start dictation, a thumbs-up sends the draft.
 
-Clutch is a macOS menu-bar app. A hidden MediaPipe face tracker works out which Claude session you are facing, Apple's Vision framework reads your hand pose, and an Accessibility bridge presses Claude's own controls (its dictation button, its Send button, its scroll area). Clutch does no speech recognition of its own: Claude's dictation does the listening. Everything runs on your Mac.
+Ensemble is a macOS menu-bar app. A hidden MediaPipe face tracker works out which Claude session you are facing, Apple's Vision framework reads your hand pose, and an Accessibility bridge presses Claude's own controls (its dictation button, its Send button, its scroll area). Ensemble does no speech recognition of its own: Claude's dictation does the listening. Everything runs on your Mac.
 
 ## What it does
 
@@ -17,7 +17,7 @@ Clutch is a macOS menu-bar app. A hidden MediaPipe face tracker works out which 
 - **Hands-free dictation.** A double thumb-to-index pinch starts Claude's dictation; a second double pinch stops it. Your hand can leave the frame in between.
 - **Send by gesture.** Hold a thumbs-up and the dictated draft is sent.
 - **Scroll by gesture.** Pinch and drag up or down to scroll the session, at your system's scroll direction and speed.
-- **A status capsule** at the top of the screen (a floating one on screens without a notch) shows what Clutch sees and what it is about to do, so nothing happens by surprise.
+- **A status capsule** at the top of the screen (a floating one on screens without a notch) shows what Ensemble sees and what it is about to do, so nothing happens by surprise.
 
 ## Gestures
 
@@ -64,7 +64,7 @@ It needs Swift 6.2 or newer, which comes with Apple's 2025 developer tools (`xco
 | Accessibility | Finds Claude's session panes and presses its dictation, Send and scroll controls |
 | Notifications (optional) | Alerts and sound cues when a safety check refuses or stops something |
 
-Clutch does not ask for the Microphone permission: Claude records, and Clutch only watches which apps are recording.
+Ensemble does not ask for the Microphone permission: Claude records, and Ensemble only watches which apps are recording.
 
 ## Privacy
 
@@ -77,12 +77,12 @@ Clutch does not ask for the Microphone permission: Claude records, and Clutch on
 
 ## Safety design
 
-Dictation controls a microphone, so the rule is: Claude's microphone is never left recording because of Clutch.
+Dictation controls a microphone, so the rule is: Claude's microphone is never left recording because of Ensemble.
 
 - **Written before pressed.** A record of "dictation started" is saved and flushed to disk before the microphone button is pressed. If the app crashes mid-recording, the next launch finds the record and stops it.
 - **Dead-man check.** While listening, the app must keep confirming it is alive roughly every second, or dictation is stopped.
-- **Standing check.** A timer verifies, even when nothing seems wrong, that Claude's microphone state matches what Clutch believes.
-- **Fallback.** If a stop cannot be confirmed, Clutch sounds an alarm and mutes the input device Claude is using, recording the change so it can be undone later.
+- **Standing check.** A timer verifies, even when nothing seems wrong, that Claude's microphone state matches what Ensemble believes.
+- **Fallback.** If a stop cannot be confirmed, Ensemble sounds an alarm and mutes the input device Claude is using, recording the change so it can be undone later.
 - **Quitting stops dictation** before the process exits.
 - **Dictation stops and gestures are refused** when you type or click, when more than one face is in view, when no face has been seen for 10 seconds, when the camera is covered, when another app starts using a microphone, when the input device changes, when the Mac sleeps, the screen locks or the screen saver starts, or when Claude quits.
 - **Send is narrow.** It needs a non-empty draft, dictation that ended in the last 30 seconds, and no keyboard or mouse use since.
@@ -92,7 +92,7 @@ Dictation controls a microphone, so the rule is: Claude's microphone is never le
 ```
 swift build            # debug build
 swift test             # unit tests (see below)
-scripts/bundle.sh      # release build -> build/Clutch.app, code-signed
+scripts/bundle.sh      # release build -> build/Ensemble.app, code-signed
 ```
 
 The tests use Swift Testing. With only the Command Line Tools installed, add the framework paths:
@@ -103,12 +103,12 @@ L=/Library/Developer/CommandLineTools/Library/Developer/usr/lib
 swift test --enable-swift-testing -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $F -Xlinker -rpath -Xlinker $F -Xlinker -rpath -Xlinker $L
 ```
 
-**Signing identity.** `scripts/bundle.sh` signs with a local code-signing certificate named `Clutch Local Signing` (override with `CLUTCH_SIGN_IDENTITY`) and stops with an error if it is missing. It never signs ad hoc: an ad-hoc signature is a new identity on every build, and macOS then asks for Camera and Accessibility again each time. Create the certificate once in Keychain Access > Certificate Assistant > Create a Certificate (type: Code Signing). `swift scripts/make-icon.swift` redraws the app icon.
+**Signing identity.** `scripts/bundle.sh` signs with a local code-signing certificate named `Ensemble Local Signing` (override with `ENSEMBLE_SIGN_IDENTITY`) and stops with an error if it is missing (a Mac that already holds a certificate from the app's earlier working name keeps using it, so its Camera and Accessibility grants survive). It never signs ad hoc: an ad-hoc signature is a new identity on every build, and macOS then asks for Camera and Accessibility again each time. Create the certificate once in Keychain Access > Certificate Assistant > Create a Certificate (type: Code Signing). `swift scripts/make-icon.swift` redraws the app icon.
 
 ## Architecture
 
-- **`Sources/ClutchCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, the size-capped log file, the frame-rate planner, and the hand-pose classifier adapted from Sleight (`Vendor/`).
-- **`Sources/Clutch`** is the app:
+- **`Sources/EnsembleCore`** is pure logic with no UI or camera access, and is fully unit-tested: the gesture state machine, the nose pointer (calibration fit plus a One Euro filter), the covered-camera and multi-face detectors, the size-capped log file, the dictation safety records and the move of those records out of the app's earlier folder, the frame-rate planner, and the hand-pose classifier adapted from Sleight (`Vendor/`).
+- **`Sources/Ensemble`** is the app:
   - `Engine/` captures camera frames. Hands go to Apple's Vision hand-pose request. Faces go to MediaPipe Face Landmarker running in a hidden `WKWebView` (the MediaPipe runtime, its WebAssembly and the model are bundled in `Resources/web` and served by a custom URL scheme, so nothing touches the network). To stay light on CPU, the camera runs at its own rate but analyses are scheduled: hand pose at every frame only while a hand is in view (and for 1 s after), while dictating, while a send is pending, while calibrating or while a gesture is held, otherwise a probe about 8 times a second; the face tracker gets a 320x240 frame about 15 times a second; and after 3 s with no face both drop to about 2 a second until a face returns (never while dictating).
   - `Claude/` is the Accessibility bridge: it finds Claude's session panes, reads the state of the dictation, Send and mode controls, presses them, and runs the dictation safety checks.
   - `Coordinator/` joins the two: it turns gesture intents into actions on the session you are looking at, after every safety guard has agreed.
@@ -120,7 +120,7 @@ swift test --enable-swift-testing -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $
 
 ## Limitations
 
-- The Claude bridge reads Claude desktop's interface through Accessibility by the labels it shows today. A Claude update that renames or restructures those controls can break it until Clutch is updated.
+- The Claude bridge reads Claude desktop's interface through Accessibility by the labels it shows today. A Claude update that renames or restructures those controls can break it until Ensemble is updated.
 - Pointing accuracy is that of a head pose, not an eye tracker: it picks a session pane, not a line of text. Recalibrate when you move your seat or change monitors.
 - Gestures need decent light and a camera that sees your hand. Glasses, hats and strong backlight reduce face tracking quality.
 - One person in view at a time: a second face pauses all gestures by design.
@@ -137,17 +137,17 @@ swift test --enable-swift-testing -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $
 
 ## Contributing
 
-Issues and pull requests are welcome. Before opening a pull request, run `swift build` and the tests above; changes to `ClutchCore` should come with a test, since its gesture timing is replayed deterministically from recorded fixtures. Anything that touches dictation or sending must keep the safety rules above intact: say in the pull request how the change preserves them.
+Issues and pull requests are welcome. Before opening a pull request, run `swift build` and the tests above; changes to `EnsembleCore` should come with a test, since its gesture timing is replayed deterministically from recorded fixtures. Anything that touches dictation or sending must keep the safety rules above intact: say in the pull request how the change preserves them.
 
 ## Credits and licenses
 
-Clutch is MIT licensed (see [LICENSE](LICENSE)). It includes:
+Ensemble is MIT licensed (see [LICENSE](LICENSE)). It includes:
 
 - [MediaPipe](https://github.com/google-ai-edge/mediapipe) by Google, Apache-2.0, plus the Face Landmarker model.
-- Sleight by Florian Riquelme, MIT. The hand-pose rules in `Sources/ClutchCore/Vendor/Sleight`.
+- Sleight by Florian Riquelme, MIT. The hand-pose rules in `Sources/EnsembleCore/Vendor/Sleight`.
 - claude-dictation-hotkey by Rene Banuelos, MIT. The approach to driving Claude's dictation.
 
-Full notices, including the model licensing note, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Clutch is an independent project and is not affiliated with or endorsed by Anthropic.
+Full notices, including the model licensing note, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ensemble is an independent project and is not affiliated with or endorsed by Anthropic.
 
 ## Releases and updates
 
