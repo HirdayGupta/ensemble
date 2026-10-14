@@ -66,6 +66,7 @@ final class Coordinator: AppCoordinating {
     private let sendWindow = 30.0
     /// Wait this long after the hand opens before stopping, so the last word is caught.
     private let stopTail = 0.4
+    private static let staleHeadSeconds = 2.0
 
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
@@ -337,6 +338,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func tick() {
+        dropStaleReadings()
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
@@ -349,6 +351,16 @@ final class Coordinator: AppCoordinating {
                 refuse("The input device changed; dictation stopped"); endTalk(reason: "input device changed")
             }
         }
+    }
+
+    /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
+    private func dropStaleReadings() {
+        guard let head = latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
+        guard target != nil || dotPoint != nil || candidate != nil || state.nosePoint != nil else { return }
+        ClutchLog.write("head readings stopped; clearing the highlight")
+        target = nil; candidate = nil; dotPoint = nil
+        updateDot()
+        pushOverlay()
     }
 
     private func refreshSessions() {
