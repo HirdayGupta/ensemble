@@ -420,9 +420,9 @@ import Testing
         try JSONDecoder().decode(GestureMapping.self, from: Data(json.utf8))
     }
 
-    @Test func defaultsPointToScroll() {
-        let m = GestureMapping()
-        #expect(m.scrollUp == .pointUp && m.scrollDown == .pointDown)
+    @Test func poseScrollIsOffByDefault() {
+        let m = GestureMapping()           // pinch and drag scrolls; pose scrolling is opt-in
+        #expect(m.scrollUp == nil && m.scrollDown == nil)
     }
 
     @Test func roundTripKeepsOffAndCustomValues() throws {
@@ -435,9 +435,9 @@ import Testing
         #expect(back.scrollUp == nil && back.send == nil)
     }
 
-    @Test func legacyScrollPoseGetsThePointingDefaults() throws {
+    @Test func legacyScrollPoseGetsTheDefaults() throws {
         let m = try decode(#"{"talk":"fist","send":"thumbsUp","scroll":"twoFingers","cancel":"openPalm"}"#)
-        #expect(m.scrollUp == .pointUp && m.scrollDown == .pointDown && m.send == .thumbsUp && m.talk == .fist)
+        #expect(m.scrollUp == nil && m.scrollDown == nil && m.send == .thumbsUp && m.talk == .fist)
     }
 
     @Test func legacyScrollOffTurnsBothDirectionsOff() throws {
@@ -449,7 +449,7 @@ import Testing
     @Test func legacyMappingWithoutScrollKeyDecodesWithDefaults() throws {
         let m = try decode(#"{"talk":"openPalm","cancel":"fist"}"#)
         #expect(m.talk == .openPalm && m.cancel == .fist)
-        #expect(m.send == .thumbsUp && m.scrollUp == .pointUp && m.scrollDown == .pointDown)
+        #expect(m.send == .thumbsUp && m.scrollUp == nil && m.scrollDown == nil)
     }
 
     @Test func legacySendOffStaysOff() throws {
