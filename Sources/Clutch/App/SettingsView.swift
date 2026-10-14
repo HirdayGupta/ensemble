@@ -129,7 +129,7 @@ private struct DisplaySettings: View {
                 }
             }
             Section("Sending") {
-                LabeledContent("Countdown before sending") {
+                LabeledContent("Hold thumbs-up to send") {
                     HStack {
                         Slider(value: $settings.sendCountdownSeconds, in: SettingsStore.countdownRange, step: 0.5)
                             .frame(width: 180)

@@ -13,7 +13,8 @@ public final class GestureMachine {
     static let releaseHold = 0.4
     static let handLostHold = 0.6
     static let staleHold = 1.0
-    static let sendHold = 0.3
+    /// Holding the send pose this long sends: the hold itself is the confirmation (settable).
+    public var sendHold = 1.5
     /// Going straight from the talk pose to the send pose stops dictation and sends. Held a little longer than
     /// a plain send, and still shorter than `releaseHold`, so it is read before the hold counts as released.
     static let stopAndSendHold = 0.35
@@ -36,6 +37,7 @@ public final class GestureMachine {
         var startedWhileTalking: Bool
         var armed: Bool
         var fired = false
+        var stoppedForSend = false     // this send pose already ended a dictation; it may still send
         var lastPalm: CGPoint?
         var lastT: TimeInterval
         var velocity = 0.0
@@ -62,7 +64,7 @@ public final class GestureMachine {
             return make(.talk, Self.talkHold, r.armed)
         }
         if talking { return nil }
-        if r.pose == mapping.send { return make(.send, Self.sendHold, !r.startedWhileTalking && !r.fired) }
+        if r.pose == mapping.send { return make(.send, sendHold, (!r.startedWhileTalking || r.stoppedForSend) && !r.fired) }
         if r.pose == mapping.cancel { return make(.cancel, Self.cancelHold, !r.startedWhileTalking && !r.fired) }
         if r.pose == mapping.scroll {
             let p = make(.scroll, Self.scrollHold, true)
@@ -119,13 +121,13 @@ public final class GestureMachine {
                 releaseStart = nil
                 intents.append(.talkBegan)
             }
-        } else if talking, pose == mapping.send, !r.fired, held >= Self.stopAndSendHold {
-            r.fired = true
+        } else if talking, pose == mapping.send, !r.stoppedForSend, held >= Self.stopAndSendHold {
+            // Straight from the talk pose to the send pose: stop dictating now; keep holding to send.
+            r.stoppedForSend = true
             endTalk(.released, at: h.t, into: &intents)
-            intents.append(.sendRequested)
         } else if !talking {
-            if pose == mapping.send, !r.startedWhileTalking, !r.fired, held >= Self.sendHold,
-               lastTalkEndT.map({ h.t - $0 >= Self.sendAfterTalkEnd }) ?? true {
+            if pose == mapping.send, !r.startedWhileTalking || r.stoppedForSend, !r.fired, held >= sendHold,
+               r.stoppedForSend || (lastTalkEndT.map({ h.t - $0 >= Self.sendAfterTalkEnd }) ?? true) {
                 r.fired = true
                 intents.append(.sendRequested)
             } else if pose == mapping.cancel, !r.startedWhileTalking, !r.fired, held >= Self.cancelHold {

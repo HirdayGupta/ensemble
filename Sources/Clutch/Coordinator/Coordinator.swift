@@ -67,8 +67,10 @@ final class Coordinator: AppCoordinating {
         if let data = settings.calibration { pointer.calibration = data }
         gestures.mapping = settings.mapping
         pointer.setSmoothing(settings.pointerSmoothing)
+        gestures.sendHold = settings.sendCountdownSeconds
 
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
+        settings.$sendCountdownSeconds.dropFirst().sink { [weak self] v in self?.gestures.sendHold = v }.store(in: &cancellables)
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.pointer.setSmoothing(k) }.store(in: &cancellables)
         settings.$enabled.dropFirst().removeDuplicates().sink { [weak self] on in
             guard let self else { return }
@@ -301,7 +303,7 @@ final class Coordinator: AppCoordinating {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
         case .sendRequested:
-            if listeningSession != nil { sendAfterStop = true; ClutchLog.write("stop and send") } else { requestSend() }
+            if listeningSession != nil || busy { sendAfterStop = true; ClutchLog.write("send after stop") } else { requestSend() }
         case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
         }
@@ -397,9 +399,22 @@ final class Coordinator: AppCoordinating {
             guard let text = await self.bridge.draftText(session), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.refuse("The draft is empty"); return
             }
-            ClutchLog.write("send countdown started (\(text.count) characters)")
-            self.pendingSend = (session, Date(), text)
-            Notifier.shared.playCue(.listenStart)
+            ClutchLog.write("sending (\(text.count) characters)")
+            self.sendNow(session)
+        }
+    }
+
+    private func sendNow(_ session: ClaudeSession) {
+        busy = true
+        Task { @MainActor in
+            let result = await self.bridge.sendDraft(session)
+            self.busy = false
+            switch result {
+            case .done:
+                ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
+                self.overlay.showBanner(title: "Sent", body: "Message sent to Claude", seconds: 1.5)
+            case .refused(let why), .unknown(let why): self.refuse("Not sent: \(why)")
+            }
         }
     }
 

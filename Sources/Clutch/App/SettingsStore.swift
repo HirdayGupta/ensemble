@@ -71,7 +71,7 @@ final class SettingsStore: ObservableObject {
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
-        let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 2.0
+        let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 1.5
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 
         if let data = store.data(forKey: Key.mapping), let decoded = try? JSONDecoder().decode(GestureMapping.self, from: data) {

@@ -10,19 +10,9 @@ struct OverlayScreenView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if model.showHighlight, !model.listening, let target = model.target, let local = local(target) {
-                HighlightView(frame: local)
+            if model.showHighlight || model.listening, let target = model.target, let local = local(target) {
+                HighlightView(frame: local, listening: model.listening)
                     .transition(.opacity)
-            }
-            if model.listening, let target = model.target, let local = local(target) {
-                ListeningView(frame: local)
-                    .transition(.opacity)
-            } else if model.listening, isPrimary {
-                ListeningPill()
-                    .position(x: screenFrame.width / 2, y: 64)
-            }
-            if let countdown = model.countdown, let local = local(countdown.sessionFrame) {
-                CountdownPill(countdown: countdown, hint: model.cancelHint, sessionFrame: local)
             }
             // The dot shows when the setting is on, and always while a gesture is being made.
             if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
@@ -30,10 +20,9 @@ struct OverlayScreenView: View {
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
                     .animation(.smooth(duration: 0.18), value: nose)
             }
-            if isPrimary, let banner = model.banner {
-                BannerView(banner: banner)
-                    .position(x: screenFrame.width / 2, y: 96)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            if showsIsland {
+                IslandView(model: model)
+                    .frame(width: screenFrame.width, alignment: .top)
             }
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
@@ -41,6 +30,13 @@ struct OverlayScreenView: View {
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
+    }
+
+    /// The island sits on the screen holding the session in play, else on the primary screen.
+    private var showsIsland: Bool {
+        if let t = model.target, t.intersects(screenFrame) { return true }
+        if let c = model.countdown, c.sessionFrame.intersects(screenFrame) { return true }
+        return model.target == nil && model.countdown == nil && isPrimary
     }
 
     private func local(_ global: CGRect) -> CGRect? {
@@ -51,15 +47,102 @@ struct OverlayScreenView: View {
 
 private struct HighlightView: View {
     let frame: CGRect
+    let listening: Bool
+    @State private var breathe = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let color: Color = listening ? .red : .accentColor
         shape
-            .fill(Color.accentColor.opacity(0.05))
-            .overlay(shape.strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 2.5))
-            .shadow(color: Color.accentColor.opacity(0.55), radius: 18)
+            .strokeBorder(color.opacity(listening ? (breathe ? 0.95 : 0.6) : 0.9), lineWidth: listening ? 3.5 : 3)
+            .shadow(color: color.opacity(0.6), radius: listening ? (breathe ? 16 : 8) : 10)
             .frame(width: frame.width, height: frame.height)
             .position(x: frame.midX, y: frame.midY)
+            .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true } }
+    }
+}
+
+/// A Dynamic Island style capsule hanging from the top centre of the screen. It grows and morphs with a
+/// spring between listening, the send countdown and short messages, and folds away when idle.
+private struct IslandView: View {
+    @ObservedObject var model: OverlayModel
+
+    private enum Mode: Equatable { case idle, listening, countdown, banner }
+    private var mode: Mode {
+        if let _ = model.countdown { return .countdown }
+        if model.listening { return .listening }
+        if model.banner != nil { return .banner }
+        return .idle
+    }
+
+    private var size: CGSize {
+        switch mode {
+        case .idle: return CGSize(width: 120, height: 0)
+        case .listening: return CGSize(width: 230, height: 38)
+        case .countdown: return CGSize(width: 420, height: 112)
+        case .banner: return CGSize(width: 380, height: 64)
+        }
+    }
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: mode == .listening ? 19 : 26,
+                                          bottomTrailingRadius: mode == .listening ? 19 : 26, topTrailingRadius: 0, style: .continuous)
+        ZStack {
+            shape.fill(Color.black)
+            content
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.85)).animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.08)),
+                                        removal: .opacity.animation(.easeOut(duration: 0.12))))
+                .id(mode)
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(shape)
+        .shadow(color: .black.opacity(mode == .idle ? 0 : 0.35), radius: 14, y: 6)
+        .opacity(mode == .idle ? 0 : 1)
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: mode)
+        .environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch mode {
+        case .idle:
+            EmptyView()
+        case .listening:
+            HStack(spacing: 10) {
+                SoundWaves(color: .red).frame(width: 26, height: 16)
+                Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Spacer(minLength: 0)
+                Text("open hand to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+            }
+        case .countdown:
+            if let c = model.countdown {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        Circle().stroke(.white.opacity(0.2), lineWidth: 3.5)
+                        Circle().trim(from: 0, to: min(max(c.progress, 0), 1))
+                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        Image(systemName: "paperplane.fill").font(.system(size: 12)).foregroundStyle(Color.accentColor)
+                    }
+                    .frame(width: 34, height: 34)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sending").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        Text(c.text).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8)).lineLimit(3)
+                        Text(model.cancelHint).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        case .banner:
+            if let b = model.banner {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(b.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
+                    Text(b.body).font(.system(size: 13)).foregroundStyle(.white).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 }
 

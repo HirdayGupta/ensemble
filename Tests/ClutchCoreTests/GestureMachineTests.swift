@@ -169,15 +169,16 @@ import Testing
 }
 
 @Suite struct GestureMachineSendCancelTests {
-    @Test func sendNeedsPointThreeSecondsAndFiresOnce() {
+    @Test func sendNeedsTheFullHoldAndFiresOnce() {
         let s = GestureSim()
         s.hold(.openPalm, for: 0.5)
-        s.hold(.thumbsUp, for: 0.2)
-        #expect(s.count(.sendRequested) == 0)
+        s.hold(.thumbsUp, for: 1.2)
+        #expect(s.count(.sendRequested) == 0)      // let go before 1.5 s: nothing sent
+        s.hold(.openPalm, for: 0.5)
         s.hold(.thumbsUp, for: 3)
         #expect(s.count(.sendRequested) == 1)
         s.hold(.openPalm, for: 0.5)
-        s.hold(.thumbsUp, for: 1)
+        s.hold(.thumbsUp, for: 1.7)
         #expect(s.count(.sendRequested) == 2)
     }
 
@@ -219,8 +220,8 @@ import Testing
         let ended = try #require(s.firstTime(of: .talkEnded(.released)))
         s.hold(.thumbsUp, for: 2)
         let sent = try #require(s.firstTime(of: .sendRequested))
-        #expect(sent - ended >= 0.5)
-        #expect(sent - ended < 0.6)
+        #expect(sent - ended >= 1.5)              // the send hold starts after the hand opened
+        #expect(sent - ended < 1.7)
     }
 
     @Test func sendNotWhileTalking() {

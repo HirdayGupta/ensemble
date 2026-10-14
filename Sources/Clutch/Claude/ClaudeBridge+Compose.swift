@@ -43,12 +43,7 @@ extension ClaudeBridge {
         guard let entry = liveEntry(s, rescanPane: true) else { return .refused("session not found") }
         let e = entry.elements
 
-        guard let modeControl = e.modeControl, let mode = AX.title(modeControl) else {
-            return .refused("permission mode unreadable")
-        }
-        guard ClaudeLabels.sendAllowedModes.contains(mode) else {
-            return .refused("permission mode \"\(mode)\" is not allowed for sending by gesture")
-        }
+        // Any permission mode: a deliberate 1.5 s hold is the confirmation (Akshay, 2026-10-14).
         if e.stopButton != nil { return .refused("Claude is still generating") }
         guard let composer = e.composer else { return .refused("composer not found") }
 
