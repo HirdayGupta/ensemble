@@ -44,6 +44,8 @@ final class Coordinator: AppCoordinating {
     private var lastRaiseBlockLog: TimeInterval = 0
     /// Session to focus once a dictation stop (caused by looking at it) completes.
     private var focusAfterStop: ClaudeSession?
+    /// The session Clutch last moved focus to.
+    private var lastFocusedId: String?
     private var pendingFocus: (session: ClaudeSession, until: TimeInterval)?   // a look-away focus that was deferred by busy or typing
     private var listeningSession: ClaudeSession?
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
@@ -358,7 +360,8 @@ final class Coordinator: AppCoordinating {
             } else {
                 covered = nil
             }
-        } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 && head.faceCount == 0 {
+        } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 {
+            // A hand in front of the face hides it or reads as a second face for a moment: keep the target.
             // face hidden for a moment (hand in front): keep the last target and dot
         } else {
             dotPoint = nil
@@ -690,6 +693,12 @@ final class Coordinator: AppCoordinating {
     /// The nose settled on a different session. Focus follows it; a dictation running elsewhere stops first,
     /// keeping its text unsent (switching sessions in Claude while recording would discard it).
     private func lookedAt(_ session: ClaudeSession) {
+        // Coming back to the session that already has focus (after the target dropped for a moment) is not a
+        // switch: no focus call, no glow.
+        if session.id == lastFocusedId, NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.hasPrefix("com.anthropic.claudefordesktop") == true {
+            pendingFocus = nil
+            return
+        }
         guard !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet else {
             // The nose has already settled and will not "settle" again, so retry from the tick for a few seconds.
             pendingFocus = (session, CACurrentMediaTime() + 3)
@@ -704,6 +713,8 @@ final class Coordinator: AppCoordinating {
             return
         }
         overlay.flashArrival(session.frame)
+        lastFocusedId = session.id
+        ClutchLog.write("focus moved to a session")
         Task { _ = await self.bridge.focus(session) }
     }
 
