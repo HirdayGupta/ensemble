@@ -22,8 +22,8 @@ struct OverlayScreenView: View {
                     .animation(.linear(duration: 0.1), value: nose)
             } else if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
                 GlassSphere()
-                    .frame(width: 22, height: 22)
-                    .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                    .frame(width: 18, height: 18)
+                    .shadow(color: .black.opacity(0.15), radius: 1.5, y: 0.5)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
                     .animation(.linear(duration: 0.08), value: nose)
             }
@@ -404,22 +404,13 @@ struct SoundWaves: View {
     }
 }
 
-/// A clear lens like a hydrocolloid patch made of glass: almost fully transparent, a faint rim, a soft
-/// inner shade at the bottom and a bright specular glint at the top left. Drawn by hand: the system glass
-/// effect has no backdrop to sample in a transparent overlay window and renders dark there.
+/// The nose dot: a flat, clear patch, like a hydrocolloid patch made of glass. Mostly transparent with a
+/// thin bright rim; no shading or highlights, so it reads as flat.
 private struct GlassSphere: View {
     var body: some View {
-        ZStack {
-            Circle().fill(Color.white.opacity(0.06))
-            Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.18)], center: UnitPoint(x: 0.5, y: 0.35), startRadius: 3, endRadius: 12))
-            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.25), .white.opacity(0.55)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            Ellipse()
-                .fill(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
-                .frame(width: 9, height: 5)
-                .offset(x: -3, y: -5)
-            Circle().fill(Color.white.opacity(0.35)).frame(width: 2.5, height: 2.5).offset(x: 4, y: 5)
-        }
-        .compositingGroup()
+        Circle()
+            .fill(Color.white.opacity(0.16))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1))
+            .background(Circle().fill(.ultraThinMaterial.opacity(0.35)))
     }
 }
