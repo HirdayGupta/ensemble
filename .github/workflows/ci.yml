@@ -1,0 +1,62 @@
+# Build and test on every pull request and every push to main. `ci` is the one job a branch ruleset should require.
+# Workflow-file hygiene (zizmor, pinact, secrets scan) lives in hygiene.yml.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# A second push to a pull request supersedes the first, so cancel the run it replaced. Pushes to main key on the
+# commit instead, so a rapid second push gets its own group rather than dropping the first push's run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    # Liquid Glass (GlassStyle.swift) needs the macOS 26 SDK, so the runner image must carry Xcode 26.
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # Explicit bash turns on pipefail, so a failing `swift build | tee` fails the step instead of tee's exit code hiding it.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build
+        run: swift build -c release 2>&1 | tee /tmp/ensemble-ci-build.log
+
+      - name: Test
+        run: swift test 2>&1 | tee /tmp/ensemble-ci-test.log
+
+      # The two checks below are written by a different change; until they land the steps pass without running anything.
+      - name: Network check
+        run: '[ ! -x scripts/check-network.sh ] || scripts/check-network.sh 2>&1 | tee /tmp/ensemble-ci-network.log'
+
+      - name: Size check
+        run: '[ ! -x scripts/check-size.sh ] || scripts/check-size.sh 2>&1 | tee /tmp/ensemble-ci-size.log'
+
+      # scripts/bundle.sh is not run here: it exits when the keychain has no code-signing identity and has no ad-hoc mode
+      # (docs/RELEASING.md, "What CI does not build").
+
+      - name: Keep the logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-logs
+          path: /tmp/ensemble-ci-*.log
+          if-no-files-found: ignore
+          retention-days: 7

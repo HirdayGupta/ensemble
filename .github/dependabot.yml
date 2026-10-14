@@ -1,0 +1,25 @@
+# Actions are pinned to a commit SHA, which only a scanner can bump, so a version bump arrives as a pull request that
+# ci has to pass like any other change. A week of cooldown lets a bad release surface before it reaches this repository.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Sparkle is pinned exactly in Package.swift and bumped deliberately (docs/RELEASING.md); a pull request here is the
+  # prompt to do that, never an automatic merge. Tools/PerfBench has no dependencies.
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      swift:
+        patterns: ["*"]
