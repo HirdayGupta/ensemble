@@ -50,6 +50,14 @@ final class Coordinator: AppCoordinating {
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
     private var pendingScroll = 0.0
+    /// Smooth scrolling: hand motion adds distance to `scrollRemaining`; a 60 Hz loop delivers a fixed share of
+    /// it each frame (an exponential glide that irons out hand-tracking jitter), and a short coast continues the
+    /// last velocity after the pinch is released, like a trackpad flick.
+    private var scrollRemaining = 0.0
+    private var scrollVelocity = 0.0          // points per second, smoothed, for the coast
+    private var scrollTarget: CGPoint?
+    private var scrollTimer: Timer?
+    private let scrollEase = 0.2              // share of the remaining distance delivered per 1/60 s frame
     private var busy = false                 // a start/stop/send is in flight
     private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
@@ -419,8 +427,15 @@ final class Coordinator: AppCoordinating {
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
-            ClaudeBridge.postScroll(at: CGPoint(x: s.session.frame.midX, y: s.session.frame.midY), dy: pendingScroll)
+            scrollRemaining += pendingScroll
+            scrollVelocity = 0.7 * scrollVelocity + 0.3 * (pendingScroll * 20)     // the tick runs at 20 Hz
+            scrollTarget = CGPoint(x: s.session.frame.midX, y: s.session.frame.midY)
             pendingScroll = 0
+            startScrollLoop()
+        }
+        if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.15, scrollVelocity != 0 {
+            scrollRemaining += scrollVelocity * 0.18                                  // coast after release
+            scrollVelocity = 0
         }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
         let now = CACurrentMediaTime()
@@ -690,6 +705,28 @@ final class Coordinator: AppCoordinating {
         }
         overlay.flashArrival(session.frame)
         Task { _ = await self.bridge.focus(session) }
+    }
+
+    private func startScrollLoop() {
+        guard scrollTimer == nil else { return }
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrollFrame() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        scrollTimer = t
+    }
+
+    private func scrollFrame() {
+        let step = scrollRemaining * scrollEase
+        guard abs(scrollRemaining) >= 0.5, let at = scrollTarget else {
+            scrollRemaining = 0
+            scrollTimer?.invalidate(); scrollTimer = nil
+            return
+        }
+        // Whole pixels only; the fraction stays in `scrollRemaining` so nothing is lost.
+        let px = step.rounded() != 0 ? step.rounded() : (step > 0 ? 1 : -1)
+        scrollRemaining -= px
+        ClaudeBridge.postScroll(at: at, dy: px)
     }
 
     // MARK: - Dot placement
