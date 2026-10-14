@@ -111,7 +111,7 @@ rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Ensemble.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DMG"
+hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ -format ULMO -ov "$DMG"
 rm -rf "$STAGE"
 
 if [ "$DISTRIBUTION" = "1" ]; then
