@@ -27,18 +27,16 @@ else
   echo "warning: Assets/AppIcon.icns missing; run: swift scripts/make-icon.swift" | tee -a "$LOG"
 fi
 
-# SwiftPM's generated Bundle.module looks for Ensemble_Ensemble.bundle in the app's top level, which the signature
-# rejects ("unsealed contents present in the bundle root"), and then in the absolute build directory, which
-# only exists on the build machine. The bundle therefore ships in Contents/Resources (sealed), and code must
-# resolve it with EnsembleResources.bundle (Sources/Ensemble/App/EnsembleResources.swift), not Bundle.module.
-RESOURCE_BUNDLE="$BIN_DIR/Ensemble_Ensemble.bundle"
-if [ -d "$RESOURCE_BUNDLE" ]; then
-  cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+# The face tracker's web folder is copied here directly rather than as a SwiftPM resource bundle, whose generated
+# accessor embeds the build machine's absolute path in the binary (Package.swift). EnsembleResources finds it.
+WEB_SRC="Sources/Ensemble/Resources/web"
+if [ -d "$WEB_SRC" ]; then
+  cp -R "$WEB_SRC" "$APP/Contents/Resources/web"
   # Large web files are stored LZMA-packed (about 5 MB smaller); AssetSchemeHandler unpacks them on the fly.
   echo "[$(date -u +%FT%TZ)] packing web assets" | tee -a "$LOG"
-  swift scripts/pack-web.swift "$APP/Contents/Resources/Ensemble_Ensemble.bundle/web" 2>&1 | tee -a "$LOG"
+  swift scripts/pack-web.swift "$APP/Contents/Resources/web" 2>&1 | tee -a "$LOG"
 else
-  echo "error: $RESOURCE_BUNDLE not found" | tee -a "$LOG"
+  echo "error: $WEB_SRC not found" | tee -a "$LOG"
   exit 1
 fi
 

@@ -7,7 +7,7 @@ import WebKit
 /// `<name>.lzma` (scripts/pack-web.swift: an 8-byte little-endian size, then LZMA data); the page still asks for `<name>`.
 final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "ensemble-asset"
-    static let root: URL? = EnsembleResources.bundle.resourceURL?.appendingPathComponent("web", isDirectory: true)
+    static let root: URL? = EnsembleResources.web
 
     static func mimeType(forExtension ext: String) -> String {
         switch ext.lowercased() {

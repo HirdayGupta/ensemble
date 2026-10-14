@@ -38,12 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { AppEnvironment.shared.stop() }
     }
 
-    /// Packaging check: prints where SwiftPM's resource bundle resolved and whether the web assets are in it.
+    /// Packaging check: prints where the web folder resolved and whether the face model is in it (packed or not).
     @MainActor private static func printResourcePath() {
-        let bundle = EnsembleResources.bundle
-        let found = bundle.url(forResource: "face_landmarker", withExtension: "task", subdirectory: "Resources/web") != nil
-            || bundle.url(forResource: "face_landmarker", withExtension: "task", subdirectory: "web") != nil
-        print("resource bundle: \(bundle.bundlePath)")
+        let web = EnsembleResources.web
+        let found = ["face_landmarker.task", "face_landmarker.task.lzma"].contains { name in
+            web.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(name).path) } ?? false
+        }
+        print("web folder: \(web?.path ?? "none")")
         print("face_landmarker.task found: \(found)")
     }
 }

@@ -16,8 +16,9 @@ let package = Package(
             name: "Ensemble",
             dependencies: ["EnsembleCore", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Ensemble",
-            exclude: ["Info.plist", "Ensemble.entitlements"],
-            resources: [.copy("Resources/web")],
+            // The web folder is copied by scripts/bundle.sh, not declared as a SwiftPM resource: SwiftPM's generated
+            // resource accessor embeds the build machine's absolute path (its home folder and user name) in the binary.
+            exclude: ["Info.plist", "Ensemble.entitlements", "Resources"],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", "Sources/Ensemble/Info.plist",

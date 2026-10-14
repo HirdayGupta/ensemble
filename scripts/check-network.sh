@@ -14,7 +14,7 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 
 WEB="Sources/Ensemble/Resources/web"
 APP="build/Ensemble.app"
-BUNDLE_WEB="$APP/Contents/Resources/Ensemble_Ensemble.bundle/web"
+BUNDLE_WEB="$APP/Contents/Resources/web"
 
 URL_RE='(https?|wss?|ftp)://[^[:space:]"<>)]*'
 SWIFT_API_RE='URLSession|NSURLConnection|URLRequest|NWConnection|NWListener|NWBrowser|NWPathMonitor|import Network|CFNetwork|CFHTTP|CFSocket|CFStream|CFReadStream|CFWriteStream|NSStream|getStreamsToHost|NetService|MultipeerConnectivity|getaddrinfo|gethostbyname|[^A-Za-z_.]socket\(|WebSocket|SCNetworkReachability'
@@ -102,6 +102,8 @@ if [ -d "$APP" ]; then
   log "built executable $EXE"
   strings -a -n 6 "$EXE" | grep -noE "$URL_RE" | sed "s|^|$EXE:|" | report "URL in executable"
   nm -u "$EXE" 2>/dev/null | grep -E "$NATIVE_SYMBOL_RE" | sed "s|^|$EXE:0:|" | report "network symbol in executable"
+  # Nothing about the build machine ships: no home-folder path (which carries the account name) anywhere in the app.
+  grep -rlaE "/Users/[^/[:space:]]+/" "$APP" 2>/dev/null | sed "s|^|build-machine path in |" >> "$FOUND"
   if [ -d "$BUNDLE_WEB" ]; then
     UNPACKED=$(mktemp -d)
     log "unpack $BUNDLE_WEB"
