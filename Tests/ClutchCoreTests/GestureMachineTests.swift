@@ -411,7 +411,7 @@ import Testing
         s.hold(.pointDown, for: 0.5)
         #expect(s.machine.progress?.action == .scrollDown)
         s.hold(.openPalm, for: 0.1)
-        #expect(s.machine.progress?.action == .cancel)
+        #expect(s.machine.progress == nil)          // an open hand shows nothing
     }
 }
 

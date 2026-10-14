@@ -106,7 +106,8 @@ public final class GestureMachine {
         }
         if talking { return nil }
         if r.pose == mapping.send { return make(.send, sendHold, (!r.startedWhileTalking || r.stoppedForSend) && !r.fired) }
-        if r.pose == mapping.cancel { return make(.cancel, Self.cancelHold, !r.startedWhileTalking && !r.fired) }
+        // An open hand is just a resting hand: nothing to show (cancel has nothing to cancel since send became a hold).
+        if r.pose == mapping.cancel { return nil }
         if let direction = scrollDirection(r.pose) {
             let p = make(direction < 0 ? .scrollUp : .scrollDown, Self.scrollHold, !r.startedWhileTalking)
             return GestureProgress(pose: p.pose, action: p.action, progress: p.progress, willAct: p.willAct, active: p.willAct && p.progress >= 1)
