@@ -12,14 +12,16 @@ struct OverlayScreenView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if let a = model.arrival, let local = local(a.frame) {
-                ArrivalGlow(frame: local).id(a.id)
-            }
             if model.showHighlight || model.listening, let target = model.target, let local = local(target) {
+                // Switching sessions cross-fades in place (the old outline dissolves, the new one condenses on
+                // its window) instead of sliding a rectangle across; the same slow fade as when hands go to the
+                // keyboard or trackpad, in both directions.
                 HighlightView(frame: local, listening: model.listening)
                     .opacity(model.handsOnInput && !model.listening ? 0 : 1)
-                    .animation(model.handsOnInput ? .easeOut(duration: 0.9) : .easeIn(duration: 0.35), value: model.handsOnInput)
-                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.9), value: model.handsOnInput)
+                    .id(highlightKey(target))
+                    .transition(.asymmetric(insertion: .opacity.animation(.easeInOut(duration: 0.55).delay(0.12)),
+                                            removal: .opacity.animation(.easeInOut(duration: 0.45))))
             }
             // While listening there is no dot: a red marker on the session's edge points at where the nose went.
             if model.listening, let nose = model.nose, let target = model.target, let local = local(target) {
@@ -38,7 +40,7 @@ struct OverlayScreenView: View {
             }
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: model.target)
+        .animation(.easeInOut(duration: 0.5), value: model.target.map(highlightKey))
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
@@ -53,6 +55,9 @@ struct OverlayScreenView: View {
         if let c = model.countdown, c.sessionFrame.intersects(screenFrame) { return true }
         return model.target == nil && model.countdown == nil && isPrimary
     }
+
+    /// One identity per session frame: a new frame is a new outline that fades in, never a moving one.
+    private func highlightKey(_ r: CGRect) -> String { "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))" }
 
     private func local(_ global: CGRect) -> CGRect? {
         guard global.intersects(screenFrame) else { return nil }
@@ -83,6 +88,7 @@ private struct HighlightView: View {
     let frame: CGRect
     let listening: Bool
     @State private var breathe = false
+    @State private var settled = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -91,8 +97,13 @@ private struct HighlightView: View {
             .strokeBorder(color.opacity(listening ? (breathe ? 0.95 : 0.6) : 0.9), lineWidth: listening ? 3.5 : 3)
             .shadow(color: color.opacity(0.6), radius: listening ? (breathe ? 16 : 8) : 10)
             .frame(width: frame.width, height: frame.height)
+            .scaleEffect(settled ? 1 : 1.012)
+            .blur(radius: settled ? 0 : 3)
             .position(x: frame.midX, y: frame.midY)
-            .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true } }
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.6)) { settled = true }
+                if listening { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathe = true } }
+            }
     }
 }
 
