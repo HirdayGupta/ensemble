@@ -18,7 +18,7 @@ struct OverlayScreenView: View {
             if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
                 NoseDot(gesture: model.gesture)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
-                    .animation(.smooth(duration: 0.18), value: nose)
+                    .animation(.linear(duration: 0.08), value: nose)
             }
             if showsIsland {
                 IslandView(model: model)

@@ -23,7 +23,7 @@ final class Coordinator: AppCoordinating {
     /// Where the gesture bubble sits while a gesture is held or dictation runs; it does not move meanwhile.
     private var frozenPoint: CGPoint?
     private var gestureShowing = false
-    private let dotLeash: CGFloat = 36
+    private let dotLeash: CGFloat = 24
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
     private var lastManyFacesT: TimeInterval = -.infinity

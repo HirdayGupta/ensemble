@@ -33,7 +33,21 @@ import Testing
 
     @Test func heldPinchIsNotATap() {
         let s = sim()
-        s.tap(closedFor: 1.0); s.tap(closedFor: 1.0)
+        s.tap(closedFor: 2.5); s.tap(closedFor: 2.5)
+        #expect(s.count(.talkBegan) == 0)
+    }
+
+    @Test func slowPinchesStillCount() {
+        let s = sim()
+        s.tap(closedFor: 1.4); s.tap(closedFor: 1.4)
+        #expect(s.count(.talkBegan) == 1)
+    }
+
+    @Test func oneFrameSpikeInsideAHeldPinchIsNotATap() {
+        let s = sim()
+        s.pinch(0.2, for: 0.2)
+        s.pinch(0.07, for: 0.5); s.pinch(0.3, for: 1.0 / 30); s.pinch(0.07, for: 0.5)
+        s.pinch(0.2, for: 1)
         #expect(s.count(.talkBegan) == 0)
     }
 

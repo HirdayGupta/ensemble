@@ -8,15 +8,21 @@ public final class GestureMachine {
     public private(set) var talking = false
     public var talkStyle: TalkStyle = .doubleTap
     /// doubleTap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
-    /// Measured on Akshay's hand (2026-10-14): a tap closes to 0.03–0.08 and, at tapping speed, only reopens to
-    /// 0.12–0.18; a relaxed hand rests around 0.20–0.26.
-    public var pinchClosed = 0.09
-    public var pinchOpen = 0.13
-    static let tapMax = 0.6            // longest a pinch may stay closed and still count as a tap
-    static let tapGap = 0.7            // second tap must close within this long after the first opened
+    /// Measured on Akshay's hand (2026-10-14): a pinch closes to 0.03–0.11 palm lengths, often held 1–2 s, and
+    /// between quick taps only reopens to 0.12–0.18; a relaxed hand rests around 0.20–0.26. Single-frame spikes
+    /// occur inside a held pinch, so both edges need two frames in a row.
+    public var pinchClosed = 0.12
+    static let reopenAbove = 0.14            // reopened when above this AND `reopenRise` above the closed minimum
+    static let reopenRise = 0.06
+    static let edgeFrames = 2
+    static let tapMin = 0.05
+    static let tapMax = 2.0            // longest a pinch may stay closed and still count as a tap
+    static let tapGap = 0.8            // second pinch must close within this long after the first opened
     static let toggleCooldown = 0.8
     private var pinchIsClosed = false
     private var pinchClosedAt: TimeInterval?
+    private var pinchMin = 1.0
+    private var edgeCount = 0
     private var lastTapEnd: TimeInterval?
     private var lastToggleAt: TimeInterval = -.infinity
     /// gatherBloom: after a start, the hand must first leave the talk pose (or the frame) before a stop counts.
@@ -205,18 +211,25 @@ public final class GestureMachine {
     /// shape works; a pinch held longer than `tapMax` (holding something) never counts.
     private func trackTaps(_ h: HandObservation, into intents: inout [GestureIntent]) {
         guard h.present, let d = h.pinch else {
-            pinchIsClosed = false; pinchClosedAt = nil
+            pinchIsClosed = false; pinchClosedAt = nil; edgeCount = 0
             return
         }
-        if !pinchIsClosed, d < pinchClosed {
-            pinchIsClosed = true
-            pinchClosedAt = h.t
+        if !pinchIsClosed {
+            edgeCount = d < pinchClosed ? edgeCount + 1 : 0
+            guard edgeCount >= Self.edgeFrames else { return }
+            pinchIsClosed = true; edgeCount = 0
+            pinchClosedAt = h.t; pinchMin = d
             if let end = lastTapEnd, h.t - end > Self.tapGap { lastTapEnd = nil }
-        } else if pinchIsClosed, d > pinchOpen {
-            pinchIsClosed = false
+        } else {
+            pinchMin = min(pinchMin, d)
+            edgeCount = d > max(Self.reopenAbove, pinchMin + Self.reopenRise) ? edgeCount + 1 : 0
+            if let start = pinchClosedAt, h.t - start > Self.tapMax { lastTapEnd = nil }   // held: not a tap
+            guard edgeCount >= Self.edgeFrames else { return }
+            pinchIsClosed = false; edgeCount = 0
             guard let start = pinchClosedAt else { return }
             pinchClosedAt = nil
-            guard h.t - start <= Self.tapMax else { lastTapEnd = nil; return }
+            let closedFor = h.t - start
+            guard closedFor >= Self.tapMin, closedFor <= Self.tapMax else { lastTapEnd = nil; return }
             if let end = lastTapEnd, start - end <= Self.tapGap, h.t - lastToggleAt >= Self.toggleCooldown {
                 lastTapEnd = nil
                 lastToggleAt = h.t
@@ -224,8 +237,6 @@ public final class GestureMachine {
             } else {
                 lastTapEnd = h.t
             }
-        } else if pinchIsClosed, let start = pinchClosedAt, h.t - start > Self.tapMax {
-            lastTapEnd = nil      // held pinch: not a tap
         }
     }
 
