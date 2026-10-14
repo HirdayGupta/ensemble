@@ -10,7 +10,7 @@ struct OverlayScreenView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if model.showHighlight, let target = model.target, let local = local(target) {
+            if model.showHighlight, !model.listening, let target = model.target, let local = local(target) {
                 HighlightView(frame: local)
                     .transition(.opacity)
             }
@@ -24,10 +24,11 @@ struct OverlayScreenView: View {
             if let countdown = model.countdown, let local = local(countdown.sessionFrame) {
                 CountdownPill(countdown: countdown, hint: model.cancelHint, sessionFrame: local)
             }
-            if model.showNoseDot, let nose = model.nose, screenFrame.contains(nose) {
+            // The dot shows when the setting is on, and always while a gesture is being made.
+            if model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
                 NoseDot(gesture: model.gesture)
                     .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
-                    .animation(.linear(duration: 0.06), value: nose)
+                    .animation(.smooth(duration: 0.18), value: nose)
             }
             if isPrimary, let banner = model.banner {
                 BannerView(banner: banner)
@@ -70,8 +71,8 @@ private struct ListeningView: View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         ZStack {
             shape
-                .strokeBorder(Color.red.opacity(pulse ? 0.95 : 0.45), lineWidth: pulse ? 4 : 2.5)
-                .shadow(color: Color.red.opacity(pulse ? 0.7 : 0.25), radius: pulse ? 22 : 10)
+                .strokeBorder(Color.white.opacity(pulse ? 0.75 : 0.4), lineWidth: 2)
+                .shadow(color: Color.black.opacity(0.25), radius: 8)
                 .frame(width: frame.width, height: frame.height)
             ListeningPill()
                 .position(x: frame.width / 2, y: 30)
@@ -87,7 +88,7 @@ private struct ListeningView: View {
 private struct ListeningPill: View {
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "mic.fill").foregroundStyle(.red)
+            SoundWaves(color: .red).frame(width: 22, height: 16)
             Text("Listening").fontWeight(.semibold)
         }
         .font(.callout)
@@ -131,10 +132,13 @@ private struct NoseDot: View {
                     .rotationEffect(.degrees(-90))
                     .padding(1.5)
                     .animation(.linear(duration: 0.08), value: g.progress)
-                Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .symbolEffect(.pulse, isActive: g.active)
+                if g.action == .talk && g.active {
+                    SoundWaves(color: tint).frame(width: 20, height: 16)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
             } else {
                 Circle().strokeBorder(Color.accentColor, lineWidth: 3)
             }
@@ -197,5 +201,23 @@ private struct BannerView: View {
         .padding(.vertical, 12)
         .frame(maxWidth: 420, alignment: .leading)
         .glassSurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+/// Five bars bouncing at different rates: a live "listening" sign.
+struct SoundWaves: View {
+    let color: Color
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<5, id: \.self) { i in
+                    let phase = t * (5.0 + Double(i) * 1.7) + Double(i)
+                    let h = 0.3 + 0.7 * abs(sin(phase))
+                    Capsule().fill(color).frame(width: 2.5).frame(maxHeight: .infinity).scaleEffect(y: h)
+                }
+            }
+        }
     }
 }

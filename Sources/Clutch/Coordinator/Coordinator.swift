@@ -18,6 +18,12 @@ final class Coordinator: AppCoordinating {
 
     private var latestHead: HeadObservation?
     private var faceCount = 0
+    /// The drawn dot: follows the filtered nose on a leash so small head wobble never moves it.
+    private var dotPoint: CGPoint?
+    /// Where the gesture bubble sits while a gesture is held or dictation runs; it does not move meanwhile.
+    private var frozenPoint: CGPoint?
+    private var gestureShowing = false
+    private let dotLeash: CGFloat = 36
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
     private var lastManyFacesT: TimeInterval = -.infinity
@@ -187,7 +193,14 @@ final class Coordinator: AppCoordinating {
         if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
             // Claude only: the nose counts only over a Claude session whose window is actually in front there.
             let under = sessions.first { $0.frame.contains(p) && claudeInFront(at: p, t: head.t) }
-            state.nosePoint = under == nil ? nil : p
+            if under == nil {
+                dotPoint = nil
+            } else if let d = dotPoint {
+                let dist = hypot(p.x - d.x, p.y - d.y)
+                if dist > dotLeash { let k = (dist - dotLeash) / dist; dotPoint = CGPoint(x: d.x + (p.x - d.x) * k, y: d.y + (p.y - d.y) * k) }
+            } else {
+                dotPoint = p
+            }
             if under?.id == target?.id {
                 candidate = nil
             } else if let c = candidate, c.session?.id == under?.id {
@@ -196,12 +209,12 @@ final class Coordinator: AppCoordinating {
                 candidate = (under, head.t)
             }
         } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 && head.faceCount == 0 {
-            state.nosePoint = nil      // face hidden for a moment (hand in front): keep the last target
+            // face hidden for a moment (hand in front): keep the last target and dot
         } else {
-            state.nosePoint = nil
+            dotPoint = nil
             target = nil
         }
-        state.targetFrame = target?.frame
+        updateDot()
         pushOverlay()
     }
 
@@ -210,7 +223,11 @@ final class Coordinator: AppCoordinating {
         guard !state.calibrating else { return }
         for intent in gestures.push(hand) { apply(intent) }
         let onClaude = target != nil || listeningSession != nil || pendingSend != nil
-        overlay.setGesture(cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress)
+        let progress = cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress
+        gestureShowing = progress != nil
+        overlay.setGesture(progress)
+        updateDot()
+        pushOverlay()
     }
 
     private func handle(light: FrameLight) {
@@ -277,7 +294,7 @@ final class Coordinator: AppCoordinating {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
         case .sendRequested: requestSend()
-        case .cancelRequested: if pendingSend != nil { pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
+        case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
         }
     }
@@ -353,18 +370,20 @@ final class Coordinator: AppCoordinating {
     }
 
     private func requestSend() {
-        guard settings.mapping.send != nil, pendingSend == nil, listeningSession == nil, !busy else { return }
+        guard settings.mapping.send != nil else { return }
+        guard pendingSend == nil, listeningSession == nil, !busy else { refuse("Send ignored: busy (\(pendingSend != nil ? "countdown running" : listeningSession != nil ? "still listening" : "a step in flight"))"); return }
         if let why = commonRefusal() { refuse(why); return }
         guard let spoken = lastSpoken, Date().timeIntervalSince(spoken.stoppedAt) <= sendWindow else {
             refuse("Nothing dictated in the last \(Int(sendWindow)) seconds"); return
         }
-        guard let session = target, session.id == spoken.session.id else { refuse("Look at the session you dictated into"); return }
-        if ClaudeBridge.secondsSinceUserInput() < Date().timeIntervalSince(spoken.stoppedAt) { refuse("Keyboard or mouse used since dictation"); return }
+        let session = spoken.session
+        if ClaudeBridge.secondsSinceUserInput() < Date().timeIntervalSince(spoken.stoppedAt) { refuse("Keyboard or mouse used since dictation; not sending"); return }
         if let other = bridge.otherProcessCapturingInput() { refuse("\(other) is using a microphone"); return }
         Task { @MainActor in
             guard let text = await self.bridge.draftText(session), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.refuse("The draft is empty"); return
             }
+            ClutchLog.write("send countdown started (\(text.count) characters)")
             self.pendingSend = (session, Date(), text)
             Notifier.shared.playCue(.listenStart)
         }
@@ -375,7 +394,8 @@ final class Coordinator: AppCoordinating {
         let duration = settings.sendCountdownSeconds + words * 0.03
         let elapsed = Date().timeIntervalSince(send.started)
         // Cancel on any keyboard or mouse use, or when the nose leaves the session.
-        if ClaudeBridge.secondsSinceUserInput() < elapsed || target?.id != send.session.id || cover.covered {
+        if ClaudeBridge.secondsSinceUserInput() < elapsed || cover.covered {
+            refuse(cover.covered ? "Send cancelled: camera covered" : "Send cancelled: keyboard or mouse used")
             pendingSend = nil; state.countdown = nil; pushOverlay(); Notifier.shared.playCue(.refused); return
         }
         if elapsed < duration {
@@ -391,7 +411,7 @@ final class Coordinator: AppCoordinating {
             let result = await self.bridge.sendDraft(send.session)
             self.busy = false
             switch result {
-            case .done: self.lastSpoken = nil; Notifier.shared.playCue(.send)
+            case .done: ClutchLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
             case .refused(let why), .unknown(let why): self.refuse("Not sent: \(why)")
             }
         }
@@ -403,6 +423,26 @@ final class Coordinator: AppCoordinating {
         if let s = scrollSession { session = s.session } else if let t = target { session = t } else { return }
         scrollSession = (session, Date())
         bridge.scroll(session, dy: dy)
+    }
+
+    // MARK: - Dot placement
+
+    /// What the dot shows: frozen in place during a gesture or dictation; otherwise only near the edge of the
+    /// session (where you may be moving to another one) and only when the dot setting is on.
+    private func updateDot() {
+        if gestureShowing || listeningSession != nil {
+            if frozenPoint == nil { frozenPoint = dotPoint ?? listeningSession.map { CGPoint(x: $0.frame.midX, y: $0.frame.maxY - 80) } }
+            state.nosePoint = frozenPoint
+        } else {
+            frozenPoint = nil
+            if let d = dotPoint, let t = target, settings.showNoseDot {
+                let inner = t.frame.insetBy(dx: t.frame.width * 0.15, dy: t.frame.height * 0.15)
+                state.nosePoint = inner.contains(d) ? nil : d
+            } else {
+                state.nosePoint = nil
+            }
+        }
+        state.targetFrame = listeningSession?.frame ?? target?.frame
     }
 
     // MARK: - Screen and version checks
@@ -445,6 +485,9 @@ final class Coordinator: AppCoordinating {
 
     private func refuse(_ why: String) {
         state.lastRefusal = why
+        if gestureShowing || pendingSend != nil || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
+            overlay.showBanner(title: "Clutch", body: why, seconds: 2.5)
+        }
         ClutchLog.write("refused: \(why)")
     }
 
@@ -460,7 +503,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func pushOverlay() {
-        overlay.update(target: target?.frame, nose: state.nosePoint, listening: state.listening,
+        overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
                        countdown: state.countdown, showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         updateStatus()
     }
