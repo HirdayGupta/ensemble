@@ -6,7 +6,7 @@ import SwiftUI
 struct ClutchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     private let env = AppEnvironment.shared
-    @StateObject private var icon = StatusIconModel(state: AppEnvironment.shared.state)
+    @StateObject private var icon = StatusIconModel(state: AppEnvironment.shared.state, settings: AppEnvironment.shared.settings)
 
     var body: some Scene {
         MenuBarExtra {
@@ -54,8 +54,8 @@ final class StatusIconModel: ObservableObject {
     @Published private(set) var image = StatusIconModel.render(status: .off, listening: false)
     private var cancellable: AnyCancellable?
 
-    init(state: AppState) {
-        cancellable = Publishers.CombineLatest3(state.$status, state.$listening, state.$enabled)
+    init(state: AppState, settings: SettingsStore) {
+        cancellable = Publishers.CombineLatest3(state.$status, state.$listening, settings.$enabled)
             .map { status, listening, enabled in (enabled ? status : .off, listening && enabled) }
             .removeDuplicates { $0 == $1 }
             .sink { [weak self] status, listening in

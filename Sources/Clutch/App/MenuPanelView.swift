@@ -35,7 +35,7 @@ struct MenuPanelView: View {
                 .glassSurface(Circle())
             VStack(alignment: .leading, spacing: 2) {
                 Text("Clutch").font(.headline)
-                Text(state.enabled ? state.status.title : "Off")
+                Text(settings.enabled ? state.status.title : "Off")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -53,7 +53,7 @@ struct MenuPanelView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
-            if state.enabled, case .needsPermission(let what) = state.status {
+            if settings.enabled, case .needsPermission(let what) = state.status {
                 row(symbol: "lock", text: Permissions.guidance(for: what), tint: .orange)
                 Button { Permissions.openSettings(for: what) } label: {
                     Label("Open \(what) settings", systemImage: "gearshape").frame(maxWidth: .infinity)
@@ -74,7 +74,7 @@ struct MenuPanelView: View {
 
     private var cameraLine: String {
         let name = state.cameraName ?? "No camera"
-        return state.enabled && state.fps > 0 ? "\(name) · \(state.fps) fps" : name
+        return settings.enabled && state.fps > 0 ? "\(name) · \(state.fps) fps" : name
     }
 
     private func row(symbol: String, text: String, tint: Color = .secondary) -> some View {

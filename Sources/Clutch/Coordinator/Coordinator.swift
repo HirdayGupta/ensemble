@@ -55,6 +55,7 @@ final class Coordinator: AppCoordinating {
     private var lastCameraRestart = Date.distantPast
     private var calibrationPending = false
     private var refreshInFlight = false
+    private var promptedAccessibility = false
     /// Front-window check cache: who owns the window under the nose, refreshed at most every 0.15 s.
     private var topOwner: (at: CGPoint, t: TimeInterval, pid: pid_t?)?
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
@@ -76,17 +77,18 @@ final class Coordinator: AppCoordinating {
         self.settings = settings
         self.overlay = overlay
         if let data = settings.calibration { pointer.calibration = data }
+        if pointer.isCalibrated, settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
         gestures.mapping = settings.mapping
         pointer.setSmoothing(settings.pointerSmoothing)
 
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.pointer.setSmoothing(k) }.store(in: &cancellables)
-        settings.$enabled.dropFirst().removeDuplicates().sink { [weak self] on in
+        settings.$enabled.removeDuplicates().dropFirst().sink { [weak self] on in
             guard let self else { return }
             // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
             DispatchQueue.main.async { on ? self.start() : self.stop() }
         }.store(in: &cancellables)
-        settings.$cameraName.dropFirst().removeDuplicates().sink { [weak self] _ in
+        settings.$cameraName.removeDuplicates().dropFirst().sink { [weak self] _ in
             guard let self, self.running else { return }
             DispatchQueue.main.async { self.stop(); self.start() }
         }.store(in: &cancellables)
@@ -122,8 +124,12 @@ final class Coordinator: AppCoordinating {
         state.cameraNames = cameraNames
         sweep()
         guard settings.enabled else { state.status = .off; return }
-        if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
-            ClutchLog.write("accessibility permission missing")
+        if !Permissions.accessibilityTrusted {
+            ClutchLog.write("accessibility permission missing (if Clutch is already listed in Settings, remove it and add it again)")
+            if !promptedAccessibility {
+                promptedAccessibility = true
+                _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+            }
         }
         running = true
         accessibilityTrusted = Permissions.accessibilityTrusted
@@ -133,15 +139,18 @@ final class Coordinator: AppCoordinating {
         lastCameraRestart = Date()
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
+        tickTimer = commonModeTimer(1.0 / 20.0) { [weak self] in self?.tick() }
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshSessions() }
-        }
+        refreshTimer = commonModeTimer(1.0) { [weak self] in self?.refreshSessions() }
         refreshSessions()
         updateStatus()
+    }
+
+    /// Common run-loop mode keeps the timers firing while a slider is dragged or a menu is open.
+    private func commonModeTimer(_ interval: TimeInterval, _ fire: @escaping @MainActor () -> Void) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in MainActor.assumeIsolated { fire() } }
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
     }
 
     func stop() {
@@ -183,21 +192,39 @@ final class Coordinator: AppCoordinating {
             }
             return
         }
+        // Calibration owns the hands and the head: end any dictation and drop any pending send first, because
+        // gesture events are ignored while it runs and a held talk pose would never be seen released.
+        pendingSend = nil; state.countdown = nil; sendAfterStop = false
+        gestures.reset()
+        if listeningSession != nil { endTalkWhenIdle(reason: "calibrating") }
+        let fingerprint = ScreenFacts.displayFingerprint()
+        let camera = state.cameraName
         state.calibrating = true
         CalibrationController.shared.run(headSource: { [weak self] in self?.latestHead }) { [weak self] samples in
             guard let self else { return }
             self.state.calibrating = false
             ClutchLog.write("calibration samples: \(samples.count)")
             guard !samples.isEmpty else { return }
+            guard ScreenFacts.displayFingerprint() == fingerprint, self.state.cameraName == camera else {
+                self.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
+                return
+            }
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
                 self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = ScreenFacts.displayFingerprint()
+                self.settings.calibrationDisplays = fingerprint
                 self.pointer.resetFilter()
             } else {
                 self.refuse("Calibration did not fit; try again sitting where you normally work")
             }
             self.updateStatus()
+        }
+    }
+
+    private func endTalkWhenIdle(reason: String) {
+        Task { @MainActor in
+            for _ in 0..<30 where self.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
+            if self.listeningSession != nil { self.endTalk(reason: reason) }
         }
     }
 
@@ -556,7 +583,6 @@ final class Coordinator: AppCoordinating {
     /// The calibration is usable only on the screen arrangement it was made on.
     private var calibratedHere: Bool {
         guard pointer.isCalibrated else { return false }
-        if settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
         return settings.calibrationDisplays == ScreenFacts.displayFingerprint()
     }
 
@@ -570,6 +596,7 @@ final class Coordinator: AppCoordinating {
     private func screensChanged() {
         ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
         if listeningSession != nil { endTalk(reason: "screens changed") }
+        if state.calibrating { CalibrationController.shared.cancel() }
         pendingSend = nil
         target = nil
         updateStatus()

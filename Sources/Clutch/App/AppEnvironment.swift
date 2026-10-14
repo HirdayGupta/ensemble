@@ -50,10 +50,7 @@ final class AppEnvironment {
 
         notifier.overlay = overlay
         notifier.settings = settings
-        state.enabled = settings.enabled
 
-        settings.$enabled.removeDuplicates().sink { [weak self] on in self?.state.enabled = on }.store(in: &cancellables)
-        state.$enabled.removeDuplicates().sink { [weak self] on in self?.settings.enabled = on }.store(in: &cancellables)
         Publishers.CombineLatest(settings.$showNoseDot, settings.$showHighlight)
             .sink { [weak self] dot, highlight in self?.overlay.setVisibility(showNoseDot: dot, showHighlight: highlight) }
             .store(in: &cancellables)
