@@ -117,6 +117,8 @@ public final class GestureMachine {
     public func reset() {
         talking = false
         pinchIsClosed = false; pinchClosedAt = nil; lastTapEnd = nil
+        pinchToggled = false; dragging = false; isDragging = false; edgeCount = 0
+        lastToggleAt = -.infinity
         stopArmed = false
         gatheredForStopAt = nil
         run = nil
@@ -125,6 +127,17 @@ public final class GestureMachine {
         absentStart = nil
         lastPushT = nil
         lastTalkEndT = nil
+    }
+
+    /// The coordinator refused or failed to start the dictation this machine just announced: forget it
+    /// without emitting an end, so the next double tap starts again instead of being read as a stop.
+    public func abortTalk() {
+        talking = false
+        lastTapEnd = nil
+        lastToggleAt = -.infinity
+        stopArmed = false
+        gatheredForStopAt = nil
+        releaseStart = nil
     }
 
     public func push(_ h: HandObservation) -> [GestureIntent] {
