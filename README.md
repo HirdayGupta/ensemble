@@ -6,7 +6,6 @@
 
 <p align="center">
 <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/license-MIT-2f6f4e?logo=opensourceinitiative&logoColor=white"></a>
-<a href="https://github.com/oficiallyAkshay/clonometer"><img alt="clones of this repository, last seven days and all time" src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/oficiallyAkshay/ensemble/badges/clones.json&query=$.badge&label=clones&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">Works with<br>
@@ -56,13 +55,13 @@ It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your 
 
 ## Security and limits
 
-No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility and never for the microphone.
+No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility, and for the microphone only if you turn on the optional live sound bars.
 
 - Never stores or sends a camera frame.
 - Never records what you dictate or what is on your screen: it presses Claude's buttons and logs events and numbers only.
 - Never reaches the internet from the face tracker page: every web address is blocked.
 - Never updates itself unless you turn on the optional updater, which stays off until the maintainer configures a signing key.
 - Never sends telemetry, analytics or crash reports.
-- Never acts on another app: with anything else in front, gestures do nothing.
+- Never acts on another app: with anything else in front, gestures do nothing. The one exception is the audio pause, which presses the system play/pause key while you dictate, and can be turned off.
 
 By default a thumbs-up sends only within 30 seconds of your dictation ending, only into the session you dictated into, and only if you have not typed or clicked since. Gesture send can be turned off in Settings, and so can the audio pause. A Claude update that renames its controls can break Ensemble until it is updated, pointing is as precise as a head pose and picks a session, not a line of text, and a second face in view pauses every gesture.
