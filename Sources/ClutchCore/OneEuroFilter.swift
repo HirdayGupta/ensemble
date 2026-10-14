@@ -19,6 +19,8 @@ public struct OneEuroFilter {
     public mutating func reset() { lastT = nil }
 
     public mutating func filter(_ x: Double, at t: Double) -> Double {
+        // A NaN or infinity must never enter the state: it would poison every later reading until a reset.
+        guard x.isFinite, t.isFinite else { return lastFiltered }
         guard let prevT = lastT else {
             lastT = t; lastRaw = x; lastFiltered = x; lastDerivative = 0
             return x

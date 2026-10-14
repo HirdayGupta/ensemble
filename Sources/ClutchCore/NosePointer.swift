@@ -59,14 +59,16 @@ public final class NosePointer {
     }
 
     public func raw(for h: HeadObservation) -> CGPoint? {
-        guard let m = model else { return nil }
-        return CGPoint(x: m.a * h.yaw + m.b * h.pitch + m.c, y: m.d * h.yaw + m.e * h.pitch + m.f)
+        guard let m = model, h.yaw.isFinite, h.pitch.isFinite else { return nil }
+        let x = m.a * h.yaw + m.b * h.pitch + m.c, y = m.d * h.yaw + m.e * h.pitch + m.f
+        guard x.isFinite, y.isFinite else { return nil }
+        return CGPoint(x: x, y: y)
     }
 
     /// Filtered point. The filter runs in units of the calibration box so its cutoffs mean the same
     /// thing on any display size.
     public func point(for h: HeadObservation) -> CGPoint? {
-        guard let m = model, let r = raw(for: h) else { return nil }
+        guard let m = model, h.t.isFinite, let r = raw(for: h) else { return nil }
         let u = filterX.filter((r.x - m.minX) / m.width, at: h.t)
         let v = filterY.filter((r.y - m.minY) / m.height, at: h.t)
         return CGPoint(x: u * m.width + m.minX, y: v * m.height + m.minY)
