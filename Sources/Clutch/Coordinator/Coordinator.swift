@@ -284,7 +284,7 @@ final class Coordinator: AppCoordinating {
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
         if head.t - headStats.since >= 5 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
-            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil)")
+            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil), \(bridge.micSnapshot)")
             headStats = (head.t, 0, [0, 0, 0])
         }
         guard !state.calibrating else { return }
@@ -461,6 +461,7 @@ final class Coordinator: AppCoordinating {
                 self.listeningSession = nil
                 self.state.listening = false
                 self.safety.episodeEnded()
+                ClutchLog.write("start dictation \(result): \(self.bridge.micSnapshot)")
                 self.refuse("Could not start dictation: \(why)")
                 self.checkClaudeUpdate()
             }
@@ -493,6 +494,7 @@ final class Coordinator: AppCoordinating {
                 }
                 Notifier.shared.playCue(.listenEnd)
             case .refused(let why), .unknown(let why):
+                ClutchLog.write("stop dictation \(result): \(self.bridge.micSnapshot)")
                 self.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
                 self.checkClaudeUpdate()
             }

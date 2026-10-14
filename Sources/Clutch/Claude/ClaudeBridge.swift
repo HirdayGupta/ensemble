@@ -25,6 +25,7 @@ final class ClaudeBridge: @unchecked Sendable {
     private var noScrollAreaUntil: [String: Date] = [:]
     private var shuttingDown = false
     private var axDisabled = false
+    private var lastMicReading: (text: String, at: Date)?
 
     static let ambientInputAllowlist: Set<String> = []
 
@@ -50,6 +51,16 @@ final class ClaudeBridge: @unchecked Sendable {
     /// What a refusal says when a session cannot be found.
     var sessionNotFound: String {
         accessibilityDisabled ? "Accessibility is off or stale for Clutch; remove it in Settings and add it again" : "session not found"
+    }
+
+    func noteMic(_ text: String) { lock.lock(); lastMicReading = (text, Date()); lock.unlock() }
+
+    /// Both mic sources as of the last read ("mic AX value=1 label=... capture=true, 2.1 s ago"), for logs.
+    /// Cached from the last bridge call; reading it never touches Accessibility.
+    var micSnapshot: String {
+        lock.lock(); defer { lock.unlock() }
+        guard let r = lastMicReading else { return "mic not read yet" }
+        return "mic \(r.text), \(String(format: "%.1f", Date().timeIntervalSince(r.at))) s ago"
     }
 
     private func noteAX(_ error: AXError) {
