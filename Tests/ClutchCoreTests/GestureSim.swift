@@ -45,7 +45,7 @@ final class GestureSim {
     }
 
     /// One quick tap: open, closed briefly, open.
-    func tap(closedFor: Double = 0.15) { pinch(0.6, for: 0.1); pinch(0.1, for: closedFor); pinch(0.6, for: 0.1) }
+    func tap(closedFor: Double = 0.15) { pinch(0.2, for: 0.1); pinch(0.04, for: closedFor); pinch(0.2, for: 0.1) }
 
     func absent(for duration: Double) {
         for _ in 0..<Int((duration * fps).rounded()) {

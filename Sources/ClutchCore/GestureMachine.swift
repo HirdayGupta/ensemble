@@ -8,9 +8,11 @@ public final class GestureMachine {
     public private(set) var talking = false
     public var talkStyle: TalkStyle = .doubleTap
     /// doubleTap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
-    public var pinchClosed = 0.22
-    public var pinchOpen = 0.38
-    static let tapMax = 0.45           // longest a pinch may stay closed and still count as a tap
+    /// Measured on Akshay's hand (2026-10-14): a tap closes to 0.03–0.08 and, at tapping speed, only reopens to
+    /// 0.12–0.18; a relaxed hand rests around 0.20–0.26.
+    public var pinchClosed = 0.09
+    public var pinchOpen = 0.13
+    static let tapMax = 0.6            // longest a pinch may stay closed and still count as a tap
     static let tapGap = 0.7            // second tap must close within this long after the first opened
     static let toggleCooldown = 0.8
     private var pinchIsClosed = false
