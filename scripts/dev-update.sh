@@ -40,9 +40,8 @@ if [ -f "$HOME/Library/Application Support/Clutch/episode.json" ] && [ "$FORCE" 
 fi
 
 if [ "$HERE" != "$THERE" ]; then
-  if ! git merge --ff-only --quiet origin/main 2>>"$LOG"; then
-    log "local checkout has diverged from main; not updating (fix: git -C \"$ROOT\" reset --hard origin/main)"; exit 0
-  fi
+  # This checkout only builds main; it follows main exactly, including a rewritten history.
+  if ! git reset --hard --quiet origin/main 2>>"$LOG"; then log "could not move to origin/main; retrying next run"; exit 0; fi
   log "main moved ${HERE:0:7} -> ${THERE:0:7}: $(git log -1 --format=%s)"
 fi
 
