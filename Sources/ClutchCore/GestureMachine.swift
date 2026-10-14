@@ -8,7 +8,7 @@ public final class GestureMachine {
     public private(set) var talking = false
     public var talkStyle: TalkStyle = .doubleTap
     /// doubleTap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
-    /// Measured on Akshay's hand (2026-10-14): a pinch closes to 0.03–0.11 palm lengths, often held 1–2 s, and
+    /// Measured on the owner's hand (2026-10-14): a pinch closes to 0.03–0.11 palm lengths, often held 1–2 s, and
     /// between quick taps only reopens to 0.12–0.18; a relaxed hand rests around 0.20–0.26. Single-frame spikes
     /// occur inside a held pinch, so both edges need two frames in a row.
     public var pinchClosed = 0.12
@@ -18,7 +18,7 @@ public final class GestureMachine {
     static let tapMin = 0.05
     static let tapMax = 2.0            // longest a pinch may stay closed and still count as a tap
     /// Second pinch must close within this long after the first opened, else the pair resets. Measured 2026-10-14:
-    /// Akshay's deliberate pairs leave 0.2–1.5 s between release and the next touch; 0.6 s missed most of them.
+    /// Deliberate pairs leave 0.2–1.5 s between release and the next touch; 0.6 s missed most of them.
     static let tapGap = 1.2
     /// Fingertips brush together while a thumbs-up is lowered; a pinch that closes this soon after one is not a tap
     /// (measured 2026-10-14: a lowered thumbs-up read as a double pinch 2.6 s after a send).

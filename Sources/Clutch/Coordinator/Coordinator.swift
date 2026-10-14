@@ -35,7 +35,7 @@ final class Coordinator: AppCoordinating {
     private var target: ClaudeSession?
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
     private var candidate: (session: ClaudeSession?, since: TimeInterval)?
-    /// 0.075 s (Akshay, 2026-10-14: 0.6 s felt slow): focus follows the nose almost at once; the border margin
+    /// 0.075 s (2026-10-14: 0.6 s felt slow): focus follows the nose almost at once; the border margin
     /// below keeps it from flipping between two neighbouring panes.
     private let switchDwell = 0.075
     /// Moving from one session to another, the nose must be this far inside the new one: no flip-flopping

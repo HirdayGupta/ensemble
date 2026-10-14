@@ -79,7 +79,7 @@ import Testing
         #expect(s.count(.talkBegan) == 1)
     }
 
-    /// Akshay's natural rhythm: about a second between letting go and the next touch.
+    /// A natural rhythm: about a second between letting go and the next touch.
     @Test func slowRhythmPairCounts() {
         let s = sim()
         s.pinch(0.6, for: 0.5)

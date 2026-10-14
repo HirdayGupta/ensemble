@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds a distributable DMG: build/Clutch-<version>.dmg (+ .sha256). Safe to run repeatedly.
+# Builds a distributable DMG: build/Ensemble-<version>.dmg (+ .sha256). Safe to run repeatedly.
 #
 # Environment (all optional):
 #   CLUTCH_SIGN_IDENTITY     "Developer ID Application: Name (TEAMID)" for a distribution build; default is the local identity
@@ -59,7 +59,7 @@ BUILD="${CLUTCH_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 export CLUTCH_VERSION="$VERSION" CLUTCH_BUILD="$BUILD"
 
 APP="build/Ensemble.app"
-DMG="build/Clutch-$VERSION.dmg"
+DMG="build/Ensemble-$VERSION.dmg"
 STAGE="build/dmg-stage"
 VOLNAME="Clutch $VERSION"
 
@@ -95,7 +95,7 @@ notarize() {
 
 if [ "$NOTARIZE" = "1" ]; then
   log "step 2/5: notarize and staple the app"
-  ZIP="build/Clutch-notarize.zip"
+  ZIP="build/Ensemble-notarize.zip"
   rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
   notarize "$ZIP"

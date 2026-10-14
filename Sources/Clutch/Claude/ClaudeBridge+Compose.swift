@@ -44,7 +44,7 @@ extension ClaudeBridge {
         guard let entry = liveEntry(s, rescanPane: true) else { return .refused(self.sessionNotFound) }
         let e = entry.elements
 
-        // Any permission mode: a deliberate 1.5 s hold is the confirmation (Akshay, 2026-10-14).
+        // Any permission mode: a deliberate 1.5 s hold is the confirmation (owner decision, 2026-10-14).
         if e.stopButton != nil { return .refused("Claude is still generating") }
         guard let composer = e.composer else { return .refused("composer not found") }
 
