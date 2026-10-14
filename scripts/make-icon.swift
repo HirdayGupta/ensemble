@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Draws the Clutch app icon with CoreGraphics and writes Assets/AppIcon.iconset, Assets/AppIcon.icns and Assets/logo.png.
+// Draws the Ensemble app icon with CoreGraphics and writes Assets/AppIcon.iconset, Assets/AppIcon.icns and Assets/logo.png.
 // Run from the repo root: swift scripts/make-icon.swift
 import AppKit
 import CoreGraphics

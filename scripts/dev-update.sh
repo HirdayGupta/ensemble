@@ -10,7 +10,6 @@ LOG="$LOG_DIR/updater.log"
 APP_DEST="${ENSEMBLE_APP_DEST:-$HOME/Applications/Ensemble.app}"
 BUNDLE_ID="dev.ensemble.app"
 LOCK="$ROOT/.build/dev-update.lock"
-export CLUTCH_SIGN_IDENTITY="${CLUTCH_SIGN_IDENTITY:-Ensemble Local Signing}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 
 mkdir -p "$LOG_DIR" "$ROOT/.build"
@@ -35,7 +34,8 @@ THERE="$(git rev-parse origin/main)"
 if [ "$HERE" = "$THERE" ] && [ "$FORCE" != "--force" ] && [ -d "$APP_DEST" ]; then exit 0; fi
 
 # Never swap the app while Claude is listening: the safety record exists only during dictation.
-if [ -f "$HOME/Library/Application Support/Clutch/episode.json" ] && [ "$FORCE" != "--force" ]; then
+# A build from before the rename keeps its record in the old folder until it quits, so both are checked.
+if { [ -f "$HOME/Library/Application Support/Ensemble/episode.json" ] || [ -f "$HOME/Library/Application Support/Clutch/episode.json" ]; } && [ "$FORCE" != "--force" ]; then
   log "dictation in progress; update deferred"; exit 0
 fi
 

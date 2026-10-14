@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 APP="build/Ensemble.app"
-LOG="/tmp/clutch-bundle.log"
+LOG="/tmp/ensemble-bundle.log"
 
 echo "[$(date -u +%FT%TZ)] swift build -c release" | tee "$LOG"
 swift build -c release 2>&1 | tee -a "$LOG"
@@ -16,8 +16,8 @@ echo "[$(date -u +%FT%TZ)] assembling $APP" | tee -a "$LOG"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp "$BIN_DIR/Clutch" "$APP/Contents/MacOS/Clutch"
-cp Sources/Clutch/Info.plist "$APP/Contents/Info.plist"
+cp "$BIN_DIR/Ensemble" "$APP/Contents/MacOS/Ensemble"
+cp Sources/Ensemble/Info.plist "$APP/Contents/Info.plist"
 
 if [ -f Assets/AppIcon.icns ]; then
   cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
@@ -25,11 +25,11 @@ else
   echo "warning: Assets/AppIcon.icns missing; run: swift scripts/make-icon.swift" | tee -a "$LOG"
 fi
 
-# SwiftPM's generated Bundle.module looks for Clutch_Clutch.bundle in the app's top level, which the signature
+# SwiftPM's generated Bundle.module looks for Ensemble_Ensemble.bundle in the app's top level, which the signature
 # rejects ("unsealed contents present in the bundle root"), and then in the absolute build directory, which
 # only exists on the build machine. The bundle therefore ships in Contents/Resources (sealed), and code must
-# resolve it with ClutchResources.bundle (Sources/Clutch/App/ClutchResources.swift), not Bundle.module.
-RESOURCE_BUNDLE="$BIN_DIR/Clutch_Clutch.bundle"
+# resolve it with EnsembleResources.bundle (Sources/Ensemble/App/EnsembleResources.swift), not Bundle.module.
+RESOURCE_BUNDLE="$BIN_DIR/Ensemble_Ensemble.bundle"
 if [ -d "$RESOURCE_BUNDLE" ]; then
   cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 else
@@ -46,27 +46,38 @@ if [ ! -d "$SPARKLE_SRC" ]; then
 fi
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
-# Clutch is not sandboxed, so Sparkle's XPC services are not used (https://sparkle-project.org/documentation/sandboxing/).
+# Ensemble is not sandboxed, so Sparkle's XPC services are not used (https://sparkle-project.org/documentation/sandboxing/).
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
 
 # Optional version stamping for releases (scripts/release.sh). Sparkle compares CFBundleVersion, so it must grow every release.
-if [ -n "${CLUTCH_VERSION:-}" ]; then
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $CLUTCH_VERSION" "$APP/Contents/Info.plist"
+if [ -n "${ENSEMBLE_VERSION:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ENSEMBLE_VERSION" "$APP/Contents/Info.plist"
 fi
-if [ -n "${CLUTCH_BUILD:-}" ]; then
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $CLUTCH_BUILD" "$APP/Contents/Info.plist"
+if [ -n "${ENSEMBLE_BUILD:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ENSEMBLE_BUILD" "$APP/Contents/Info.plist"
 fi
 
 # Signing uses one pinned identity so the designated requirement (what Camera and Accessibility grants are tied
-# to) is the same on every build. Set CLUTCH_SIGN_IDENTITY to use another identity name; there is no ad-hoc
+# to) is the same on every build. Set ENSEMBLE_SIGN_IDENTITY to use another identity name; there is no ad-hoc
 # fallback, because an ad-hoc signature is a new identity on every build and silently invalidates the grants.
 #
 # Two modes, chosen by the identity name:
-#   local         "Clutch Local Signing" (default) or any other name: no hardened runtime, no secure timestamp.
+#   local         "Ensemble Local Signing" (default) or any other name: no hardened runtime, no secure timestamp.
 #   distribution  a name starting with "Developer ID Application": hardened runtime + secure timestamp (both required
 #                 for notarization).
-IDENTITY_NAME="${CLUTCH_SIGN_IDENTITY:-Clutch Local Signing}"
-ENTITLEMENTS="Sources/Clutch/Clutch.entitlements"
+IDENTITY_NAME="${ENSEMBLE_SIGN_IDENTITY:-Ensemble Local Signing}"
+# Compatibility with the app's earlier working name: a Mac that was set up before the rename holds its Camera and
+# Accessibility grants against the signature of "Clutch Local Signing". Signing with a different certificate would
+# make macOS ask for both again, so when the default identity is absent and the old one exists, the old one is used.
+# An explicit ENSEMBLE_SIGN_IDENTITY is never overridden.
+LEGACY_LOCAL_IDENTITY="Clutch Local Signing"
+if [ -z "${ENSEMBLE_SIGN_IDENTITY:-}" ]; then
+  LOCAL_IDENTITIES="$(security find-identity -p codesigning 2>/dev/null || true)"
+  if ! grep -qF "\"$IDENTITY_NAME\"" <<<"$LOCAL_IDENTITIES" && grep -qF "\"$LEGACY_LOCAL_IDENTITY\"" <<<"$LOCAL_IDENTITIES"; then
+    IDENTITY_NAME="$LEGACY_LOCAL_IDENTITY"
+  fi
+fi
+ENTITLEMENTS="Sources/Ensemble/Ensemble.entitlements"
 case "$IDENTITY_NAME" in
   "Developer ID Application"*)
     MODE="distribution"
@@ -87,7 +98,7 @@ fi
 COUNT="$(printf '%s' "$HASHES" | grep -c . || true)"
 if [ "$COUNT" -eq 0 ]; then
   echo "error: no code-signing identity named \"$IDENTITY_NAME\" in the keychain." | tee -a "$LOG" >&2
-  echo "       Create it (Keychain Access > Certificate Assistant > Create a Certificate, type Code Signing) or set CLUTCH_SIGN_IDENTITY." | tee -a "$LOG" >&2
+  echo "       Create it (Keychain Access > Certificate Assistant > Create a Certificate, type Code Signing) or set ENSEMBLE_SIGN_IDENTITY." | tee -a "$LOG" >&2
   exit 1
 elif [ "$COUNT" -gt 1 ]; then
   echo "error: $COUNT identities are named \"$IDENTITY_NAME\"; delete the extras so the choice is unambiguous:" | tee -a "$LOG" >&2

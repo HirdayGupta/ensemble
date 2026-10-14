@@ -46,7 +46,7 @@ if tail -n 1 "$LOG" | grep -q "build skipped"; then
 elif tail -n 1 "$LOG" | grep -q "build failed"; then
   echo "--- this Mac's compiler: $(swift --version 2>&1 | head -1)"
   echo "--- build errors (paste everything from here to the end into your Claude session):"
-  sed -n "/swift build -c release/,\$p" /tmp/clutch-bundle.log | grep -E -A3 "error:" | head -60
+  sed -n "/swift build -c release/,\$p" /tmp/ensemble-bundle.log | grep -E -A3 "error:" | head -60
 fi
 
 mkdir -p "$(dirname "$AGENT")"

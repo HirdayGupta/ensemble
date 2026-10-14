@@ -3,11 +3,11 @@
 # appcast-dir (default build/appcast) holds the published appcast.xml, if any; it is updated in place.
 #
 # Environment:
-#   CLUTCH_DOWNLOAD_PREFIX   required: URL the DMG is downloaded from, ending in "/",
+#   ENSEMBLE_DOWNLOAD_PREFIX   required: URL the DMG is downloaded from, ending in "/",
 #                            e.g. https://github.com/OWNER/REPO/releases/download/v0.1.0/
 #   SPARKLE_ED_PRIVATE_KEY   the EdDSA private key text (from generate_keys -x). Without it, generate_appcast reads the
 #                            key from this Mac's login keychain (where generate_keys stored it).
-#   CLUTCH_RELEASE_NOTES     optional path to a .md/.html/.txt file embedded as the release notes of this version.
+#   ENSEMBLE_RELEASE_NOTES     optional path to a .md/.html/.txt file embedded as the release notes of this version.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,7 +16,7 @@ cd "$ROOT"
 DMG="${1:?usage: scripts/appcast.sh <dmg> [appcast-dir]}"
 OUT_DIR="${2:-build/appcast}"
 GEN=".build/artifacts/sparkle/Sparkle/bin/generate_appcast"
-PREFIX="${CLUTCH_DOWNLOAD_PREFIX:?set CLUTCH_DOWNLOAD_PREFIX to the release download URL, ending in /}"
+PREFIX="${ENSEMBLE_DOWNLOAD_PREFIX:?set ENSEMBLE_DOWNLOAD_PREFIX to the release download URL, ending in /}"
 [ -x "$GEN" ] || { echo "error: $GEN not found (run swift package resolve)" >&2; exit 1; }
 [ -f "$DMG" ] || { echo "error: $DMG not found" >&2; exit 1; }
 
@@ -27,8 +27,8 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT_DIR"
 [ ! -f "$OUT_DIR/appcast.xml" ] || cp "$OUT_DIR/appcast.xml" "$WORK/appcast.xml"
 cp "$DMG" "$WORK/"
-if [ -n "${CLUTCH_RELEASE_NOTES:-}" ]; then
-  cp "$CLUTCH_RELEASE_NOTES" "$WORK/$(basename "${DMG%.dmg}").${CLUTCH_RELEASE_NOTES##*.}"
+if [ -n "${ENSEMBLE_RELEASE_NOTES:-}" ]; then
+  cp "$ENSEMBLE_RELEASE_NOTES" "$WORK/$(basename "${DMG%.dmg}").${ENSEMBLE_RELEASE_NOTES##*.}"
 fi
 
 echo "[$(date -u +%FT%TZ)] generate_appcast for $(basename "$DMG")"

@@ -2,26 +2,26 @@
 # Builds a distributable DMG: build/Ensemble-<version>.dmg (+ .sha256). Safe to run repeatedly.
 #
 # Environment (all optional):
-#   CLUTCH_SIGN_IDENTITY     "Developer ID Application: Name (TEAMID)" for a distribution build; default is the local identity
+#   ENSEMBLE_SIGN_IDENTITY     "Developer ID Application: Name (TEAMID)" for a distribution build; default is the local identity
 #                            (see scripts/bundle.sh). A local build gives a DMG for testing only: Gatekeeper blocks it elsewhere.
-#   CLUTCH_NOTARY_PROFILE    notarytool keychain profile name (xcrun notarytool store-credentials). Enables notarize + staple.
-#   CLUTCH_NOTARY_KEY_PATH   alternative for CI: App Store Connect API key (.p8), with CLUTCH_NOTARY_KEY_ID and (team keys)
-#                            CLUTCH_NOTARY_ISSUER.
-#   CLUTCH_VERSION           marketing version (CFBundleShortVersionString); default: the one in Info.plist.
-#   CLUTCH_BUILD             build number (CFBundleVersion, what Sparkle compares); default: git commit count.
-#   CLUTCH_DRY_RUN=1         (or --dry-run) print the notarytool/stapler commands instead of running them.
+#   ENSEMBLE_NOTARY_PROFILE    notarytool keychain profile name (xcrun notarytool store-credentials). Enables notarize + staple.
+#   ENSEMBLE_NOTARY_KEY_PATH   alternative for CI: App Store Connect API key (.p8), with ENSEMBLE_NOTARY_KEY_ID and (team keys)
+#                            ENSEMBLE_NOTARY_ISSUER.
+#   ENSEMBLE_VERSION           marketing version (CFBundleShortVersionString); default: the one in Info.plist.
+#   ENSEMBLE_BUILD             build number (CFBundleVersion, what Sparkle compares); default: git commit count.
+#   ENSEMBLE_DRY_RUN=1         (or --dry-run) print the notarytool/stapler commands instead of running them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-LOG="/tmp/clutch-release.log"
-if [ -z "${CLUTCH_RELEASE_LOGGING:-}" ]; then
-  export CLUTCH_RELEASE_LOGGING=1
+LOG="/tmp/ensemble-release.log"
+if [ -z "${ENSEMBLE_RELEASE_LOGGING:-}" ]; then
+  export ENSEMBLE_RELEASE_LOGGING=1
   exec > >(tee "$LOG") 2>&1
 fi
 
-DRY_RUN="${CLUTCH_DRY_RUN:-0}"
+DRY_RUN="${ENSEMBLE_DRY_RUN:-0}"
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
@@ -34,34 +34,34 @@ die() { log "error: $*" >&2; exit 1; }
 # Runs a command that talks to Apple's notary service, or only prints it in a dry run.
 apple() { if [ "$DRY_RUN" = "1" ]; then log "DRY-RUN: $*"; else "$@"; fi; }
 
-IDENTITY_NAME="${CLUTCH_SIGN_IDENTITY:-Clutch Local Signing}"
+IDENTITY_NAME="${ENSEMBLE_SIGN_IDENTITY:-Ensemble Local Signing}"
 case "$IDENTITY_NAME" in
   "Developer ID Application"*) DISTRIBUTION=1 ;;
   *) DISTRIBUTION=0 ;;
 esac
 
 NOTARY_ARGS=()
-if [ -n "${CLUTCH_NOTARY_PROFILE:-}" ]; then
-  NOTARY_ARGS=(--keychain-profile "$CLUTCH_NOTARY_PROFILE")
-elif [ -n "${CLUTCH_NOTARY_KEY_PATH:-}" ]; then
-  [ -n "${CLUTCH_NOTARY_KEY_ID:-}" ] || die "CLUTCH_NOTARY_KEY_PATH needs CLUTCH_NOTARY_KEY_ID"
-  NOTARY_ARGS=(--key "$CLUTCH_NOTARY_KEY_PATH" --key-id "$CLUTCH_NOTARY_KEY_ID")
-  [ -z "${CLUTCH_NOTARY_ISSUER:-}" ] || NOTARY_ARGS+=(--issuer "$CLUTCH_NOTARY_ISSUER")
+if [ -n "${ENSEMBLE_NOTARY_PROFILE:-}" ]; then
+  NOTARY_ARGS=(--keychain-profile "$ENSEMBLE_NOTARY_PROFILE")
+elif [ -n "${ENSEMBLE_NOTARY_KEY_PATH:-}" ]; then
+  [ -n "${ENSEMBLE_NOTARY_KEY_ID:-}" ] || die "ENSEMBLE_NOTARY_KEY_PATH needs ENSEMBLE_NOTARY_KEY_ID"
+  NOTARY_ARGS=(--key "$ENSEMBLE_NOTARY_KEY_PATH" --key-id "$ENSEMBLE_NOTARY_KEY_ID")
+  [ -z "${ENSEMBLE_NOTARY_ISSUER:-}" ] || NOTARY_ARGS+=(--issuer "$ENSEMBLE_NOTARY_ISSUER")
 fi
 NOTARIZE=0
 if [ "${#NOTARY_ARGS[@]}" -gt 0 ]; then
-  [ "$DISTRIBUTION" = "1" ] || die "notarization needs a Developer ID identity; set CLUTCH_SIGN_IDENTITY=\"Developer ID Application: ...\""
+  [ "$DISTRIBUTION" = "1" ] || die "notarization needs a Developer ID identity; set ENSEMBLE_SIGN_IDENTITY=\"Developer ID Application: ...\""
   NOTARIZE=1
 fi
 
-VERSION="${CLUTCH_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Sources/Clutch/Info.plist)}"
-BUILD="${CLUTCH_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
-export CLUTCH_VERSION="$VERSION" CLUTCH_BUILD="$BUILD"
+VERSION="${ENSEMBLE_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Sources/Ensemble/Info.plist)}"
+BUILD="${ENSEMBLE_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+export ENSEMBLE_VERSION="$VERSION" ENSEMBLE_BUILD="$BUILD"
 
 APP="build/Ensemble.app"
 DMG="build/Ensemble-$VERSION.dmg"
 STAGE="build/dmg-stage"
-VOLNAME="Clutch $VERSION"
+VOLNAME="Ensemble $VERSION"
 
 log "release $VERSION (build $BUILD), signing: $IDENTITY_NAME, notarize: $([ $NOTARIZE = 1 ] && echo yes || echo no), dry run: $DRY_RUN"
 
@@ -76,7 +76,7 @@ fi
 
 notarize() {
   local file="$1" result
-  result="/tmp/clutch-notary-$(basename "$file").json"
+  result="/tmp/ensemble-notary-$(basename "$file").json"
   log "notarizing $file (Apple's service usually takes 2 to 15 minutes)"
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY-RUN: xcrun notarytool submit $file ${NOTARY_ARGS[*]} --wait --output-format json"
@@ -103,7 +103,7 @@ if [ "$NOTARIZE" = "1" ]; then
   apple xcrun stapler staple "$APP"
   apple xcrun stapler validate "$APP"
 else
-  log "step 2/5: notarization skipped. Set CLUTCH_NOTARY_PROFILE (and sign with a Developer ID identity) to notarize."
+  log "step 2/5: notarization skipped. Set ENSEMBLE_NOTARY_PROFILE (and sign with a Developer ID identity) to notarize."
 fi
 
 log "step 3/5: create $DMG"
