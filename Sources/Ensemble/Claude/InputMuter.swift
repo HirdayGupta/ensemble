@@ -1,3 +1,4 @@
+import EnsembleCore
 import CoreAudio
 import Foundation
 

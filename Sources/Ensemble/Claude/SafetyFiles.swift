@@ -1,44 +1,22 @@
+import EnsembleCore
 import Foundation
-
-/// A dictation press that has been started and not yet proven finished. Written (and fsynced) before the
-/// press so that a crash mid-recording is discoverable on the next launch.
-struct EpisodeRecord: Codable, Equatable {
-    var id: String
-    var startedAt: Date
-    var pid: Int32
-    var bootSessionUUID: String
-    var sessionID: String
-    var claudeVersion: String?
-}
-
-/// An input-device mute (or volume-to-zero) that this app applied as a last-resort safeguard.
-struct MuteRecord: Codable, Equatable {
-    enum Method: String, Codable { case mute, volume }
-    var deviceUID: String
-    var method: Method
-    var priorMuted: Bool?
-    var priorVolume: Float?
-    var appliedAt: Date
-}
 
 enum SafetyFiles {
     static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Ensemble", isDirectory: true)
+    }
+    /// The folder builds from before the rename wrote to. Records still in it (a dictation left recording, an input
+    /// muted) are moved into `directory` the first time any safety file is touched, which is early in every launch.
+    static var legacyDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Clutch", isDirectory: true)
     }
-    static var episodeURL: URL { directory.appendingPathComponent("episode.json") }
-    static var muteURL: URL { directory.appendingPathComponent("mute.json") }
-
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return e
+    private static let adoptedLegacyRecords: [String] = {
+        let adopted = SafetyFolderMigration.adopt(from: legacyDirectory, into: directory)
+        if !adopted.isEmpty { EnsembleLog.write("safety files: adopted \(adopted.joined(separator: ", ")) from the previous app folder") }
+        return adopted
     }()
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
+    static var episodeURL: URL { _ = adoptedLegacyRecords; return directory.appendingPathComponent(SafetyFolderMigration.episodeName) }
+    static var muteURL: URL { _ = adoptedLegacyRecords; return directory.appendingPathComponent(SafetyFolderMigration.muteName) }
 
     static func bootSessionUUID() -> String {
         var size = 0
@@ -79,12 +57,12 @@ enum SafetyFiles {
     }
 
     static func writeEpisode(_ record: EpisodeRecord) throws {
-        try writeDurably(try encoder.encode(record), to: episodeURL)
+        try writeDurably(try SafetyRecordCoding.encoder.encode(record), to: episodeURL)
     }
 
     static func readEpisode() -> EpisodeRecord? {
         guard let data = try? Data(contentsOf: episodeURL) else { return nil }
-        return try? decoder.decode(EpisodeRecord.self, from: data)
+        return try? SafetyRecordCoding.decoder.decode(EpisodeRecord.self, from: data)
     }
 
     static func episodeFileExists() -> Bool {
@@ -94,12 +72,12 @@ enum SafetyFiles {
     static func deleteEpisode() { try? FileManager.default.removeItem(at: episodeURL) }
 
     static func writeMutes(_ records: [MuteRecord]) throws {
-        try writeDurably(try encoder.encode(records), to: muteURL)
+        try writeDurably(try SafetyRecordCoding.encoder.encode(records), to: muteURL)
     }
 
     static func readMutes() -> [MuteRecord] {
         guard let data = try? Data(contentsOf: muteURL) else { return [] }
-        return (try? decoder.decode([MuteRecord].self, from: data)) ?? []
+        return (try? SafetyRecordCoding.decoder.decode([MuteRecord].self, from: data)) ?? []
     }
 
     static func deleteMutes() { try? FileManager.default.removeItem(at: muteURL) }
