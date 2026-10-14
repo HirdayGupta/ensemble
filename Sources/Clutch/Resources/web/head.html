@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>clutch-head</title>
+</head>
+<body>
+<script type="module">
+import { FilesetResolver, FaceLandmarker } from './vision_bundle.mjs';
+
+const post = (m) => window.webkit.messageHandlers.head.postMessage(m);
+const BASE = 'clutch-asset://local';
+
+let landmarker = null;
+let delegate = null;
+let lastTs = 0;
+
+window.addEventListener('error', (e) => post({ log: 'window error: ' + e.message }));
+window.addEventListener('unhandledrejection', (e) => post({ log: 'unhandled rejection: ' + e.reason }));
+
+async function create(which) {
+  const fileset = await FilesetResolver.forVisionTasks(BASE + '/wasm');
+  const lm = await FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: BASE + '/face_landmarker.task', delegate: which },
+    runningMode: 'VIDEO',
+    numFaces: 2,
+    outputFacialTransformationMatrixes: true,
+  });
+  landmarker = lm;
+  delegate = which;
+}
+
+async function init() {
+  try {
+    try {
+      await create('GPU');
+    } catch (gpuError) {
+      post({ log: 'GPU delegate failed, using CPU: ' + gpuError });
+      await create('CPU');
+    }
+    post({ ready: true, delegate });
+  } catch (e) {
+    post({ error: String(e && e.message ? e.message : e) });
+  }
+}
+
+function decode(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+}
+
+function detect(bitmap, t) {
+  lastTs = Math.max(lastTs + 1, Math.round(t * 1000));
+  return landmarker.detectForVideo(bitmap, lastTs);
+}
+
+// Column-major 4x4 head transform: yaw from the forward axis, pitch from the up axis' z component.
+function angles(m) {
+  const yaw = Math.atan2(m[8], m[10]);
+  const pitch = Math.asin(Math.max(-1, Math.min(1, m[9])));
+  return { yaw, pitch };
+}
+
+async function processFrame(b64, t) {
+  let bitmap = null;
+  try {
+    if (!landmarker) throw new Error('face tracker not ready');
+    bitmap = await decode(b64);
+    let result;
+    try {
+      result = detect(bitmap, t);
+    } catch (e) {
+      if (delegate !== 'GPU') throw e;
+      post({ log: 'GPU detection failed, switching to CPU: ' + e });
+      landmarker.close();
+      lastTs = 0;
+      await create('CPU');
+      result = detect(bitmap, t);
+    }
+    const faces = result.faceLandmarks ? result.faceLandmarks.length : 0;
+    const mats = result.facialTransformationMatrixes;
+    if (faces > 0 && mats && mats.length > 0) {
+      const { yaw, pitch } = angles(mats[0].data);
+      post({ t, yaw, pitch, faces });
+    } else {
+      post({ t, faces });
+    }
+  } catch (e) {
+    post({ t, frameError: String(e && e.message ? e.message : e) });
+  } finally {
+    if (bitmap) bitmap.close();
+  }
+}
+
+// Returns nothing: evaluateJavaScript cannot carry a Promise back. The answer arrives via postMessage.
+window.clutchFrame = (b64, t) => { processFrame(b64, t); };
+
+init();
+</script>
+</body>
+</html>

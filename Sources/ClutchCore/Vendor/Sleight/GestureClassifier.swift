@@ -1,43 +1,45 @@
 import Foundation
 import Vision
 
-enum Gesture: String, CaseIterable {
+public enum Gesture: String, CaseIterable {
     case openPalm, fist, twoFingers, thumbsUp
     case swipeLeft, swipeRight   // dynamic, produced by SwipeDetector
 
-    var isSwipe: Bool { self == .swipeLeft || self == .swipeRight }
+    public var isSwipe: Bool { self == .swipeLeft || self == .swipeRight }
 }
 
 /// Everything the classifier derived from one hand, for the debug view.
-struct HandFeatures {
-    var index, middle, ring, little: Bool
-    var curled: Int              // fingers folded back past their PIP (see `GestureClassifier.curlRatio`)
-    var tipReach: CGFloat        // farthest fingertip from the wrist, in palm lengths
-    var thumbStraight, thumbClear, thumbUp: Bool
-    var extent: CGFloat          // landmark bounding-box diagonal, fraction of frame
-    var palm: CGFloat            // wrist → middle MCP, fraction of frame; the unit every finger test is normalized by
-    var span: CGFloat            // knuckle width (index MCP → little MCP) in palm lengths; see `maxPalmSpan`
-    var upright: CGFloat         // middle knuckle above the wrist, in palm lengths; see `minUpright`
-    var tooSmall: Bool           // pose rejected because the hand is too far away
-    var angled: Bool             // pose rejected because the palm does not face the camera or points down
-    var thumb: Bool { thumbStraight && thumbClear }
-    var extendedCount: Int { [index, middle, ring, little].filter { $0 }.count }
+public struct HandFeatures {
+    public var index, middle, ring, little: Bool
+    public var curled: Int              // fingers folded back past their PIP (see `GestureClassifier.curlRatio`)
+    public var tipReach: CGFloat        // farthest fingertip from the wrist, in palm lengths
+    public var thumbStraight, thumbClear, thumbUp: Bool
+    public var extent: CGFloat          // landmark bounding-box diagonal, fraction of frame
+    public var palm: CGFloat            // wrist → middle MCP, fraction of frame; the unit every finger test is normalized by
+    public var span: CGFloat            // knuckle width (index MCP → little MCP) in palm lengths; see `maxPalmSpan`
+    public var upright: CGFloat         // middle knuckle above the wrist, in palm lengths; see `minUpright`
+    public var tooSmall: Bool           // pose rejected because the hand is too far away
+    public var angled: Bool             // pose rejected because the palm does not face the camera or points down
+    public var thumb: Bool { thumbStraight && thumbClear }
+    public var extendedCount: Int { [index, middle, ring, little].filter { $0 }.count }
     /// Enough fingers extended to count as an open hand; swipes only track open hands.
-    var isOpen: Bool { extendedCount >= 3 }
-    var gesture: Gesture?
+    public var isOpen: Bool { extendedCount >= 3 }
+    public var gesture: Gesture?
 }
 
 /// Rule-based static pose classifier on Vision hand landmarks.
 /// All distances are normalized by hand size (wrist → middle MCP) for scale invariance.
-struct GestureClassifier {
+public struct GestureClassifier {
+    public init() {}
+
     /// Open-finger poses (open palm, two fingers) need at least this hand extent. Deliberate open
     /// palms measure 0.33 at arm's length and 0.21 one step back; the floor only rejects hands
     /// farther than that. Distance no longer separates gestures from desk hands (an open hand
     /// held up while talking reaches 0.29), `maxPalmSpan` does.
-    var minOpenExtent: CGFloat = 0.19
+    public var minOpenExtent: CGFloat = 0.19
     /// Closed poses (fist, thumbs up) need this much. A fist is compact, about 0.6 of an open
     /// palm's extent at the same distance: 0.19 at arm's length, 0.12 one step back.
-    var minClosedExtent: CGFloat = 0.11
+    public var minClosedExtent: CGFloat = 0.11
 
     /// Knuckle width over palm length, at most, for open palm, fist and two fingers. A palm facing
     /// the camera keeps its full wrist-to-knuckle length and measures 0.37–0.58 in every fixture at
@@ -77,9 +79,9 @@ struct GestureClassifier {
     /// a fifth of the idle fixture's hands do too.
     static let minUpright: CGFloat = 0.3
 
-    func classify(_ hand: Hand) -> Gesture? { features(hand)?.gesture }
+    public func classify(_ hand: Hand) -> Gesture? { features(hand)?.gesture }
 
-    func features(_ hand: Hand) -> HandFeatures? {
+    public func features(_ hand: Hand) -> HandFeatures? {
         guard let wrist = hand[.wrist], let midMCP = hand[.middleMCP] else { return nil }
         let size = dist(wrist, midMCP)
         guard size > 0.01 else { return nil }
