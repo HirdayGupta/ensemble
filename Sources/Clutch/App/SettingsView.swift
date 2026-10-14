@@ -196,6 +196,7 @@ private struct AboutSettings: View {
                 credit("MediaPipe", "Face landmarks. Apache-2.0, Google.")
                 credit("Sleight", "Hand-pose rules. MIT, Florian Riquelme.")
                 credit("claude-dictation-hotkey", "Dictation approach. MIT.")
+                credit("Sparkle", "Updates. MIT, Sparkle Project.")
             }
             .padding(14)
             .frame(maxWidth: 400, alignment: .leading)

@@ -1,0 +1,144 @@
+# Releasing Clutch
+
+How a release is built, signed, notarized, published, and delivered to installed copies. Nothing in this repo signs, uploads, or publishes by itself: the scripts run on your command, and the GitHub workflow runs only when a tag named `v*` is pushed.
+
+## The pieces
+
+| Piece | What it does |
+|---|---|
+| `scripts/bundle.sh` | Builds the release binary, assembles `build/Clutch.app` with Sparkle inside, signs it. Local identity by default; `CLUTCH_SIGN_IDENTITY="Developer ID Application: ..."` switches to hardened runtime + secure timestamp + `Sources/Clutch/Clutch.entitlements`. |
+| `scripts/release.sh` | Runs `bundle.sh`, optionally notarizes and staples the app, builds `build/Clutch-<version>.dmg` with `hdiutil` (app plus an Applications shortcut), signs/notarizes/staples the DMG, writes the `.sha256`, prints a summary. `--dry-run` prints the Apple-service commands instead of running them. |
+| `scripts/appcast.sh` | Adds a DMG to the Sparkle appcast with Sparkle's `generate_appcast`; refuses to write an appcast whose items lack an EdDSA signature. |
+| `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release, update the appcast on the `gh-pages` branch. |
+| `Sources/Clutch/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
+
+Log of the last `release.sh` run: `/tmp/clutch-release.log`.
+
+## One-time setup (you)
+
+Do these once, in this order.
+
+1. **Decide the final name and bundle identifier before the first public release.** The bundle identifier is `dev.clutch.app` (`Sources/Clutch/Info.plist`, `LoginAgent.swift`). Camera and Accessibility grants, saved settings, the login agent and every future Sparkle update are tied to it, so changing it after release makes every user re-grant permissions and breaks the update chain. If the project becomes "Leanback", rename first: bundle identifier, app name, DMG name, feed URL, cask.
+2. **Apple Developer Program: $99 per year.** Enroll at https://developer.apple.com/programs/enroll/ (an individual needs a legal name and two-factor sign-in; an organization needs a D-U-N-S number and a public website). Notarization requires the paid membership. The fee waiver covers only nonprofits, schools, and governments, not individual open-source maintainers (https://developer.apple.com/help/account/membership/fee-waivers/).
+3. **Developer ID Application certificate.** Only the account holder can create it. In Keychain Access: Certificate Assistant, Request a Certificate From a Certificate Authority, save to disk. At https://developer.apple.com/account/resources/certificates/add choose "Developer ID Application", upload the request, download the `.cer`, double-click it. Confirm with `security find-identity -v -p codesigning`: a line `"Developer ID Application: Your Name (TEAMID)"`. Export it (Keychain Access, right-click the certificate, Export, `.p12`, choose a password) for the CI secret.
+4. **Notarization credentials.** In App Store Connect, Users and Access, Integrations, App Store Connect API: create a key with Developer access and download `AuthKey_XXXX.p8` (downloadable once). Note the key ID and the issuer ID. For local runs store them once:
+   ```
+   xcrun notarytool store-credentials clutch-notary --key AuthKey_XXXX.p8 --key-id KEYID --issuer ISSUERID
+   ```
+   (An app-specific password works too: `--apple-id ... --password ... --team-id ...`.)
+5. **Sparkle update-signing key.** From the repo root, once packages are resolved (`swift package resolve`):
+   ```
+   .build/artifacts/sparkle/Sparkle/bin/generate_keys
+   ```
+   It stores the private key in your login keychain and prints the public key. Paste the public key over `TODO-REPLACE-WITH-SPARKLE-PUBLIC-ED-KEY` in `Sources/Clutch/Info.plist`. Export the private key for CI and for backup: `generate_keys -x sparkle_private.key`; keep the file in a password manager. If this key is lost, installed copies cannot be sent signed updates and users must reinstall by hand.
+6. **GitHub.** Replace `OWNER/REPO` in `UpdateConfig.feedURL` (`Sources/Clutch/App/UpdateController.swift`) with `https://<account>.github.io/<repo>/appcast.xml`. Create the branch that serves the appcast and turn on Pages:
+   ```
+   git switch --orphan gh-pages && git commit --allow-empty -m "Appcast branch" && git push origin gh-pages && git switch -
+   ```
+   Then Settings, Pages, Source: Deploy from a branch, `gh-pages`, `/ (root)`. The first release's workflow creates `appcast.xml` there.
+7. **Repository secrets** (Settings, Secrets and variables, Actions):
+
+   | Secret | Value |
+   |---|---|
+   | `DEVELOPER_ID_P12_BASE64` | `base64 -i DeveloperID.p12 \| pbcopy` |
+   | `DEVELOPER_ID_P12_PASSWORD` | the password chosen when exporting the `.p12` |
+   | `NOTARY_KEY_P8` | the full text of `AuthKey_XXXX.p8` |
+   | `NOTARY_KEY_ID` | the API key ID |
+   | `NOTARY_ISSUER_ID` | the issuer ID |
+   | `SPARKLE_ED_PRIVATE_KEY` | the text of `sparkle_private.key` |
+
+   The workflow's first step stops with the name of any missing secret or leftover placeholder.
+
+## Try it locally first
+
+```
+scripts/release.sh                                   # local identity: a DMG for this Mac only
+CLUTCH_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+  CLUTCH_NOTARY_PROFILE=clutch-notary scripts/release.sh --dry-run   # signs, prints the notarization commands
+CLUTCH_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+  CLUTCH_NOTARY_PROFILE=clutch-notary scripts/release.sh             # the real thing; waits on Apple (2 to 15 minutes, twice)
+```
+
+A DMG made with the local identity opens on this Mac only. Gatekeeper rejects it elsewhere.
+
+## Cut a release
+
+1. Merge to `main`; the tests pass.
+2. `git tag v0.1.0 && git push origin v0.1.0`. The version comes from the tag; the build number is the commit count, so it grows with every commit (Sparkle compares the build number, never reuse or lower one).
+3. The workflow runs (about 20 to 40 minutes, most of it Apple's notary queue). On success the GitHub Release holds `Clutch-0.1.0.dmg` and its `.sha256`, and `appcast.xml` on `gh-pages` lists the new version.
+4. Check on a Mac that has never run Clutch: download the DMG from the release page, drag the app to Applications, double-click. It must open with no Gatekeeper warning. `spctl -a -t exec -vv /Applications/Clutch.app` says `source=Notarized Developer ID`.
+5. Tags with a dash (`v0.2.0-beta.1`) publish a pre-release and are not added to the appcast.
+
+If the workflow fails after the GitHub Release is created (for example the appcast push), fix the cause and re-run the failed job; do not move the tag.
+
+## How updates reach users
+
+- Each installed copy reads the appcast at `UpdateConfig.feedURL` (GitHub Pages, HTTPS), compares the build number, downloads the DMG from the GitHub Release, verifies the EdDSA signature against `SUPublicEDKey` and the Apple code signature, then replaces the app and relaunches.
+- Policy in `UpdateController.swift`: no network until the user turns on "Check for updates automatically" in Settings, About (or presses Check for Updates). With it on, Sparkle checks at most once a day (`SUScheduledCheckInterval` = 86400). Sparkle's own "check automatically?" prompt is suppressed so no window appears at login or while dictating. A scheduled check that finds an update never opens a window: the menu panel entry changes to "Update to x.y.z..." and the user presses it.
+- To check for updates by default (Sparkle's standard behavior is a prompt on the second launch), remove the `updaterShouldPromptForPermissionToCheck` override and let Sparkle ask, or set `SUEnableAutomaticChecks` to true in `Info.plist` (no consent step).
+- A build whose `SUPublicEDKey` is still the placeholder, or whose feed URL still says `OWNER`, has updates off: the menu entry explains it and Sparkle never starts.
+
+## Permissions survive updates only with a stable signature
+
+Camera and Accessibility grants are tied to the app's signature. Developer ID signatures are stable across releases, so users keep their grants through updates. Moving from the local "Clutch Local Signing" identity to Developer ID changes the signature once: everyone, including you, re-grants Camera and Accessibility after first installing a Developer ID build. Never distribute ad-hoc signed builds: every build is a new identity and grants reset each time.
+
+## First Developer ID build: checks nobody has run yet
+
+These need a notarized build on a real Mac and could not be run from the development machine:
+
+- Face tracking starts (MediaPipe's WASM runs in WebKit's separate process, so no JIT entitlement is expected; if it fails under the hardened runtime, add `com.apple.security.cs.allow-jit` to `Clutch.entitlements`, nothing broader).
+- The Camera prompt appears and the camera opens (`com.apple.security.device.camera`).
+- Accessibility control of Claude and the pinch gestures work.
+- Settings, About, Check for Updates reaches the appcast and reports "up to date".
+- Install version N, publish N+1, confirm the update installs and the app relaunches (the login agent has `KeepAlive` only on failure exit, so Sparkle's clean quit should not fight it).
+
+## Homebrew
+
+The main `homebrew-cask` repository disabled casks that fail Gatekeeper on 2026-09-01 (https://github.com/orgs/Homebrew/discussions/6334, https://brew.sh/2025/11/12/homebrew-5.0.0/), so the main repository takes only the notarized build, and also judges notability. Start with your own tap: a repository named `homebrew-tap` with `Casks/clutch.rb`:
+
+```ruby
+cask "clutch" do
+  version "0.1.0"
+  sha256 "<contents of Clutch-0.1.0.dmg.sha256, the hash only>"
+
+  url "https://github.com/OWNER/REPO/releases/download/v#{version}/Clutch-#{version}.dmg"
+  name "Clutch"
+  desc "Control the Claude desktop app hands-free with a webcam"
+  homepage "https://github.com/OWNER/REPO"
+
+  livecheck do
+    url "https://OWNER.github.io/REPO/appcast.xml"
+    strategy :sparkle, &:short_version
+  end
+
+  auto_updates true
+  depends_on macos: :sonoma
+
+  app "Clutch.app"
+
+  uninstall quit: "dev.clutch.app"
+
+  zap trash: [
+    "~/Library/Application Support/Clutch",
+    "~/Library/LaunchAgents/dev.clutch.app.plist",
+    "~/Library/Logs/Clutch",
+    "~/Library/Preferences/dev.clutch.app.plist",
+  ]
+end
+```
+
+Users: `brew install --cask OWNER/tap/clutch`. After each release, update `version` and `sha256` in the tap (edit the file and push, or `brew bump-cask-pr` for the main repository). An un-notarized cask in a tap installs, but Homebrew no longer has a flag to skip the quarantine check, so users would run `xattr -dr com.apple.quarantine /Applications/Clutch.app` themselves.
+
+## If you ship before notarizing
+
+Users on macOS 15 and later see a block message with no Control-click bypass. They open System Settings, Privacy & Security, scroll to "Open Anyway" (https://support.apple.com/en-us/102445), or run `xattr -dr com.apple.quarantine /Applications/Clutch.app`. Reports of an extra "damaged" message on macOS 26 exist but are from blogs only. Sparkle updates still work, but each one is a new un-notarized download.
+
+## Sources
+
+- Notarization: https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
+- Developer ID: https://developer.apple.com/developer-id/
+- Sparkle documentation: https://sparkle-project.org/documentation/ (publishing, customization, sandboxing, gentle reminders)
+- Sparkle releases (2.10.0, 2026-09-13): https://github.com/sparkle-project/Sparkle/releases
+- GitHub's certificate import recipe: https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
+- Runner images: https://github.com/actions/runner-images
+- What similar apps ship: Rectangle (DMG + Sparkle), Ice (zip + Sparkle, appcast on GitHub Pages), Stats (DMG): their READMEs and Homebrew cask files.
