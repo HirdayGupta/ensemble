@@ -40,10 +40,17 @@ if [ -f "$HOME/Library/Application Support/Clutch/episode.json" ] && [ "$FORCE" 
 fi
 
 if [ "$HERE" != "$THERE" ]; then
+  # Never discard work: uncommitted edits, or a HEAD other than the one this script last moved to, mean someone
+  # is developing in this checkout. (After a rewritten main, HEAD still equals the recorded commit, so reset is safe.)
+  LAST="$(cat "$ROOT/.build/dev-update.head" 2>/dev/null || echo "$HERE")"
+  if [ -n "$(git status --porcelain --untracked-files=no)" ] || [ "$HERE" != "$LAST" ]; then
+    log "this checkout has local edits or commits; not updating. Develop in another clone, or push and run: git reset --hard origin/main"; exit 0
+  fi
   # This checkout only builds main; it follows main exactly, including a rewritten history.
   if ! git reset --hard --quiet origin/main 2>>"$LOG"; then log "could not move to origin/main; retrying next run"; exit 0; fi
   log "main moved ${HERE:0:7} -> ${THERE:0:7}: $(git log -1 --format=%s)"
 fi
+git rev-parse HEAD > "$ROOT/.build/dev-update.head"
 
 # The app uses macOS 26 APIs (Liquid Glass, renamed AVFoundation notifications): Swift 6.2 or newer is required.
 SWIFT_VER="$(swift --version 2>&1 | sed -nE 's/.*Swift version ([0-9]+)\.([0-9]+).*/\1 \2/p' | head -1)"
