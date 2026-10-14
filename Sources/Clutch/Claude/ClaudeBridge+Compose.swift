@@ -100,21 +100,21 @@ extension ClaudeBridge {
             setScrollMethod(.accessibility)
             return
         }
-        let pixels = Int32(max(-3000, min(3000, (-dy).rounded())))
+        // Measured live: a positive pixel delta moves Claude's transcript content up, i.e. scrolls down.
+        let pixels = Int32(max(-3000, min(3000, dy.rounded())))
         guard pixels != 0,
               let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else {
             setScrollMethod(.failed)
             return
         }
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        // Claude (Electron) ignores scroll events posted to its process; only events through the session event
+        // stream reach the page, routed to the window under the event's location. Posting there moves the
+        // pointer to that location, so it is put straight back: measured live, the page still scrolls.
         event.location = CGPoint(x: s.frame.midX, y: s.frame.midY)
-        // Route to the session's window even when the pointer is elsewhere: AppKit picks the target window from
-        // these fields for events posted to the process.
-        if s.windowNumber > 0 {
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(s.windowNumber))
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(s.windowNumber))
-        }
-        event.postToPid(pid)
+        let saved = CGEvent(source: nil)?.location
+        event.post(tap: .cgSessionEventTap)
+        if let saved { CGWarpMouseCursorPosition(saved) }
         setScrollMethod(.wheelEvent)
     }
 
