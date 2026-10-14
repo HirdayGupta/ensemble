@@ -662,6 +662,8 @@ final class Coordinator: AppCoordinating {
         state.listening = true
         pushOverlay()
         Task { @MainActor in
+            // Other audio is paused before the microphone opens, so neither it nor the pause is transcribed.
+            if self.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
             let result = await self.bridge.startDictation(session)
             self.busy = false
             switch result {
@@ -1054,9 +1056,8 @@ final class Coordinator: AppCoordinating {
     }
 
     private func pushOverlay() {
-        // Every dictation start and end passes through here: fade other audio out for its length, back in after.
-        let wantDuck = listeningSession != nil && settings.pauseMediaWhileDictating
-        if wantDuck != duckWanted { duckWanted = wantDuck; if wantDuck { ducker.duck() } else { ducker.restore() } }
+        // Every dictation end passes through here: audio paused for it resumes.
+        if duckWanted, listeningSession == nil { duckWanted = false; ducker.restore() }
         let acting = listeningSession ?? (gestures.progress?.action == .send ? lastSpoken?.session : nil) ?? target
         var switching: SessionSwitch?
         if listeningSession != nil {

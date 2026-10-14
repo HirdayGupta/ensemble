@@ -2,78 +2,72 @@ import AppKit
 import AudioToolbox
 import CoreAudio
 
-/// Other audio playing through speakers would be heard by the microphone and transcribed. While dictating, this
-/// fades the system output down in 0.25 s and presses play/pause; afterwards it presses play again and fades the
-/// volume back in 0.4 s. Headphones and Bluetooth output are left alone: the microphone cannot hear them.
+/// Other audio playing through speakers would be heard by the microphone and transcribed. Before dictation starts,
+/// this fades the system output down in 0.25 s, presses play/pause, and puts the volume straight back: the media is
+/// paused, so nothing is heard, and Claude's own start and stop sounds play at normal volume. When dictation ends it
+/// waits for Claude's stop sound, then presses play again with the volume faded in over 0.4 s. Headphones and
+/// Bluetooth output are left alone: the microphone cannot hear them.
 ///
 /// macOS 15.4 removed apps' access to which app is playing, so play/pause goes to whatever macOS treats as
-/// "now playing". If the audio is still playing half a second later, that press reached the wrong app and is
-/// undone; the volume stays down either way, so the transcript is protected even then.
+/// "now playing". The check that the sound actually stopped runs before Claude's microphone is pressed (Claude's
+/// start sound would otherwise read as audio still playing); if it did not stop, the press is undone and nothing
+/// else is touched.
 ///
-/// The volume to return to is saved before it is touched: a crash mid-dictation is put right on the next launch.
+/// The volume to return to is saved while it is down: a crash mid-fade is put right on the next launch.
 @MainActor
 final class MediaDucker {
-    private var device: AudioObjectID?
-    private var savedVolume: Float32?
-    private var paused = false
-    private var work: Task<Void, Never>?
+    private var paused: (device: AudioObjectID, volume: Float32?)?
     private static let savedKey = "duck.savedVolume"
     private static let savedUIDKey = "duck.deviceUID"
 
-    var isActive: Bool { device != nil }
-
-    func duck() {
-        guard device == nil, let dev = Self.defaultOutput(), Self.isPlaying(dev), !Self.isHeadphones(dev) else { return }
-        device = dev
+    /// Runs before the microphone is pressed; returns once the media is paused (about 0.5 s) or at once when
+    /// nothing is playing on speakers.
+    func duck() async {
+        guard paused == nil, let dev = Self.defaultOutput(), Self.isPlaying(dev), !Self.isHeadphones(dev) else { return }
         let volume = Self.volume(dev)
-        savedVolume = volume
-        if let volume, let uid = Self.uid(dev) {
-            UserDefaults.standard.set(volume, forKey: Self.savedKey)
-            UserDefaults.standard.set(uid, forKey: Self.savedUIDKey)
-        }
-        EnsembleLog.write("audio playing on speakers: fading out and pausing")
-        work = Task { @MainActor in
-            if let volume { await Self.ramp(dev, from: volume, to: 0, seconds: 0.25) }
-            guard !Task.isCancelled else { return }
-            Self.pressPlayPause()
-            self.paused = true
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            guard !Task.isCancelled else { return }
-            if Self.isPlaying(dev) {
-                Self.pressPlayPause()
-                self.paused = false
-                EnsembleLog.write("play/pause did not stop the audio; press undone, volume stays down while dictating")
-            }
-        }
+        Self.save(dev, volume)
+        if let volume { await Self.ramp(dev, from: volume, to: 0, seconds: 0.25) }
+        Self.pressPlayPause()
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        let stopped = !Self.isPlaying(dev)
+        if !stopped { Self.pressPlayPause() }
+        if let volume { Self.setVolume(dev, volume) }
+        Self.clearSaved()
+        EnsembleLog.write(stopped ? "audio on speakers faded out and paused for dictation"
+                                  : "play/pause did not stop the audio; press undone, audio left as it was")
+        if stopped { paused = (dev, volume) }
     }
 
+    /// Dictation ended: after Claude's stop sound, resume the media and fade it back in.
     func restore() {
-        guard let dev = device else { return }
-        work?.cancel(); work = nil
-        device = nil
-        if paused { Self.pressPlayPause(); paused = false }
-        let target = savedVolume
-        savedVolume = nil
+        guard let p = paused else { return }
+        paused = nil
         Task { @MainActor in
-            if let target {
-                try? await Task.sleep(nanoseconds: 150_000_000)      // let playback resume under the fade
-                await Self.ramp(dev, from: Self.volume(dev) ?? 0, to: target, seconds: 0.4)
-            }
-            UserDefaults.standard.removeObject(forKey: Self.savedKey)
-            UserDefaults.standard.removeObject(forKey: Self.savedUIDKey)
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            let target = Self.volume(p.device) ?? p.volume
+            if let target { Self.save(p.device, target); Self.setVolume(p.device, 0) }
+            Self.pressPlayPause()
+            if let target { await Self.ramp(p.device, from: 0, to: target, seconds: 0.4) }
+            Self.clearSaved()
         }
     }
 
-    /// Quit path: put the volume back at once, no fade.
+    /// Quit path: resume at once, no fade.
     func restoreNow() {
-        guard let dev = device else { return }
-        work?.cancel(); work = nil
-        device = nil
-        if paused { Self.pressPlayPause(); paused = false }
-        if let v = savedVolume { Self.setVolume(dev, v) }
-        savedVolume = nil
-        UserDefaults.standard.removeObject(forKey: Self.savedKey)
-        UserDefaults.standard.removeObject(forKey: Self.savedUIDKey)
+        guard paused != nil else { return }
+        paused = nil
+        Self.pressPlayPause()
+    }
+
+    private static func save(_ dev: AudioObjectID, _ volume: Float32?) {
+        guard let volume, let uid = uid(dev) else { return }
+        UserDefaults.standard.set(volume, forKey: savedKey)
+        UserDefaults.standard.set(uid, forKey: savedUIDKey)
+    }
+
+    private static func clearSaved() {
+        UserDefaults.standard.removeObject(forKey: savedKey)
+        UserDefaults.standard.removeObject(forKey: savedUIDKey)
     }
 
     /// Launch: a volume left down by a crash goes back to where it was.
