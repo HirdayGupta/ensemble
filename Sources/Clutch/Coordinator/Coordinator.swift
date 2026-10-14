@@ -508,7 +508,7 @@ final class Coordinator: AppCoordinating {
         case .scroll(let dy): scroll(dy)
         case .dragScroll(let handDy):
             // Natural scrolling: the content follows the hand, so a hand moving up shows later content (scrolls down).
-            scroll(handDy * SystemPointer.speedFactor * (SystemPointer.naturalScrolling ? 1 : -1))
+            scroll(handDy * SystemPointer.speedFactor * (SystemPointer.naturalScrolling ? 1 : -1) * (settings.reverseScroll ? -1 : 1))
         }
     }
 

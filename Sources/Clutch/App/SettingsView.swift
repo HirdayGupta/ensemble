@@ -129,6 +129,13 @@ private struct DisplaySettings: View {
                     }
                 }
             }
+            Section("Scrolling") {
+                Toggle("Reverse pinch-and-drag direction", isOn: $settings.reverseScroll)
+                Text(settings.reverseScroll
+                     ? "Moving your pinch up scrolls toward earlier messages."
+                     : "Moving your pinch up drags the page up, toward later messages (follows your Mac's scroll direction).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Sending") {
                 LabeledContent("Hold thumbs-up to send") {
                     HStack {
