@@ -49,43 +49,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// Re-renders the menu-bar icon only when the status or listening flag changes, not on every coordinator tick.
+/// While dictating, the lit dot pulses once a second.
 @MainActor
 final class StatusIconModel: ObservableObject {
-    @Published private(set) var image = StatusIconModel.render(status: .off, listening: false)
+    @Published private(set) var image = StatusIconModel.render(.off)
     private var cancellable: AnyCancellable?
+    private var pulse: Timer?
 
     init(state: AppState, settings: SettingsStore) {
         cancellable = Publishers.CombineLatest3(state.$status, state.$listening, settings.$enabled)
             .map { status, listening, enabled in (enabled ? status : .off, listening && enabled) }
             .removeDuplicates { $0 == $1 }
-            .sink { [weak self] status, listening in
-                self?.image = Self.render(status: status, listening: listening)
-            }
+            .sink { [weak self] status, listening in self?.show(status: status, listening: listening) }
     }
 
-    /// A drawing-handler image resolves colours at draw time, so it follows light/dark menu bars even though
-    /// it is not a template (a template could not carry the red dot).
-    private static func render(status: AppStatus, listening: Bool) -> NSImage {
-        let symbol = NSImage(systemSymbolName: status.symbolName, accessibilityDescription: "Ensemble")
-            ?? NSImage(systemSymbolName: "hand.raised", accessibilityDescription: "Ensemble")
-        let configured = symbol?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-        let size = NSSize(width: 22, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
-            guard let configured else { return false }
-            let tinted = configured.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
-            let glyph = tinted ?? configured
-            let glyphSize = glyph.size
-            glyph.draw(in: NSRect(x: (rect.width - glyphSize.width) / 2, y: (rect.height - glyphSize.height) / 2,
-                                  width: glyphSize.width, height: glyphSize.height))
-            if listening {
-                let dot = NSRect(x: rect.width - 8, y: rect.height - 8, width: 7, height: 7)
-                NSColor.systemRed.setFill()
-                NSBezierPath(ovalIn: dot).fill()
+    private func show(status: AppStatus, listening: Bool) {
+        pulse?.invalidate(); pulse = nil
+        guard listening else { image = Self.render(Self.look(status)); return }
+        let bright = Self.render(.dictating(bright: true)), dim = Self.render(.dictating(bright: false))
+        image = bright
+        let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { guard let self else { return }; self.image = self.image === bright ? dim : bright }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        pulse = t
+    }
+
+    enum Look: Equatable { case off, on, attention, dictating(bright: Bool) }
+
+    static func look(_ status: AppStatus) -> Look {
+        switch status {
+        case .off, .claudeNotRunning: return .off
+        case .watching, .listening: return .on
+        case .cameraCovered, .needsCalibration, .needsPermission, .error: return .attention
+        }
+    }
+
+    /// The Ensemble dots: three sessions. Hollow when off, filled when on, the top one blue while dictating,
+    /// hollow with an exclamation mark when something needs you. Drawn at draw time, so it follows light and
+    /// dark menu bars.
+    static func render(_ look: Look) -> NSImage {
+        let attention = look == .attention
+        let size = NSSize(width: attention ? 24 : 18, height: 18)
+        let image = NSImage(size: size, flipped: true) { _ in
+            let r: CGFloat = 3.2
+            let centres = [CGPoint(x: 9, y: 5), CGPoint(x: 4.6, y: 12.6), CGPoint(x: 13.4, y: 12.6)]
+            for (i, c) in centres.enumerated() {
+                let filled = look != .off && !attention
+                let rr = filled ? r + 0.3 : r
+                let path = NSBezierPath(ovalIn: NSRect(x: c.x - rr, y: c.y - rr, width: rr * 2, height: rr * 2))
+                if case .dictating(let bright) = look, i == 0 {
+                    NSColor(Color.clutchBlue).withAlphaComponent(bright ? 1 : 0.4).setFill(); path.fill()
+                } else if filled {
+                    NSColor.labelColor.setFill(); path.fill()
+                } else {
+                    NSColor.labelColor.setStroke(); path.lineWidth = 1.3; path.stroke()
+                }
+            }
+            if attention {
+                NSColor.labelColor.setFill()
+                NSBezierPath(roundedRect: NSRect(x: 20.6, y: 3, width: 2, height: 8.5), xRadius: 1, yRadius: 1).fill()
+                NSBezierPath(ovalIn: NSRect(x: 20.5, y: 13, width: 2.2, height: 2.2)).fill()
             }
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "Ensemble: \(status.title)"
+        image.accessibilityDescription = "Ensemble"
         return image
     }
 }
