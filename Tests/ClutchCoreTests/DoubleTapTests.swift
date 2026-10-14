@@ -73,3 +73,14 @@ import Testing
         #expect(s.machine.talking)
     }
 }
+
+@Suite struct DoubleTapExpiryTests {
+    @Test func halfwayStateExpiresAfterTheGap() {
+        let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        s.tap()
+        #expect(s.machine.awaitingSecondTap)
+        s.pinch(0.2, for: 1.0)
+        #expect(!s.machine.awaitingSecondTap)
+        #expect(s.machine.progress == nil)
+    }
+}

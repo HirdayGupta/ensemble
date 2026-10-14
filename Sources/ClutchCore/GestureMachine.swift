@@ -121,7 +121,10 @@ public final class GestureMachine {
     public func push(_ h: HandObservation) -> [GestureIntent] {
         lastPushT = h.t
         var intents: [GestureIntent] = []
-        if talkStyle == .doubleTap { trackTaps(h, into: &intents) }
+        if talkStyle == .doubleTap {
+            if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
+            trackTaps(h, into: &intents)
+        }
 
         guard h.present else {
             run = nil
@@ -247,7 +250,10 @@ public final class GestureMachine {
     }
 
     /// Feedback for the bubble: after one tap, the second tap is awaited.
-    public var awaitingSecondTap: Bool { talkStyle == .doubleTap && lastTapEnd != nil }
+    public var awaitingSecondTap: Bool {
+        guard talkStyle == .doubleTap, let end = lastTapEnd, let now = lastPushT else { return false }
+        return now - end <= Self.tapGap
+    }
 
     private func trackRelease(isTalkPose: Bool, at t: TimeInterval, into intents: inout [GestureIntent]) {
         guard talking else { releaseStart = nil; return }
