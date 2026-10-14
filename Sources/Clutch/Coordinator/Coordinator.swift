@@ -63,11 +63,12 @@ final class Coordinator: AppCoordinating {
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.pointer.setSmoothing(k) }.store(in: &cancellables)
         settings.$enabled.dropFirst().removeDuplicates().sink { [weak self] on in
             guard let self else { return }
-            on ? self.start() : self.stop()
+            // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
+            DispatchQueue.main.async { on ? self.start() : self.stop() }
         }.store(in: &cancellables)
         settings.$cameraName.dropFirst().removeDuplicates().sink { [weak self] _ in
             guard let self, self.running else { return }
-            self.stop(); self.start()
+            DispatchQueue.main.async { self.stop(); self.start() }
         }.store(in: &cancellables)
 
         engine.onHand = { [weak self] in self?.handle(hand: $0) }
@@ -136,7 +137,7 @@ final class Coordinator: AppCoordinating {
         ClutchLog.write("calibrate requested (engine running=\(engine.isRunning))")
         // Calibrating while off turns Clutch on first and waits for the camera's first face reading.
         if !engine.isRunning || latestHead == nil {
-            if !settings.enabled { settings.enabled = true } else if !running { start() }
+            if !settings.enabled { settings.enabled = true } else if !running { start() }   // the enabled sink starts it
             Task { @MainActor in
                 for _ in 0..<50 where self.latestHead?.faceCount != 1 { try? await Task.sleep(nanoseconds: 100_000_000) }
                 guard self.engine.isRunning, self.latestHead != nil else { self.refuse("The camera did not start; check Camera permission"); return }
@@ -178,7 +179,8 @@ final class Coordinator: AppCoordinating {
         if head.faceCount == 1 { lastOneFaceT = head.t } else if head.faceCount > 1 { lastManyFacesT = head.t }
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
         if head.t - headStats.since >= 5 {
-            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), last yaw \(String(format: "%.2f", head.yaw)) pitch \(String(format: "%.2f", head.pitch)), nose on Claude: \(target != nil)")
+            let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
+            ClutchLog.write("head: \(headStats.n) readings in 5 s, faces 0/1/2+ = \(headStats.faces), nose at \(nose), accessibility \(AXIsProcessTrusted()), Claude running \(bridge.claudeIsRunning()), sessions \(sessions.count), nose on Claude: \(target != nil)")
             headStats = (head.t, 0, [0, 0, 0])
         }
         guard !state.calibrating else { return }
