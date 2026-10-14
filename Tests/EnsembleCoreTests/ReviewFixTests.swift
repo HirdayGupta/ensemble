@@ -3,7 +3,7 @@ import Testing
 @testable import EnsembleCore
 
 @Suite struct ReviewFixTests {
-    private func sim() -> GestureSim { GestureSim(mapping: GestureMapping(), style: .doubleTap) }
+    private func sim() -> GestureSim { GestureSim(mapping: GestureMapping()) }
 
     @Test func abortedTalkLetsTheNextDoubleTapStartAgain() {
         let s = sim()

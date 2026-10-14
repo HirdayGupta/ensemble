@@ -3,7 +3,7 @@ import Testing
 @testable import EnsembleCore
 
 @Suite struct DoubleTapTests {
-    private func sim() -> GestureSim { GestureSim(mapping: GestureMapping(), style: .doubleTap) }
+    private func sim() -> GestureSim { GestureSim(mapping: GestureMapping()) }
 
     @Test func doubleTapStartsAndAnotherStops() {
         let s = sim()
@@ -98,7 +98,7 @@ import Testing
 
 @Suite struct DoubleTapOnTouchTests {
     @Test func secondPinchActsOnTouchEvenIfHeld() {
-        let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        let s = GestureSim(mapping: GestureMapping())
         s.pinch(0.6, for: 0.5)
         s.tap()
         s.pinch(0.2, for: 0.1)
@@ -113,7 +113,7 @@ import Testing
 
 @Suite struct DoubleTapExpiryTests {
     @Test func halfwayStateExpiresAfterTheGap() {
-        let s = GestureSim(mapping: GestureMapping(), style: .doubleTap)
+        let s = GestureSim(mapping: GestureMapping())
         s.pinch(0.6, for: 0.5)
         s.tap()
         #expect(s.machine.awaitingSecondTap)
@@ -125,7 +125,7 @@ import Testing
 
 @Suite struct PinchArcScrollTests {
     @Test func anArcScrollsByDistanceTravelled() {
-        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        let m = GestureMachine(mapping: GestureMapping())
         var t = 10.0, total = 0.0
         func push(_ x: Double, _ y: Double, _ pinch: Double) {
             for i in m.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: x, y: y), pinch: pinch)) {
@@ -146,7 +146,7 @@ import Testing
 
 @Suite struct PinchScrollDirectionTests {
     private func run(_ path: [(Double, Double)]) -> [Double] {
-        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        let m = GestureMachine(mapping: GestureMapping())
         var t = 10.0, out: [Double] = []
         func push(_ x: Double, _ y: Double, _ pinch: Double) {
             for i in m.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: x, y: y), pinch: pinch)) {
@@ -190,7 +190,7 @@ import Testing
 
 @Suite struct PinchReleaseStopsScrollTests {
     @Test func slightlyOpeningTheFingersEndsTheDragImmediately() {
-        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        let m = GestureMachine(mapping: GestureMapping())
         var t = 10.0
         var afterRelease = 0, ended = 0
         var released = false

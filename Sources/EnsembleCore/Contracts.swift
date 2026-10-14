@@ -47,7 +47,7 @@ public struct FrameLight: Sendable {
 
 /// Which pose does what. User-configurable.
 public struct GestureMapping: Codable, Equatable, Sendable {
-    public var talk: Pose = .gather             // used by the gather style; the double tap needs no pose
+    public var talk: Pose = .gather             // kept for saved settings; the double tap needs no pose
     public var send: Pose? = .thumbsUp          // nil = sending by gesture is off
     public var scrollUp: Pose? = nil            // optional pose scroll (off by default: pinch and drag scrolls)
     public var scrollDown: Pose? = nil
@@ -98,7 +98,7 @@ public enum GestureIntent: Equatable, Sendable {
     case dragScrollEnded                    // the pinch opened or the hand left: scrolling stops now
 }
 
-public enum TalkEndReason: String, Sendable { case released, handLost, stale }
+public enum TalkEndReason: String, Sendable { case released, stale }
 
 /// A Claude Code session pane visible on screen.
 public struct ClaudeSession: Equatable, Sendable {
@@ -130,13 +130,6 @@ public enum BridgeResult: Equatable, Sendable {
 
 /// What a held pose will do once its hold completes.
 public enum GestureAction: String, Sendable { case talk, stop, send, cancel, scrollUp, scrollDown }
-
-/// How the talk pose controls dictation.
-public enum TalkStyle: String, Codable, Sendable {
-    case doubleTap     // two quick thumb-to-index taps start, two more stop; the hand may leave in between
-    case gatherBloom   // the talk pose starts; the talk pose again then an open hand stops; the hand may leave in between
-    case hold          // dictate only while the talk pose is held
-}
 
 /// A pose being held right now: `progress` fills from 0 to 1 over the hold; `willAct` is false when this hold
 /// cannot fire (for example a fist that arrived already closed); `active` is true while it is acting (dictating, scrolling).

@@ -6,8 +6,7 @@ import Foundation
 public final class GestureMachine {
     public var mapping: GestureMapping
     public private(set) var talking = false
-    public var talkStyle: TalkStyle = .doubleTap
-    /// doubleTap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
+    /// Double-tap thresholds, in palm lengths with hysteresis: closed below `pinchClosed`, open again above `pinchOpen`.
     /// Measured on the owner's hand (2026-10-14): a pinch closes to 0.03–0.11 palm lengths, often held 1–2 s, and
     /// between quick taps only reopens to 0.12–0.18; a relaxed hand rests around 0.20–0.26. Single-frame spikes
     /// occur inside a held pinch, so both edges need two frames in a row.
@@ -53,17 +52,8 @@ public final class GestureMachine {
     private var lastSendPoseT: TimeInterval = -.infinity
     private var lastTapEnd: TimeInterval?
     private var lastToggleAt: TimeInterval = -.infinity
-    /// gatherBloom: after a start, the hand must first leave the talk pose (or the frame) before a stop counts.
-    private var stopArmed = false
-    /// gatherBloom: when the talk pose was last held long enough to begin a stop; an open hand soon after stops.
-    private var gatheredForStopAt: TimeInterval?
-    static let bloomWindow = 1.5
 
     // Timing rules (seconds).
-    static let talkHold = 0.3
-    static let talkArmWindow = 1.5
-    static let releaseHold = 0.4
-    static let handLostHold = 0.6
     static let staleHold = 1.0
     /// Holding the send pose this long sends: the hold itself is the confirmation (settable).
     public var sendHold = 1.5
@@ -87,16 +77,12 @@ public final class GestureMachine {
         var pose: Pose
         var start: TimeInterval
         var startedWhileTalking: Bool
-        var armed: Bool
         var fired = false
         var stoppedForSend = false     // this send pose already ended a dictation; it may still send
         var lastT: TimeInterval
     }
 
     private var run: Run?
-    private var lastOtherPresentT: TimeInterval?     // last present frame whose pose was not the talk pose
-    private var releaseStart: TimeInterval?
-    private var absentStart: TimeInterval?
     private var lastPushT: TimeInterval?
     private var lastTalkEndT: TimeInterval?
 
@@ -104,22 +90,12 @@ public final class GestureMachine {
 
     /// The pose currently held and how far its hold has progressed toward acting, for on-screen feedback.
     public var progress: GestureProgress? {
-        if talkStyle == .doubleTap {
-            if awaitingSecondTap { return GestureProgress(pose: .gather, action: talking ? .stop : .talk, progress: 0.5, willAct: true, active: false) }
-            if talking, run?.pose != mapping.send { return GestureProgress(pose: .gather, action: .talk, progress: 1, willAct: true, active: true) }
-        }
+        if awaitingSecondTap { return GestureProgress(pose: .gather, action: talking ? .stop : .talk, progress: 0.5, willAct: true, active: false) }
+        if talking, run?.pose != mapping.send { return GestureProgress(pose: .gather, action: .talk, progress: 1, willAct: true, active: true) }
         guard let r = run else { return nil }
         let held = r.lastT - r.start
         func make(_ action: GestureAction, _ need: Double, _ can: Bool) -> GestureProgress {
             GestureProgress(pose: r.pose, action: action, progress: min(max(held / need, 0), 1), willAct: can, active: false)
-        }
-        if talkStyle == .gatherBloom, talking {
-            if r.pose == mapping.talk && stopArmed { return make(.stop, Self.talkHold, true) }
-            if r.pose == mapping.cancel, gatheredForStopAt != nil { return GestureProgress(pose: r.pose, action: .stop, progress: 1, willAct: true, active: true) }
-        }
-        if r.pose == mapping.talk && talkStyle != .doubleTap {
-            if talking { return GestureProgress(pose: r.pose, action: .talk, progress: 1, willAct: true, active: true) }
-            return make(.talk, Self.talkHold, r.armed)
         }
         if talking { return nil }
         if r.pose == mapping.send { return make(.send, sendHold, (!r.startedWhileTalking || r.stoppedForSend) && !r.fired) }
@@ -138,12 +114,7 @@ public final class GestureMachine {
         pinchToggled = false; dragging = false; isDragging = false; edgeCount = 0
         pinchSuspect = false; lastSendPoseT = -.infinity
         lastToggleAt = -.infinity
-        stopArmed = false
-        gatheredForStopAt = nil
         run = nil
-        lastOtherPresentT = nil
-        releaseStart = nil
-        absentStart = nil
         lastPushT = nil
         lastTalkEndT = nil
     }
@@ -154,9 +125,6 @@ public final class GestureMachine {
         talking = false
         lastTapEnd = nil
         lastToggleAt = -.infinity
-        stopArmed = false
-        gatheredForStopAt = nil
-        releaseStart = nil
     }
 
     public func push(_ observation: HandObservation) -> [GestureIntent] {
@@ -168,65 +136,21 @@ public final class GestureMachine {
         lastPushT = h.t
         var intents: [GestureIntent] = []
         if h.present, let send = mapping.send, h.pose == send { lastSendPoseT = h.t }
-        if talkStyle == .doubleTap {
-            if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
-            trackTaps(h, into: &intents)
-        }
+        if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
+        trackTaps(h, into: &intents)
 
-        guard h.present else {
+        guard h.present, let pose = h.pose else {
             run = nil
-            releaseStart = nil
-            absentStart = absentStart ?? h.t
-            if talking, talkStyle != .hold {
-                if let since = absentStart, h.t - since >= 0.3 { stopArmed = true }
-            } else if talking, let since = absentStart, h.t - since >= Self.handLostHold {
-                endTalk(.handLost, at: h.t, into: &intents)
-            }
-            return intents
-        }
-        absentStart = nil
-
-        let pose = h.pose
-        if pose != mapping.talk { lastOtherPresentT = h.t }
-
-        guard let pose else {
-            run = nil
-            if talkStyle == .gatherBloom { if talking { stopArmed = true } } else if talkStyle == .hold { trackRelease(isTalkPose: false, at: h.t, into: &intents) }
             return intents
         }
 
         if run?.pose != pose {
-            let armed = pose == mapping.talk && (lastOtherPresentT.map { h.t - $0 <= Self.talkArmWindow } ?? false)
-            run = Run(pose: pose, start: h.t, startedWhileTalking: talking, armed: armed, lastT: h.t)
+            run = Run(pose: pose, start: h.t, startedWhileTalking: talking, lastT: h.t)
         }
-        if talkStyle == .hold { trackRelease(isTalkPose: pose == mapping.talk, at: h.t, into: &intents) }
         guard var r = run else { return intents }
         let held = h.t - r.start
 
-        if talkStyle == .gatherBloom, talking, pose != mapping.send {
-            if pose == mapping.talk {
-                if stopArmed, held >= Self.talkHold { gatheredForStopAt = h.t }
-            } else {
-                stopArmed = true
-                if pose == mapping.cancel, let g = gatheredForStopAt, h.t - g <= Self.bloomWindow {
-                    endTalk(.released, at: h.t, into: &intents)
-                    r.fired = true            // this open hand is the bloom; it must not also cancel anything
-                }
-            }
-            r.lastT = h.t
-            run = r
-            return intents
-        }
-
-        if pose == mapping.talk && talkStyle != .doubleTap {
-            if !talking, r.armed, held >= Self.talkHold {
-                talking = true
-                stopArmed = false
-                gatheredForStopAt = nil
-                releaseStart = nil
-                intents.append(.talkBegan)
-            }
-        } else if talking, pose == mapping.send, !r.stoppedForSend, held >= Self.stopAndSendHold {
+        if talking, pose == mapping.send, !r.stoppedForSend, held >= Self.stopAndSendHold {
             // Straight from the talk pose to the send pose: stop dictating now; keep holding to send.
             r.stoppedForSend = true
             endTalk(.released, at: h.t, into: &intents)
@@ -346,27 +270,16 @@ public final class GestureMachine {
 
     /// Feedback for the bubble: after one tap, the second tap is awaited.
     public var awaitingSecondTap: Bool {
-        guard talkStyle == .doubleTap, let end = lastTapEnd, let now = lastPushT else { return false }
+        guard let end = lastTapEnd, let now = lastPushT else { return false }
         return now - end <= Self.tapGap
-    }
-
-    private func trackRelease(isTalkPose: Bool, at t: TimeInterval, into intents: inout [GestureIntent]) {
-        guard talking else { releaseStart = nil; return }
-        if isTalkPose { releaseStart = nil; return }
-        releaseStart = releaseStart ?? t
-        if let since = releaseStart, t - since >= Self.releaseHold {
-            endTalk(.released, at: t, into: &intents)
-        }
     }
 
     private func endTalk(_ reason: TalkEndReason, at t: TimeInterval, into intents: inout [GestureIntent]) {
         talking = false
-        releaseStart = nil
-        absentStart = nil
         lastTalkEndT = t
-        // On release the current run stays, still marked as started while talking. After a lost hand
-        // or stale camera the next closed hand is a new arrival, not an open-to-fist transition.
-        if reason != .released { run = nil; lastOtherPresentT = nil }
+        // On release the current run stays, still marked as started while talking. After a stale camera
+        // the next pose is a new arrival.
+        if reason != .released { run = nil }
         intents.append(.talkEnded(reason))
     }
 

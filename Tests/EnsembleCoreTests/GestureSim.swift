@@ -2,6 +2,11 @@ import CoreGraphics
 import Foundation
 @testable import EnsembleCore
 
+extension GestureMapping {
+    /// The default mapping with the optional pointing scroll poses switched on.
+    static var pointScroll: GestureMapping { var m = GestureMapping(); m.scrollUp = .pointUp; m.scrollDown = .pointDown; return m }
+}
+
 /// Drives a GestureMachine with synthetic 30 fps frames and records when each intent fired.
 final class GestureSim {
     let machine: GestureMachine
@@ -9,9 +14,8 @@ final class GestureSim {
     var log: [(t: TimeInterval, intent: GestureIntent)] = []
     let fps = 30.0
 
-    init(mapping: GestureMapping = .holdFist, style: TalkStyle = .hold) {
+    init(mapping: GestureMapping = .pointScroll) {
         machine = GestureMachine(mapping: mapping)
-        machine.talkStyle = style
     }
 
     var intents: [GestureIntent] { log.map(\.intent) }
@@ -45,7 +49,15 @@ final class GestureSim {
     }
 
     /// One quick tap: open, closed briefly, open.
-    func tap(closedFor: Double = 0.15) { pinch(0.2, for: 0.1); pinch(0.04, for: closedFor); pinch(0.2, for: 0.1) }
+    func tap(closedFor: Double = 0.15, pose: Pose? = nil) {
+        pinch(0.2, for: 0.1, pose: pose); pinch(0.04, for: closedFor, pose: pose); pinch(0.2, for: 0.1, pose: pose)
+    }
+
+    /// A double tap: starts dictation when idle, stops it when dictating.
+    func toggleTalk(pose: Pose? = nil) {
+        pinch(0.6, for: 1.0, pose: pose)
+        tap(pose: pose); tap(pose: pose)
+    }
 
     func absent(for duration: Double) {
         for _ in 0..<Int((duration * fps).rounded()) {

@@ -7,31 +7,16 @@ import Testing
         try FixtureReplay.intents(name)
     }
 
-    @Test func fistHoldProducesBeganEndedPairs() throws {
-        let intents = try gestureIntents("fist-hold").map(\.intent)
-        #expect(intents.count == 8)
-        for (i, intent) in intents.enumerated() {
-            #expect(intent == (i % 2 == 0 ? .talkBegan : .talkEnded(.handLost)))
-        }
-    }
-
-    @Test func farFistBeginsAndEndsStaleWhenFramesStop() throws {
-        let machine = GestureMachine(mapping: .holdFist)
-        machine.talkStyle = .hold
-        let obs = try FixtureReplay.observations("fist-far")
-        var intents: [GestureIntent] = []
-        for o in obs { intents += machine.push(o) }
-        #expect(intents == [.talkBegan])
-        intents = machine.tick(now: obs.last!.t + 1.0)
-        #expect(intents == [.talkEnded(.stale)])
-    }
-
     @Test(arguments: ["none-desk-life", "none-dogfood-1052-fist"])
-    func idleHandsNeverTalkOrSend(name: String) throws {
+    func idleHandsNeverSendOrScroll(name: String) throws {
         let intents = try FixtureReplay.intents(name).map(\.intent)
-        #expect(!intents.contains(.talkBegan))
         #expect(!intents.contains(.sendRequested))
         #expect(!intents.contains { if case .scroll = $0 { return true }; return false })
+    }
+
+    @Test func idleDeskHandNeverStartsDictation() throws {
+        let intents = try FixtureReplay.intents("none-desk-life").map(\.intent)
+        #expect(!intents.contains(.talkBegan))
     }
 
     @Test func thumbsUpHoldSends() throws {

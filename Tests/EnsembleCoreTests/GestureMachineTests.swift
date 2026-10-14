@@ -4,122 +4,9 @@ import Testing
 @testable import EnsembleCore
 
 @Suite struct GestureMachineTalkTests {
-    @Test func openToFistHoldBeginsTalkOnce() throws {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.5)
-        let fistStart = s.t
-        s.hold(.fist, for: 5)
-        #expect(s.count(.talkBegan) == 1)
-        #expect(s.machine.talking)
-        let began = try #require(s.firstTime(of: .talkBegan))
-        #expect(began - fistStart >= 0.3 && began - fistStart < 0.4)
-    }
-
-    @Test func shortFistDoesNotBegin() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.5)
-        s.hold(.fist, for: 0.25)
-        s.hold(.openPalm, for: 0.5)
-        #expect(s.count(.talkBegan) == 0)
-    }
-
-    @Test func fistThatInterruptsResetsTheHold() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.5)
-        s.hold(.fist, for: 0.2)
-        s.hold(nil, for: 0.1)
-        s.hold(.fist, for: 0.2)
-        #expect(s.count(.talkBegan) == 0)
-    }
-
-    @Test func handArrivingAlreadyClosedDoesNotBegin() {
-        let s = GestureSim()
-        s.absent(for: 2)
-        s.hold(.fist, for: 3)
-        #expect(s.count(.talkBegan) == 0)
-        #expect(!s.machine.talking)
-    }
-
-    @Test func openHandSeenLongAgoDoesNotArm() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.5)
-        s.absent(for: 2)
-        s.hold(.fist, for: 1)
-        #expect(s.count(.talkBegan) == 0)
-    }
-
-    @Test func openHandSeenWithinWindowArms() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.5)
-        s.absent(for: 0.9)
-        s.hold(.fist, for: 1)
-        #expect(s.count(.talkBegan) == 1)
-    }
-
-    @Test func unclassifiedHandCountsAsDifferentState() {
-        let s = GestureSim()
-        s.hold(nil, for: 0.4)
-        s.hold(.fist, for: 1)
-        #expect(s.count(.talkBegan) == 1)
-    }
-
-    @Test func releaseEndsTalkAfterPointFourSeconds() throws {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        let releaseStart = s.t
-        s.hold(.openPalm, for: 1)
-        #expect(s.intents.last == .talkEnded(.released))
-        let ended = try #require(s.firstTime(of: .talkEnded(.released)))
-        #expect(ended - releaseStart >= 0.4 && ended - releaseStart < 0.5)
-        #expect(!s.machine.talking)
-    }
-
-    @Test func briefFlickerDoesNotEndTalk() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(nil, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        #expect(s.machine.talking)
-        #expect(s.count(.talkEnded(.released)) == 0)
-    }
-
-    @Test func otherPoseAlsoReleases() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.twoFingers, for: 0.6)
-        #expect(s.count(.talkEnded(.released)) == 1)
-    }
-
-    @Test func handLostEndsTalkAfterPointSixSeconds() throws {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        let lostStart = s.t
-        s.absent(for: 1)
-        let ended = try #require(s.firstTime(of: .talkEnded(.handLost)))
-        #expect(ended - lostStart >= 0.6 && ended - lostStart < 0.7)
-        #expect(!s.machine.talking)
-    }
-
-    @Test func shortHandLossKeepsTalking() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.absent(for: 0.5)
-        s.hold(.fist, for: 1)
-        #expect(s.machine.talking)
-        #expect(s.count(.talkEnded(.handLost)) == 0)
-    }
-
     @Test func staleCameraEndsTalkOnTick() {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
+        s.toggleTalk()
         s.tick(after: 0.9)
         #expect(s.machine.talking)
         s.tick(after: 1.0)
@@ -137,35 +24,32 @@ import Testing
         #expect(s.log.count == before)
     }
 
-    @Test func canTalkAgainAfterRelease() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 0.6)
-        s.hold(.fist, for: 1)
-        #expect(s.count(.talkBegan) == 2)
-        #expect(s.count(.talkEnded(.released)) == 1)
-    }
-
     @Test func resetClearsTalking() {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
+        s.toggleTalk()
+        #expect(s.machine.talking)
         s.machine.reset()
         #expect(!s.machine.talking)
         s.tick(after: 5)
         #expect(s.count(.talkEnded(.stale)) == 0)
     }
 
-    @Test func customTalkPose() {
-        var m = GestureMapping()
-        m.talk = .thumbsUp
-        m.send = nil
-        let s = GestureSim(mapping: m)
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.thumbsUp, for: 1)
-        #expect(s.count(.talkBegan) == 1)
-        #expect(s.count(.sendRequested) == 0)
+    @Test func noPoseStartsOrStopsDictation() {
+        let s = GestureSim()
+        for pose in [Pose.fist, .openPalm, .gather, .thumbsUp, .twoFingers] {
+            s.hold(.openPalm, for: 0.5)
+            s.hold(pose, for: 2)
+        }
+        #expect(s.count(.talkBegan) == 0)
+        s.toggleTalk()
+        for pose in [Pose.fist, .gather, .twoFingers] {
+            s.hold(.openPalm, for: 0.5)
+            s.hold(pose, for: 2)
+        }
+        s.hold(nil, for: 2)
+        s.absent(for: 0.9)
+        #expect(s.machine.talking)
+        #expect(s.count(.talkEnded(.released)) == 0)
     }
 }
 
@@ -192,45 +76,42 @@ import Testing
         #expect(s.count(.sendRequested) == 0)
     }
 
-    @Test func fistStraightToThumbsUpStopsThenSendsOnce() throws {
+    @Test func thumbsUpWhileDictatingStopsThenSendsOnce() throws {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
+        s.toggleTalk()
         s.hold(.thumbsUp, for: 4)
         #expect(s.count(.talkEnded(.released)) == 1)
         #expect(s.count(.sendRequested) == 1)
         let ended = try #require(s.firstTime(of: .talkEnded(.released)))
         let sent = try #require(s.firstTime(of: .sendRequested))
-        #expect(sent >= ended)
+        #expect(sent - ended > 1.1 && sent - ended < 1.3)   // stop after 0.35 s of the pose, send after the full 1.5 s hold
     }
 
-    @Test func openPalmEndingAHoldNeverSends() {
+    @Test func sendHoldStartsOnlyAfterTheDoubleTapThatStoppedDictation() throws {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 4)
-        #expect(s.count(.talkEnded(.released)) == 1)
-        #expect(s.count(.sendRequested) == 0)
-    }
-
-    @Test func sendWaitsHalfSecondAfterTalkEnded() throws {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 0.47)          // ends the hold at about 0.4 s
+        s.toggleTalk()
+        s.toggleTalk()
         let ended = try #require(s.firstTime(of: .talkEnded(.released)))
         s.hold(.thumbsUp, for: 2)
         let sent = try #require(s.firstTime(of: .sendRequested))
-        #expect(sent - ended >= 1.5)              // the send hold starts after the hand opened
-        #expect(sent - ended < 1.7)
+        #expect(sent - ended >= 1.5 && sent - ended < 2.0)
     }
 
-    @Test func sendNotWhileTalking() {
+    @Test func openHandWhileDictatingNeitherStopsNorCancels() {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
+        s.toggleTalk()
+        s.hold(.openPalm, for: 4)
+        #expect(s.machine.talking)
+        #expect(s.count(.talkEnded(.released)) == 0)
+        #expect(s.count(.cancelRequested) == 0)
+        #expect(s.count(.sendRequested) == 0)
+    }
+
+    @Test func briefThumbsUpWhileDictatingKeepsDictating() {
+        let s = GestureSim()
+        s.toggleTalk()
         s.hold(.thumbsUp, for: 0.3)
-        s.hold(.fist, for: 0.5)
+        s.hold(.openPalm, for: 0.5)
         #expect(s.machine.talking)
         #expect(s.count(.sendRequested) == 0)
     }
@@ -242,24 +123,6 @@ import Testing
         #expect(s.count(.cancelRequested) == 0)
         s.hold(.openPalm, for: 3)
         #expect(s.count(.cancelRequested) == 1)
-    }
-
-    @Test func openHandThatReleasesTalkDoesNotCancel() {
-        let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 3)
-        #expect(s.count(.talkEnded(.released)) == 1)
-        #expect(s.count(.cancelRequested) == 0)
-    }
-
-    @Test func noCancelWhileTalking() {
-        let s = GestureSim()
-        s.hold(.thumbsUp, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.openPalm, for: 0.35)
-        #expect(s.machine.talking)
-        #expect(s.count(.cancelRequested) == 0)
     }
 }
 
@@ -342,22 +205,21 @@ import Testing
         #expect(s.scrollTotal() == 0)
     }
 
-    @Test func noScrollWhileDictationIsHeld() {
+    @Test func noScrollWhileDictating() {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        #expect(s.machine.talking)
-        s.hold(.pointUp, for: 0.3)   // shorter than the release hold: still talking
+        s.toggleTalk()
+        s.hold(.pointUp, for: 2)
         #expect(s.machine.talking)
         #expect(s.scrollTotal() == 0)
     }
 
-    @Test func thePoseThatEndedDictationDoesNotScroll() {
+    @Test func thePoseHeldThroughTheStopDoesNotScroll() {
         let s = GestureSim()
-        s.hold(.openPalm, for: 0.3)
-        s.hold(.fist, for: 1)
-        s.hold(.pointUp, for: 2)
+        s.toggleTalk()
+        s.hold(.pointUp, for: 0.5)
+        s.toggleTalk(pose: .pointUp)
         #expect(!s.machine.talking)
+        s.hold(.pointUp, for: 2)
         #expect(s.scrollTotal() == 0)
         s.hold(nil, for: 0.1)
         s.hold(.pointUp, for: 1)
@@ -375,7 +237,7 @@ import Testing
     }
 
     @Test func eachDirectionCanBeTurnedOffSeparately() {
-        var m = GestureMapping.holdFist
+        var m = GestureMapping.pointScroll
         m.scrollDown = nil
         let s = GestureSim(mapping: m)
         s.hold(.pointDown, for: 1.5)
