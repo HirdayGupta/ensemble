@@ -79,7 +79,11 @@ async function processFrame(b64, t) {
       await create('CPU');
       result = detect(bitmap, t);
     }
-    const faces = result.faceLandmarks ? result.faceLandmarks.length : 0;
+    // Count only faces at least half the width of the largest one: a face on a TV or poster behind the user is
+    // much smaller and must not count as a second person.
+    const widths = (result.faceLandmarks || []).map(lm => { let lo = 1, hi = 0; for (const p of lm) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); } return hi - lo; });
+    const biggest = widths.length ? Math.max(...widths) : 0;
+    const faces = widths.filter(w => w >= biggest * 0.5).length;
     const mats = result.facialTransformationMatrixes;
     if (faces > 0 && mats && mats.length > 0) {
       const { yaw, pitch } = angles(mats[0].data);
