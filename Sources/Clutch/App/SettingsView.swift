@@ -42,6 +42,9 @@ private struct GeneralSettings: View {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
                 Toggle("Play sounds", isOn: $settings.playSounds)
+                Toggle("Fade out and pause other audio while dictating", isOn: $settings.pauseMediaWhileDictating)
+                Text("Only when the sound comes from speakers the microphone can hear; headphones are left alone.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("Show the panel from anywhere", value: "⌥⌘K")

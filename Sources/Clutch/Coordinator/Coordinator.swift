@@ -74,6 +74,9 @@ final class Coordinator: AppCoordinating {
     private let flickThreshold = 2500.0       // points per second at release to start momentum
     private let inertiaFriction = 0.955       // per 1/60 s frame
     private let meter = AudioLevelMeter()
+    /// Fades out and pauses other audio on speakers while dictating, so it is not transcribed.
+    private let ducker = MediaDucker()
+    private var duckWanted = false
     private var busy = false                 // a start/stop/send is in flight
     private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
@@ -196,6 +199,7 @@ final class Coordinator: AppCoordinating {
         ClutchLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(pointer.isCalibrated), accessibility=\(AXIsProcessTrusted()), screens=\(ScreenFacts.displayFingerprint()))")
         state.cameraNames = cameraNames
         sweep()
+        MediaDucker.recoverAfterCrash()
         guard settings.enabled else { state.status = .off; return }
         if !Permissions.accessibilityTrusted {
             ClutchLog.write("accessibility permission missing (if Clutch is already listed in Settings, remove it and add it again)")
@@ -316,6 +320,7 @@ final class Coordinator: AppCoordinating {
         let session = listeningSession
         listeningSession = nil
         pendingSend = nil
+        ducker.restoreNow()
         safety.stopForTermination(session: session)
         ClutchLog.flush()
     }
@@ -1049,6 +1054,9 @@ final class Coordinator: AppCoordinating {
     }
 
     private func pushOverlay() {
+        // Every dictation start and end passes through here: fade other audio out for its length, back in after.
+        let wantDuck = listeningSession != nil && settings.pauseMediaWhileDictating
+        if wantDuck != duckWanted { duckWanted = wantDuck; if wantDuck { ducker.duck() } else { ducker.restore() } }
         let acting = listeningSession ?? (gestures.progress?.action == .send ? lastSpoken?.session : nil) ?? target
         var switching: SessionSwitch?
         if listeningSession != nil {
