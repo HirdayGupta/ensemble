@@ -27,6 +27,8 @@ final class OverlayModel: ObservableObject {
     @Published var arrival: Arrival?
     /// The keyboard, mouse or trackpad is in use: the highlight fades away until they rest.
     @Published var handsOnInput = false
+    /// Live voice level 0...1 while listening (0 when unavailable).
+    @Published var audioLevel = 0.0
     @Published var cancelHint = "Show an open palm to cancel"
 
     var hasContent: Bool {
@@ -87,6 +89,10 @@ final class OverlayController {
 
     func setCancelHint(_ text: String) {
         setIfChanged(&model.cancelHint, text)
+    }
+
+    func setAudioLevel(_ v: Double) {
+        model.audioLevel = v
     }
 
     func setHandsOnInput(_ on: Bool) {

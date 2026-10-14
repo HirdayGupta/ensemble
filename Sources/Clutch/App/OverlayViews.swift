@@ -155,7 +155,7 @@ private struct IslandView: View {
             EmptyView()
         case .listening:
             HStack(spacing: 10) {
-                SoundWaves(color: .clutchBlue).frame(width: 26, height: 16)
+                SoundWaves(color: .clutchBlue, level: model.audioLevel).frame(width: 26, height: 16)
                 Text("Listening").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                 Spacer(minLength: 0)
                 Text("double pinch to stop").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
@@ -413,17 +413,20 @@ private struct BannerView: View {
     }
 }
 
-/// Five bars bouncing at different rates: a live "listening" sign.
+/// Five bars that follow the live voice level (each with its own wobble so they never move in lockstep).
+/// With no level available (no microphone permission) they idle gently.
 struct SoundWaves: View {
     let color: Color
+    var level: Double = 0
 
     var body: some View {
         TimelineView(.animation) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .center, spacing: 2) {
                 ForEach(0..<5, id: \.self) { i in
-                    let phase = t * (5.0 + Double(i) * 1.7) + Double(i)
-                    let h = 0.3 + 0.7 * abs(sin(phase))
+                    let wobble = 0.5 + 0.5 * abs(sin(t * (6.0 + Double(i) * 1.9) + Double(i)))
+                    let shape = [0.55, 0.85, 1.0, 0.8, 0.6][i]
+                    let h = level > 0.02 ? 0.15 + 0.85 * min(1, level * shape * (0.7 + 0.3 * wobble)) : 0.2 + 0.15 * wobble
                     Capsule().fill(color).frame(width: 2.5).frame(maxHeight: .infinity).scaleEffect(y: h)
                 }
             }

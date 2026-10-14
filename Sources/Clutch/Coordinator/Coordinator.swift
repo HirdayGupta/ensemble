@@ -60,6 +60,15 @@ final class Coordinator: AppCoordinating {
     private var scrollTarget: CGPoint?
     private var scrollTimer: Timer?
     private let scrollEase = 0.2              // share of the remaining distance delivered per 1/60 s frame
+    /// Upward pinch strokes are naturally shorter than downward ones, so they count this much more.
+    private let upStrokeGain = 1.6
+    /// Recent scroll output, for the release velocity.
+    private var recentScroll: [(t: TimeInterval, dy: Double)] = []
+    /// Momentum after a fast release: points per second, decaying each frame. A slow release stops dead.
+    private var inertia = 0.0
+    private let flickThreshold = 2500.0       // points per second at release to start momentum
+    private let inertiaFriction = 0.955       // per 1/60 s frame
+    private let meter = AudioLevelMeter()
     private var busy = false                 // a start/stop/send is in flight
     private var disarming = false            // "Clear and disarm" is stopping the microphone
     /// Thumbs-up made straight from the fist: send once the stop is confirmed.
@@ -122,6 +131,7 @@ final class Coordinator: AppCoordinating {
         }.store(in: &cancellables)
 
         engine.onHand = { [weak self] in self?.handle(hand: $0) }
+        meter.onLevel = { [weak self] v in self?.overlay.setAudioLevel(v) }
         engine.onHead = { [weak self] in self?.handle(head: $0) }
         engine.onLight = { [weak self] in self?.handle(light: $0) }
         engine.onStatus = { [weak self] in self?.handle(status: $0) }
@@ -507,11 +517,24 @@ final class Coordinator: AppCoordinating {
         case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
         case .dragScrollEnded:
-            // The pinch is gone: stop dead. No glide remainder, no coast.
+            // The pinch is gone. A slow release stops dead; a fast flick throws the page with momentum.
+            let now = CACurrentMediaTime()
+            recentScroll.removeAll { now - $0.t > 0.12 }
+            let v = recentScroll.reduce(0) { $0 + $1.dy } / 0.12
+            recentScroll.removeAll()
             pendingScroll = 0; scrollRemaining = 0; scrollVelocity = 0
-            scrollTimer?.invalidate(); scrollTimer = nil
+            if abs(v) >= flickThreshold, scrollTarget != nil {
+                inertia = max(-15000, min(15000, v))
+                ClutchLog.write("flick: \(Int(inertia)) pt/s")
+                startScrollLoop()
+            } else {
+                inertia = 0
+                scrollTimer?.invalidate(); scrollTimer = nil
+            }
             scrollSession = nil
-        case .dragScroll(let handDy):
+        case .dragScroll(let rawHandDy):
+            inertia = 0                                         // a new drag catches the page
+            let handDy = rawHandDy > 0 ? rawHandDy * upStrokeGain : rawHandDy
             // Natural scrolling: the content follows the hand, so a hand moving up shows later content (scrolls down).
             scroll(handDy * SystemPointer.speedFactor * (SystemPointer.naturalScrolling ? 1 : -1) * (settings.reverseScroll ? -1 : 1))
         }
@@ -558,6 +581,7 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation started")
+                self.meter.start()
                 self.listeningSince = CACurrentMediaTime()
                 self.holdInputDevice = self.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()
@@ -586,6 +610,7 @@ final class Coordinator: AppCoordinating {
             self.busy = false
             self.listeningSession = nil
             self.state.listening = false
+            self.meter.stop()
             self.safety.episodeEnded()
             if self.gestures.talking { self.gestures.reset() }
             if case .done = result {} else { self.sendAfterStop = false; self.focusAfterStop = nil }
@@ -689,6 +714,7 @@ final class Coordinator: AppCoordinating {
         if scrollSession == nil { ClutchLog.write("scroll started") }
         scrollSession = (session, Date())
         pendingScroll += dy           // flushed on the tick, so the pointer is touched at most 20 times a second
+        recentScroll.append((CACurrentMediaTime(), dy))
     }
 
     /// The nose settled on a different session. Focus follows it; a dictation running elsewhere stops first,
@@ -729,8 +755,13 @@ final class Coordinator: AppCoordinating {
     }
 
     private func scrollFrame() {
+        if inertia != 0 {
+            // Momentum: stopped by a new pinch, by hands on the keyboard/mouse/trackpad, or when it dies out.
+            if gestures.pinchHeld || ClaudeBridge.secondsSincePhysicalInput() < 0.2 || abs(inertia) < 60 { inertia = 0 }
+            else { scrollRemaining += inertia / 60; inertia *= inertiaFriction }
+        }
         let step = scrollRemaining * scrollEase
-        guard abs(scrollRemaining) >= 0.5, let at = scrollTarget else {
+        guard abs(scrollRemaining) >= 0.5 || inertia != 0, let at = scrollTarget else {
             scrollRemaining = 0
             scrollTimer?.invalidate(); scrollTimer = nil
             return

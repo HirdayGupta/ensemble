@@ -18,6 +18,7 @@
     <!-- Automatic checks are off until the user turns them on in Settings > About; once on, at most one check a day. -->
     <key>SUScheduledCheckInterval</key><integer>86400</integer>
     <key>NSCameraUsageDescription</key><string>Clutch watches your head direction and hand gestures to control Claude. Video is analysed on this Mac and never stored or sent.</string>
+    <key>NSMicrophoneUsageDescription</key><string>While Claude is listening, Clutch reads how loud you are speaking to animate the sound bars. Audio is never recorded, stored or sent.</string>
     <key>NSCameraReactionEffectGesturesEnabledDefault</key><false/>
 </dict>
 </plist>
