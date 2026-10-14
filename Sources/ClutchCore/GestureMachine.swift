@@ -249,6 +249,7 @@ public final class GestureMachine {
     /// shape works; a pinch held longer than `tapMax` (holding something) never counts.
     private func trackTaps(_ h: HandObservation, into intents: inout [GestureIntent]) {
         guard h.present, let d = h.pinch else {
+            if dragging { intents.append(.dragScrollEnded) }
             pinchIsClosed = false; pinchClosedAt = nil; edgeCount = 0
             dragging = false; isDragging = false
             return
@@ -274,6 +275,13 @@ public final class GestureMachine {
             }
         } else {
             // Pinch and drag: a held pinch that moves vertically scrolls, with the hand position smoothed.
+            // Release first: fingers that have parted while dragging end the drag before any movement counts.
+            if dragging, d > max(pinchClosed, min(pinchMin, d) + Self.reopenRise * 0.6) {
+                pinchIsClosed = false; edgeCount = 0; pinchClosedAt = nil
+                dragging = false; isDragging = false; lastTapEnd = nil
+                intents.append(.dragScrollEnded)
+                return
+            }
             // Hands move in arcs: the scroll follows the distance the pinch travels, signed by its vertical direction.
             if !pinchToggled, let p = h.palmCenter, let originY = dragOriginY, let originX = dragOriginX {
                 let y = dragFilter.filter(Double(p.y), at: h.t)
@@ -296,7 +304,11 @@ public final class GestureMachine {
                 dragLastY = y; dragLastX = x
             }
             pinchMin = min(pinchMin, d)
-            edgeCount = d > max(Self.reopenAbove, pinchMin + Self.reopenRise) ? edgeCount + 1 : 0
+            // While dragging, opening the fingers even a little ends the drag at once (one frame, a lower bar),
+            // so the page never follows a hand that has let go.
+            let opened = dragging ? d > max(pinchClosed, pinchMin + Self.reopenRise * 0.6) : d > max(Self.reopenAbove, pinchMin + Self.reopenRise)
+            edgeCount = opened ? edgeCount + 1 : 0
+            if dragging, opened { edgeCount = Self.edgeFrames }
             if let start = pinchClosedAt, h.t - start > Self.tapMax { lastTapEnd = nil }   // held: not a tap
             guard edgeCount >= Self.edgeFrames else { return }
             pinchIsClosed = false; edgeCount = 0
@@ -304,7 +316,7 @@ public final class GestureMachine {
             pinchClosedAt = nil
             let closedFor = h.t - start
             if pinchToggled { pinchToggled = false; lastTapEnd = nil; return }
-            if dragging { dragging = false; isDragging = false; lastTapEnd = nil; return }
+            if dragging { dragging = false; isDragging = false; lastTapEnd = nil; intents.append(.dragScrollEnded); return }
             guard closedFor >= Self.tapMin, closedFor <= Self.tapMax else { lastTapEnd = nil; return }
             lastTapEnd = h.t
         }

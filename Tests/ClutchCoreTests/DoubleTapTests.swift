@@ -150,3 +150,26 @@ import Testing
         #expect(out.first! > 0 && out.last! < 0)
     }
 }
+
+@Suite struct PinchReleaseStopsScrollTests {
+    @Test func slightlyOpeningTheFingersEndsTheDragImmediately() {
+        let m = GestureMachine(mapping: GestureMapping()); m.talkStyle = .doubleTap
+        var t = 10.0
+        var afterRelease = 0, ended = 0
+        var released = false
+        func push(_ y: Double, _ pinch: Double) {
+            for i in m.push(HandObservation(t: t, present: true, pose: nil, palmCenter: CGPoint(x: 0.5, y: y), pinch: pinch)) {
+                if case .dragScroll = i, released { afterRelease += 1 }
+                if case .dragScrollEnded = i { ended += 1 }
+            }
+            t += 1.0 / 30
+        }
+        push(0.5, 0.2); push(0.5, 0.2)
+        for _ in 0..<5 { push(0.5, 0.05) }
+        for k in 1...20 { push(0.5 + Double(k) * 0.005, 0.05) }        // dragging up
+        released = true
+        for k in 1...20 { push(0.6 + Double(k) * 0.005, 0.14) }        // fingers parted a little, hand keeps moving
+        #expect(ended == 1)
+        #expect(afterRelease == 0)
+    }
+}

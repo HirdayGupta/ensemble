@@ -95,6 +95,7 @@ public enum GestureIntent: Equatable, Sendable {
     case cancelRequested
     case scroll(dy: Double)                 // points for this frame; negative = up the transcript, positive = down
     case dragScroll(handDy: Double)         // pinch and drag: points of hand travel this frame, positive = hand moved up
+    case dragScrollEnded                    // the pinch opened or the hand left: scrolling stops now
 }
 
 public enum TalkEndReason: String, Sendable { case released, handLost, stale }

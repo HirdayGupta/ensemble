@@ -437,10 +437,6 @@ final class Coordinator: AppCoordinating {
             pendingScroll = 0
             startScrollLoop()
         }
-        if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.15, scrollVelocity != 0 {
-            scrollRemaining += scrollVelocity * 0.18                                  // coast after release
-            scrollVelocity = 0
-        }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
         let now = CACurrentMediaTime()
         // With the hand free while dictating, other signals end it: you take the keyboard or mouse, or you leave.
@@ -510,6 +506,11 @@ final class Coordinator: AppCoordinating {
             if listeningSession != nil || busy { sendAfterStop = true; ClutchLog.write("send after stop") } else { requestSend() }
         case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
+        case .dragScrollEnded:
+            // The pinch is gone: stop dead. No glide remainder, no coast.
+            pendingScroll = 0; scrollRemaining = 0; scrollVelocity = 0
+            scrollTimer?.invalidate(); scrollTimer = nil
+            scrollSession = nil
         case .dragScroll(let handDy):
             // Natural scrolling: the content follows the hand, so a hand moving up shows later content (scrolls down).
             scroll(handDy * SystemPointer.speedFactor * (SystemPointer.naturalScrolling ? 1 : -1) * (settings.reverseScroll ? -1 : 1))
