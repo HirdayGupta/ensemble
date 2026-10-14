@@ -119,6 +119,14 @@ private struct DisplaySettings: View {
             Section("Overlay") {
                 Toggle("Show nose dot", isOn: $settings.showNoseDot)
                 Toggle("Highlight the session you face", isOn: $settings.showHighlight)
+                LabeledContent("Pointer smoothing") {
+                    HStack {
+                        Text("Quick").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: $settings.pointerSmoothing, in: 0...1)
+                            .frame(width: 160)
+                        Text("Steady").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             Section("Sending") {
                 LabeledContent("Countdown before sending") {

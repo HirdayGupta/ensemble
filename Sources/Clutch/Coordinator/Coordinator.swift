@@ -20,6 +20,9 @@ final class Coordinator: AppCoordinating {
     private var faceCount = 0
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
+    /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
+    private var candidate: (session: ClaudeSession?, since: TimeInterval)?
+    private let switchDwell = 0.25
     private var listeningSession: ClaudeSession?
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
@@ -45,8 +48,10 @@ final class Coordinator: AppCoordinating {
         self.overlay = overlay
         if let data = settings.calibration { pointer.calibration = data }
         gestures.mapping = settings.mapping
+        pointer.setSmoothing(settings.pointerSmoothing)
 
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
+        settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.pointer.setSmoothing(k) }.store(in: &cancellables)
         settings.$enabled.dropFirst().removeDuplicates().sink { [weak self] on in
             guard let self else { return }
             on ? self.start() : self.stop()
@@ -141,7 +146,14 @@ final class Coordinator: AppCoordinating {
         guard !state.calibrating else { return }
         if head.faceCount == 1, pointer.isCalibrated, let p = pointer.point(for: head) {
             state.nosePoint = p
-            target = sessions.first { $0.frame.contains(p) }
+            let under = sessions.first { $0.frame.contains(p) }
+            if under?.id == target?.id {
+                candidate = nil
+            } else if let c = candidate, c.session?.id == under?.id {
+                if head.t - c.since >= switchDwell { target = under; candidate = nil }
+            } else {
+                candidate = (under, head.t)
+            }
         } else {
             state.nosePoint = nil
             target = nil

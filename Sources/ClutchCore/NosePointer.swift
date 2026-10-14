@@ -72,6 +72,16 @@ public final class NosePointer {
         return CGPoint(x: u * m.width + m.minX, y: v * m.height + m.minY)
     }
 
+    /// Smoothing from 0 (light, quickest) to 1 (heaviest, steadiest). Lower minCutoff = steadier when still;
+    /// lower beta = less eager to follow fast motion.
+    public func setSmoothing(_ level: Double) {
+        let k = min(max(level, 0), 1)
+        let minCutoff = 1.0 - 0.9 * k        // 1.0 Hz ... 0.1 Hz
+        let beta = 4.0 - 3.4 * k             // 4.0 ... 0.6
+        filterX = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: 1)
+        filterY = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: 1)
+    }
+
     public func resetFilter() {
         filterX.reset()
         filterY.reset()

@@ -12,6 +12,7 @@ final class SettingsStore: ObservableObject {
         static let cameraName = "cameraName"
         static let mapping = "mapping"
         static let sendCountdownSeconds = "sendCountdownSeconds"
+        static let pointerSmoothing = "pointerSmoothing"
         static let playSounds = "playSounds"
         static let launchAtLogin = "launchAtLogin"
         static let calibration = "calibration"
@@ -28,6 +29,7 @@ final class SettingsStore: ObservableObject {
     /// nil = automatic camera choice.
     @Published var cameraName: String? { didSet { defaults.set(cameraName, forKey: Key.cameraName) } }
     @Published var mapping: GestureMapping { didSet { saveMapping() } }
+    @Published var pointerSmoothing: Double { didSet { defaults.set(pointerSmoothing, forKey: Key.pointerSmoothing) } }
     @Published var sendCountdownSeconds: Double {
         didSet {
             let clamped = min(max(sendCountdownSeconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
@@ -60,6 +62,7 @@ final class SettingsStore: ObservableObject {
         calibration = store.data(forKey: Key.calibration)
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
 
+        pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 2.0
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 
