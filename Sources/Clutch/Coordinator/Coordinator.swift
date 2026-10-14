@@ -38,6 +38,8 @@ final class Coordinator: AppCoordinating {
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
     private var scrollSession: (session: ClaudeSession, lastAt: Date)?
     private var busy = false                 // a start/stop/send is in flight
+    /// Thumbs-up made straight from the fist: send once the stop is confirmed.
+    private var sendAfterStop = false
     private var tickTimer: Timer?
     private var refreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
@@ -293,7 +295,8 @@ final class Coordinator: AppCoordinating {
         switch intent {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
-        case .sendRequested: requestSend()
+        case .sendRequested:
+            if listeningSession != nil { sendAfterStop = true; ClutchLog.write("stop and send") } else { requestSend() }
         case .cancelRequested: if pendingSend != nil { ClutchLog.write("send cancelled by open hand"); pendingSend = nil; state.countdown = nil; Notifier.shared.playCue(.refused); pushOverlay() }
         case .scroll(let dy): scroll(dy)
         }
@@ -355,11 +358,17 @@ final class Coordinator: AppCoordinating {
             self.listeningSession = nil
             self.state.listening = false
             self.safety.episodeEnded()
+            if case .done = result {} else { self.sendAfterStop = false }
             switch result {
             case .done:
                 ClutchLog.write("dictation stopped")
                 self.settings.lastClaudeVersion = self.bridge.claudeVersion
                 self.lastSpoken = (session, Date())
+                if self.sendAfterStop {
+                    self.sendAfterStop = false
+                    // Claude finalises the transcript a moment after the mic stops.
+                    Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); self.requestSend() }
+                }
                 Notifier.shared.playCue(.listenEnd)
             case .refused(let why), .unknown(let why):
                 self.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
@@ -427,20 +436,24 @@ final class Coordinator: AppCoordinating {
 
     // MARK: - Dot placement
 
-    /// What the dot shows: frozen in place during a gesture or dictation; otherwise only near the edge of the
-    /// session (where you may be moving to another one) and only when the dot setting is on.
+    /// What the dot shows. While dictating: hidden, except near the session's edges (where you may be looking
+    /// away). While a gesture is being held: frozen in place as the gesture bubble. Otherwise: the dot follows
+    /// the nose whenever it is over a Claude session and the dot setting is on.
     private func updateDot() {
-        if gestureShowing || listeningSession != nil {
-            if frozenPoint == nil { frozenPoint = dotPoint ?? listeningSession.map { CGPoint(x: $0.frame.midX, y: $0.frame.maxY - 80) } }
-            state.nosePoint = frozenPoint
-        } else {
+        if let session = listeningSession {
             frozenPoint = nil
-            if let d = dotPoint, let t = target, settings.showNoseDot {
-                let inner = t.frame.insetBy(dx: t.frame.width * 0.15, dy: t.frame.height * 0.15)
+            if let d = dotPoint {
+                let inner = session.frame.insetBy(dx: session.frame.width * 0.15, dy: session.frame.height * 0.15)
                 state.nosePoint = inner.contains(d) ? nil : d
             } else {
                 state.nosePoint = nil
             }
+        } else if gestureShowing {
+            if frozenPoint == nil { frozenPoint = dotPoint }
+            state.nosePoint = frozenPoint
+        } else {
+            frozenPoint = nil
+            state.nosePoint = settings.showNoseDot ? dotPoint : nil
         }
         state.targetFrame = listeningSession?.frame ?? target?.frame
     }

@@ -190,11 +190,23 @@ import Testing
         #expect(s.count(.sendRequested) == 0)
     }
 
-    @Test func poseThatEndsAHoldNeverSends() {
+    @Test func fistStraightToThumbsUpStopsThenSendsOnce() throws {
         let s = GestureSim()
         s.hold(.openPalm, for: 0.3)
         s.hold(.fist, for: 1)
         s.hold(.thumbsUp, for: 4)
+        #expect(s.count(.talkEnded(.released)) == 1)
+        #expect(s.count(.sendRequested) == 1)
+        let ended = try #require(s.firstTime(of: .talkEnded(.released)))
+        let sent = try #require(s.firstTime(of: .sendRequested))
+        #expect(sent >= ended)
+    }
+
+    @Test func openPalmEndingAHoldNeverSends() {
+        let s = GestureSim()
+        s.hold(.openPalm, for: 0.3)
+        s.hold(.fist, for: 1)
+        s.hold(.openPalm, for: 4)
         #expect(s.count(.talkEnded(.released)) == 1)
         #expect(s.count(.sendRequested) == 0)
     }

@@ -14,6 +14,9 @@ public final class GestureMachine {
     static let handLostHold = 0.6
     static let staleHold = 1.0
     static let sendHold = 0.3
+    /// Going straight from the talk pose to the send pose stops dictation and sends. Held a little longer than
+    /// a plain send, and still shorter than `releaseHold`, so it is read before the hold counts as released.
+    static let stopAndSendHold = 0.35
     static let sendAfterTalkEnd = 0.5
     static let cancelHold = 0.3
     static let scrollHold = 0.2
@@ -116,6 +119,10 @@ public final class GestureMachine {
                 releaseStart = nil
                 intents.append(.talkBegan)
             }
+        } else if talking, pose == mapping.send, !r.fired, held >= Self.stopAndSendHold {
+            r.fired = true
+            endTalk(.released, at: h.t, into: &intents)
+            intents.append(.sendRequested)
         } else if !talking {
             if pose == mapping.send, !r.startedWhileTalking, !r.fired, held >= Self.sendHold,
                lastTalkEndT.map({ h.t - $0 >= Self.sendAfterTalkEnd }) ?? true {
