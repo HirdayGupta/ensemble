@@ -213,7 +213,7 @@ private struct EdgeIndicator: View {
         // Where the line from the centre toward the nose meets the border.
         let sx = dx == 0 ? CGFloat.infinity : (frame.width / 2) / abs(dx)
         let sy = dy == 0 ? CGFloat.infinity : (frame.height / 2) / abs(dy)
-        let k = min(sx, sy, 1)
+        let k = min(sx, sy)
         let edge = CGPoint(x: c.x + dx * k, y: c.y + dy * k)
         let angle = Angle(radians: atan2(dy, dx))
         return Wedge()

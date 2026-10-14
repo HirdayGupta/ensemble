@@ -71,6 +71,9 @@ final class Coordinator: AppCoordinating {
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
     private var holdInputDevice: String?
     private var lastHoldAudioCheck: TimeInterval = 0
+    private var audioCheckInFlight = false
+    private var calibratedCache: (value: Bool, at: TimeInterval)?
+    private var claudeRunningCache: (value: Bool, at: TimeInterval)?
     private var listeningSince: TimeInterval = 0
 
     /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
@@ -225,7 +228,7 @@ final class Coordinator: AppCoordinating {
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
                 self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = fingerprint
+                self.settings.calibrationDisplays = fingerprint; self.calibratedCache = nil
                 self.pointer.resetFilter()
             } else {
                 self.refuse("Calibration did not fit; try again sitting where you normally work")
@@ -407,12 +410,23 @@ final class Coordinator: AppCoordinating {
             if ClaudeBridge.secondsSinceTypingOrClick() < 0.3 { refuse("Typing or a click; dictation stopped"); endTalk(reason: "input"); return }
             if now - lastOneFaceT > 10 { refuse("No face for 10 seconds; dictation stopped"); endTalk(reason: "away"); return }
         }
-        if listeningSession != nil, !busy, now - lastHoldAudioCheck >= 0.5 {
+        if let session = listeningSession, !busy, !audioCheckInFlight, now - lastHoldAudioCheck >= 0.5 {
             lastHoldAudioCheck = now
-            if let other = bridge.otherProcessCapturingInput() {
-                refuse("\(other) started using a microphone; dictation stopped"); endTalk(reason: "other capturer")
-            } else if let device = holdInputDevice, bridge.defaultInputDeviceName() != device {
-                refuse("The input device changed; dictation stopped"); endTalk(reason: "input device changed")
+            audioCheckInFlight = true
+            let bridge = self.bridge, device = holdInputDevice
+            // CoreAudio can stall for a while when a device is changing; never wait on it from the main thread.
+            Task.detached {
+                let other = bridge.otherProcessCapturingInput()
+                let current = device == nil ? nil : bridge.defaultInputDeviceName()
+                await MainActor.run {
+                    self.audioCheckInFlight = false
+                    guard self.listeningSession?.id == session.id, !self.busy else { return }
+                    if let other {
+                        self.refuse("\(other) started using a microphone; dictation stopped"); self.endTalk(reason: "other capturer")
+                    } else if let device, current != device {
+                        self.refuse("The input device changed; dictation stopped"); self.endTalk(reason: "input device changed")
+                    }
+                }
             }
         }
     }
@@ -687,7 +701,20 @@ final class Coordinator: AppCoordinating {
     /// The calibration is usable only on the screen arrangement it was made on.
     private var calibratedHere: Bool {
         guard pointer.isCalibrated else { return false }
-        return settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+        // Read on every camera frame; the screen arrangement only changes in screensChanged, so cache briefly.
+        let now = CACurrentMediaTime()
+        if let c = calibratedCache, now - c.at < 1 { return c.value }
+        let value = settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+        calibratedCache = (value, now)
+        return value
+    }
+
+    private var claudeRunning: Bool {
+        let now = CACurrentMediaTime()
+        if let c = claudeRunningCache, now - c.at < 1 { return c.value }
+        let value = bridge.claudeIsRunning()
+        claudeRunningCache = (value, now)
+        return value
     }
 
     private func claudeInFront(at p: CGPoint, t: TimeInterval) -> Bool {
@@ -698,6 +725,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func screensChanged() {
+        calibratedCache = nil
         ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
         if listeningSession != nil { endTalk(reason: "screens changed") }
         if state.calibrating { CalibrationController.shared.cancel() }
@@ -736,7 +764,7 @@ final class Coordinator: AppCoordinating {
         if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
         if cover.covered { state.status = .cameraCovered; return }
         if !calibratedHere { state.status = .needsCalibration; return }
-        if !bridge.claudeIsRunning() { state.status = .claudeNotRunning; return }
+        if !claudeRunning { state.status = .claudeNotRunning; return }
         state.status = state.listening ? .listening : .watching
     }
 

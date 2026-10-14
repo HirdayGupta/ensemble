@@ -16,6 +16,7 @@ final class FrameAnalyzer: @unchecked Sendable {
     static let jpegQuality = 0.6
 
     private var lastDiag: TimeInterval = 0
+    private var lastPinchLog: TimeInterval = 0
 
     func hand(from buffer: CMSampleBuffer, at t: TimeInterval) -> HandObservation {
         let h = detector.detect(buffer)
@@ -40,8 +41,8 @@ final class FrameAnalyzer: @unchecked Sendable {
                 f.span, f.upright, f.extent, f.tooSmall ? 1 : 0, f.angled ? 1 : 0, h.points.count))
         }
         let obs = HandClassifierAdapter.observation(from: h, at: t, classifier: classifier)
-        // While tuning the double tap: every frame where the fingertips are near each other.
-        if let p = obs.pinch, p < 0.5 { ClutchLog.write(String(format: "pinch: %.2f", p)) }
+        // While tuning the double tap: twice a second while the fingertips are near each other.
+        if let p = obs.pinch, p < 0.5, t - lastPinchLog >= 0.5 { lastPinchLog = t; ClutchLog.write(String(format: "pinch: %.2f", p)) }
         return obs
     }
 
