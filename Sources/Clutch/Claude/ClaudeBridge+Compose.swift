@@ -40,7 +40,7 @@ extension ClaudeBridge {
     }
 
     private func sendNow(_ s: ClaudeSession) -> BridgeResult {
-        guard let entry = liveEntry(s, rescanPane: true) else { return .refused("session not found") }
+        guard let entry = liveEntry(s, rescanPane: true) else { return .refused(self.sessionNotFound) }
         let e = entry.elements
 
         guard let modeControl = e.modeControl, let mode = AX.title(modeControl) else {

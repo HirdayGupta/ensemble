@@ -56,7 +56,7 @@ extension ClaudeBridge {
     }
 
     func micStateNow(_ s: ClaudeSession) -> MicState {
-        guard let entry = liveEntry(s) else { return .unknown("session not found") }
+        guard let entry = liveEntry(s) else { return .unknown(self.sessionNotFound) }
         return micStateSync(mic: entry.elements.mic)
     }
 

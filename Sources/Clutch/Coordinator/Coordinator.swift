@@ -608,7 +608,7 @@ final class Coordinator: AppCoordinating {
     /// restarts the camera; a camera that stopped for another reason is retried every 5 s.
     private func checkPermissions() {
         guard running else { return }
-        let trusted = Permissions.accessibilityTrusted
+        let trusted = Permissions.accessibilityTrusted && !bridge.accessibilityDisabled
         if trusted != accessibilityTrusted { ClutchLog.write("accessibility permission is now \(trusted ? "granted" : "missing")") }
         accessibilityTrusted = trusted
         let allowed = Permissions.cameraAllowed

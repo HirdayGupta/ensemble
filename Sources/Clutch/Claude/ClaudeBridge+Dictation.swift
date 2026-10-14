@@ -14,7 +14,7 @@ extension ClaudeBridge {
     }
 
     func focusNow(_ s: ClaudeSession) -> BridgeResult {
-        guard let entry = liveEntry(s), let pid = claudePID else { return .refused("session not found") }
+        guard let entry = liveEntry(s), let pid = claudePID else { return .refused(self.sessionNotFound) }
         DispatchQueue.main.async {
             NSRunningApplication(processIdentifier: pid)?.activate()
         }
@@ -33,7 +33,7 @@ extension ClaudeBridge {
 
     private func startNow(_ s: ClaudeSession) -> BridgeResult {
         if isShuttingDown { return .refused("Clutch is quitting") }
-        guard let before = liveEntry(s) else { return .refused("session not found") }
+        guard let before = liveEntry(s) else { return .refused(self.sessionNotFound) }
         let state = micStateSync(mic: before.elements.mic)
         guard state == .off else { return .refused("mic is not verifiably off: \(describe(state))") }
 
@@ -58,7 +58,7 @@ extension ClaudeBridge {
     }
 
     func stopNow(_ s: ClaudeSession) -> BridgeResult {
-        guard let entry = liveEntry(s) else { return .refused("session not found") }
+        guard let entry = liveEntry(s) else { return .refused(self.sessionNotFound) }
         let mic = entry.elements.mic
         switch micStateSync(mic: mic) {
         case .off:

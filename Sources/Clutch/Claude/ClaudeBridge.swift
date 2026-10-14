@@ -22,6 +22,7 @@ final class ClaudeBridge: @unchecked Sendable {
     private var scrollMethod: ScrollMethod?
     private var noScrollAreaUntil: [String: Date] = [:]
     private var shuttingDown = false
+    private var axDisabled = false
 
     static let ambientInputAllowlist: Set<String> = []
 
@@ -40,6 +41,18 @@ final class ClaudeBridge: @unchecked Sendable {
     /// Once set, no new dictation can start; the quit path uses it so a start in flight cannot press after the stop.
     func beginShutdown() { lock.lock(); shuttingDown = true; lock.unlock() }
     var isShuttingDown: Bool { lock.lock(); defer { lock.unlock() }; return shuttingDown }
+
+    /// True when the last discovery was refused because Accessibility is off or the grant is stale.
+    var accessibilityDisabled: Bool { lock.lock(); defer { lock.unlock() }; return axDisabled }
+
+    /// What a refusal says when a session cannot be found.
+    var sessionNotFound: String {
+        accessibilityDisabled ? "Accessibility is off or stale for Clutch; remove it in Settings and add it again" : "session not found"
+    }
+
+    private func noteAX(_ error: AXError) {
+        lock.lock(); axDisabled = error == .apiDisabled; lock.unlock()
+    }
 
     func claudeIsFrontmost() -> Bool {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeLabels.bundleID
@@ -92,6 +105,7 @@ final class ClaudeBridge: @unchecked Sendable {
     /// Full discovery; replaces the cache. Runs on a bridge queue.
     func discover() -> [CachedSession] {
         guard let pid = claudePID else {
+            noteAX(.success)
             replaceCache([])
             return []
         }
@@ -104,7 +118,9 @@ final class ClaudeBridge: @unchecked Sendable {
         for attempt in 0..<(justEnabled ? 8 : 1) {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.4) }
             found = []
-            for window in AX.elements(app, kAXWindowsAttribute) {
+            let windows = AX.read(app, kAXWindowsAttribute)
+            noteAX(windows.error)
+            for window in (windows.value as? [AXUIElement]) ?? [] {
                 if AX.bool(window, kAXMinimizedAttribute) == true { continue }
                 guard let wf = AX.frame(window), wf.width > 50, wf.height > 50 else { continue }
                 var number = 0
@@ -184,10 +200,12 @@ final class ClaudeBridge: @unchecked Sendable {
     private func ensureManualAccessibility(app: AXUIElement, pid: pid_t) -> Bool {
         lock.lock()
         let already = flaggedPID == pid
-        flaggedPID = pid
         lock.unlock()
-        AX.set(app, "AXManualAccessibility", kCFBooleanTrue)
-        return !already
+        if already { return false }
+        let error = AX.set(app, "AXManualAccessibility", kCFBooleanTrue)
+        guard error == .success else { noteAX(error); return false }
+        lock.lock(); flaggedPID = pid; lock.unlock()
+        return true
     }
 
     // MARK: Tree scanning

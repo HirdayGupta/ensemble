@@ -13,12 +13,15 @@ enum AX {
         return app
     }
 
-    static func copy(_ el: AXUIElement, _ attr: String) -> CFTypeRef? {
+    /// The value and the error, so callers can tell a missing attribute from a revoked or disabled API.
+    static func read(_ el: AXUIElement, _ attr: String) -> (value: CFTypeRef?, error: AXError) {
         AXUIElementSetMessagingTimeout(el, timeout)
         var value: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(el, attr as CFString, &value)
-        return err == .success ? value : nil
+        return (err == .success ? value : nil, err)
     }
+
+    static func copy(_ el: AXUIElement, _ attr: String) -> CFTypeRef? { read(el, attr).value }
 
     static func error(_ el: AXUIElement, _ attr: String) -> AXError {
         AXUIElementSetMessagingTimeout(el, timeout)
