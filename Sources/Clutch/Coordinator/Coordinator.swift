@@ -18,6 +18,9 @@ final class Coordinator: AppCoordinating {
 
     private var latestHead: HeadObservation?
     private var faceCount = 0
+    /// Last time exactly one face was seen, and the last time more than one was.
+    private var lastOneFaceT: TimeInterval = -.infinity
+    private var lastManyFacesT: TimeInterval = -.infinity
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
     /// A session (or none) the nose moved onto, waiting out `switchDwell` before the highlight follows.
@@ -92,10 +95,13 @@ final class Coordinator: AppCoordinating {
     // MARK: - AppCoordinating
 
     func start() {
-        ClutchLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(pointer.isCalibrated))")
+        ClutchLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(pointer.isCalibrated), accessibility=\(AXIsProcessTrusted()), screens=\(ScreenFacts.displayFingerprint()))")
         state.cameraNames = cameraNames
         sweep()
         guard settings.enabled else { state.status = .off; return }
+        if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
+            ClutchLog.write("accessibility permission missing")
+        }
         running = true
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
@@ -158,6 +164,7 @@ final class Coordinator: AppCoordinating {
     private func handle(head: HeadObservation) {
         latestHead = head
         faceCount = head.faceCount
+        if head.faceCount == 1 { lastOneFaceT = head.t } else if head.faceCount > 1 { lastManyFacesT = head.t }
         guard !state.calibrating else { return }
         if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
             // Claude only: the nose counts only over a Claude session whose window is actually in front there.
@@ -170,6 +177,8 @@ final class Coordinator: AppCoordinating {
             } else {
                 candidate = (under, head.t)
             }
+        } else if head.faceCount != 1 && head.t - lastOneFaceT <= 1.5 && head.faceCount == 0 {
+            state.nosePoint = nil      // face hidden for a moment (hand in front): keep the last target
         } else {
             state.nosePoint = nil
             target = nil
@@ -236,7 +245,7 @@ final class Coordinator: AppCoordinating {
         }
         Task { @MainActor in
             let found = await self.bridge.refreshSessions()
-            if found.isEmpty != self.sessions.isEmpty { ClutchLog.write("Claude sessions with a microphone found: \(found.count)") }
+            if found.map(\.id) != self.sessions.map(\.id) { ClutchLog.write("Claude sessions found: \(found.count) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.sessions = found
             self.updateStatus()
         }
@@ -259,7 +268,10 @@ final class Coordinator: AppCoordinating {
     private func commonRefusal() -> String? {
         if !settings.enabled { return "Clutch is off" }
         if cover.covered { return "Camera is covered" }
-        if faceCount != 1 { return faceCount == 0 ? "No face in view" : "More than one face in view" }
+        // The hand often covers the face as it rises: one face within the last 1.5 s counts, two never do.
+        let now = CACurrentMediaTime()
+        if now - lastManyFacesT < 1.5 { return "More than one face in view" }
+        if now - lastOneFaceT > 1.5 { return "No face in view" }
         if ClaudeBridge.secondsSinceUserInput() < inputQuiet { return "Keyboard or mouse was just used" }
         return nil
     }
@@ -420,6 +432,7 @@ final class Coordinator: AppCoordinating {
 
     private func updateStatus() {
         if !settings.enabled || !running { state.status = .off; return }
+        if !AXIsProcessTrusted() { state.status = .needsPermission("Accessibility"); return }
         if case .needsPermission = state.status { return }
         if case .error = state.status, !engine.isRunning { return }
         if cover.covered { state.status = .cameraCovered; return }
