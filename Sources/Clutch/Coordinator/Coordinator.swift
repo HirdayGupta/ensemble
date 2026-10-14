@@ -73,6 +73,7 @@ final class Coordinator: AppCoordinating {
     // MARK: - AppCoordinating
 
     func start() {
+        ClutchLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(pointer.isCalibrated))")
         state.cameraNames = cameraNames
         sweep()
         guard settings.enabled else { state.status = .off; return }
@@ -91,6 +92,7 @@ final class Coordinator: AppCoordinating {
     }
 
     func stop() {
+        ClutchLog.write("stop")
         running = false
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
@@ -104,11 +106,13 @@ final class Coordinator: AppCoordinating {
     }
 
     func calibrate() {
+        ClutchLog.write("calibrate requested (engine running=\(engine.isRunning))")
         guard engine.isRunning else { refuse("Turn Clutch on before calibrating"); return }
         state.calibrating = true
         CalibrationController.shared.run(headSource: { [weak self] in self?.latestHead }) { [weak self] samples in
             guard let self else { return }
             self.state.calibrating = false
+            ClutchLog.write("calibration samples: \(samples.count)")
             guard !samples.isEmpty else { return }
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
@@ -164,6 +168,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func handle(status: EngineStatus) {
+        if case .running = status {} else { ClutchLog.write("engine: \(status)") }
         switch status {
         case .running(let fps, let camera):
             state.fps = fps
@@ -199,6 +204,7 @@ final class Coordinator: AppCoordinating {
     // MARK: - Intents and guards
 
     private func apply(_ intent: GestureIntent) {
+        if case .scroll = intent {} else { ClutchLog.write("gesture: \(intent)") }
         switch intent {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
@@ -234,6 +240,7 @@ final class Coordinator: AppCoordinating {
             self.busy = false
             switch result {
             case .done:
+                ClutchLog.write("dictation started")
                 self.safety.episodeConfirmed()
                 Notifier.shared.playCue(.listenStart)
             case .refused(let why), .unknown(let why):
@@ -260,6 +267,7 @@ final class Coordinator: AppCoordinating {
             self.safety.episodeEnded()
             switch result {
             case .done:
+                ClutchLog.write("dictation stopped")
                 self.lastSpoken = (session, Date())
                 Notifier.shared.playCue(.listenEnd)
             case .refused(let why), .unknown(let why):
@@ -330,7 +338,7 @@ final class Coordinator: AppCoordinating {
 
     private func refuse(_ why: String) {
         state.lastRefusal = why
-        NSLog("Clutch refused: %@", why)
+        ClutchLog.write("refused: \(why)")
     }
 
     private func updateStatus() {

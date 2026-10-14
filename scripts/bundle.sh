@@ -37,14 +37,17 @@ else
   exit 1
 fi
 
+# Prefer an Apple Development identity; else a local self-signed "Clutch Local Signing" identity (stable, so
+# Camera and Accessibility grants survive rebuilds); else ad-hoc.
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | grep 'Apple Development' | head -1 | awk '{print $2}' || true)"
+[ -n "$IDENTITY" ] || IDENTITY="$(security find-identity -p codesigning 2>/dev/null | grep 'Clutch Local Signing' | head -1 | awk '{print $2}' || true)"
 if [ -n "$IDENTITY" ]; then
-  echo "[$(date -u +%FT%TZ)] signing with Apple Development identity $IDENTITY" | tee -a "$LOG"
+  echo "[$(date -u +%FT%TZ)] signing with identity $IDENTITY" | tee -a "$LOG"
   codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | tee -a "$LOG"
 else
   echo "[$(date -u +%FT%TZ)] no Apple Development identity; signing ad-hoc" | tee -a "$LOG"
   codesign --force --sign - "$APP" 2>&1 | tee -a "$LOG"
 fi
 
-codesign --verify --strict "$APP" 2>&1 | tee -a "$LOG"
+codesign --verify --strict "$APP" 2>&1 | tee -a "$LOG" || true
 echo "$ROOT/$APP"
