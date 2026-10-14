@@ -123,7 +123,11 @@ private struct IslandView: View {
     let notch: CGSize
 
     private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, otherGesture, countdown, banner }
-    private var mode: Mode {
+    /// What is drawn. It follows `liveMode` only once that has held steady for a moment, so a state that lasts
+    /// a frame or two (a dropped hand frame, the gap between a gesture firing and Claude confirming) never flashes.
+    @State private var shown: Mode = .idle
+    private var mode: Mode { shown }
+    private var liveMode: Mode {
         if model.countdown != nil { return .countdown }
         if model.listening, model.sessionSwitch != nil { return .switching }
         if let g = model.gesture {
@@ -190,6 +194,17 @@ private struct IslandView: View {
         .padding(.top, floating ? NSStatusBar.system.thickness + 8 : 0)
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: mode)
         .environment(\.colorScheme, .dark)
+        .onAppear { shown = liveMode }
+        .onChange(of: liveMode) { _, next in settle(next) }
+    }
+
+    /// 0.15 s for a new state, 0.35 s before folding away.
+    private func settle(_ next: Mode) {
+        let wait: UInt64 = next == .idle ? 350_000_000 : 150_000_000
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: wait)
+            if liveMode == next, shown != next { shown = next }
+        }
     }
 
     private func lines(_ title: Text, _ sub: Text?) -> some View {

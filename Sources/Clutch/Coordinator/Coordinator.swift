@@ -587,6 +587,7 @@ final class Coordinator: AppCoordinating {
         case .scroll, .dragScroll: break
         default: ClutchLog.write("gesture: \(intent)")
         }
+        if intent == .talkBegan || intent == .sendRequested { overlay.clearBanner() }
         switch intent {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }

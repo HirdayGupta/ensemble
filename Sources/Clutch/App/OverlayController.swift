@@ -150,6 +150,14 @@ final class OverlayController {
         }
     }
 
+    /// A new action starts: an older message must not reappear once that action's own feedback ends.
+    func clearBanner() {
+        bannerTask?.cancel()
+        guard model.banner != nil else { return }
+        model.banner = nil
+        syncPanels()
+    }
+
     private func setIfChanged<T: Equatable>(_ slot: inout T, _ value: T) {
         if slot != value { slot = value }
     }

@@ -28,7 +28,7 @@ import Testing
 
     @Test func tapsTooFarApartDoNothing() {
         let s = sim()
-        s.tap(); s.pinch(0.6, for: 1.2); s.tap()
+        s.tap(); s.pinch(0.6, for: 1.6); s.tap()
         #expect(s.count(.talkBegan) == 0)
     }
 
@@ -56,7 +56,7 @@ import Testing
     @Test func tapsMoreThanTheGapApartReset() {
         let s = sim()
         s.pinch(0.6, for: 0.5)
-        s.tap(); s.pinch(0.2, for: 0.6); s.tap()
+        s.tap(); s.pinch(0.2, for: 1.4); s.tap()
         #expect(s.count(.talkBegan) == 0)
     }
 
@@ -66,16 +66,25 @@ import Testing
         s.pinch(0.6, for: 1.0, pose: .thumbsUp)
         s.tap(); s.tap()
         #expect(s.count(.talkBegan) == 0)
-        s.pinch(0.6, for: 1.0)
+        s.pinch(0.6, for: 1.5)
         s.tap(); s.tap()
         #expect(s.count(.talkBegan) == 1)
     }
 
-    @Test func tapsAsTheHandArrivesDoNotCount() {
+    /// 2026-10-14: a pinch made as the hand came up was swallowed, so a deliberate pair needed a third pinch.
+    @Test func pinchAsTheHandArrivesCounts() {
         let s = sim()
         s.absent(for: 1)
         s.pinch(0.04, for: 0.15); s.pinch(0.2, for: 0.1); s.tap()
-        #expect(s.count(.talkBegan) == 0)
+        #expect(s.count(.talkBegan) == 1)
+    }
+
+    /// Akshay's natural rhythm: about a second between letting go and the next touch.
+    @Test func slowRhythmPairCounts() {
+        let s = sim()
+        s.pinch(0.6, for: 0.5)
+        s.tap(closedFor: 0.35); s.pinch(0.2, for: 1.0); s.tap(closedFor: 0.35)
+        #expect(s.count(.talkBegan) == 1)
     }
 
     @Test func tripleTapTogglesOnlyOnce() {
@@ -108,7 +117,7 @@ import Testing
         s.pinch(0.6, for: 0.5)
         s.tap()
         #expect(s.machine.awaitingSecondTap)
-        s.pinch(0.2, for: 1.0)
+        s.pinch(0.2, for: 1.5)
         #expect(!s.machine.awaitingSecondTap)
         #expect(s.machine.progress == nil)
     }
