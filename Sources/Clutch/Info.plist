@@ -10,7 +10,7 @@
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSMinimumSystemVersion</key><string>14.2</string>
     <key>LSUIElement</key><true/>
     <!-- Sparkle. The feed URL is UpdateConfig.feedURL in UpdateController.swift (single source of truth). -->
     <!-- TODO(owner): run Sparkle's generate_keys once and paste the printed public key here (docs/RELEASING.md). -->
