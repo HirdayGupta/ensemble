@@ -417,8 +417,8 @@ final class Coordinator: AppCoordinating {
             cameraProblem = nil; trackerFailure = nil; trackerReady = false
         case .running(let fps, let camera):
             cameraProblem = nil
-            state.fps = fps
-            state.cameraName = camera
+            state.set(\.fps, fps)
+            state.set(\.cameraName, camera)
         case .permissionDenied:
             cameraAllowed = false
         case .noCamera:
@@ -795,18 +795,18 @@ final class Coordinator: AppCoordinating {
             frozenPoint = nil
             if let d = lastNose {
                 let inner = session.frame.insetBy(dx: session.frame.width * 0.15, dy: session.frame.height * 0.15)
-                state.nosePoint = inner.contains(d) ? nil : d
+                state.set(\.nosePoint, inner.contains(d) ? nil : d)
             } else {
-                state.nosePoint = nil
+                state.set(\.nosePoint, nil)
             }
         } else if gestureShowing {
             if frozenPoint == nil { frozenPoint = dotPoint }
-            state.nosePoint = frozenPoint
+            state.set(\.nosePoint, frozenPoint)
         } else {
             frozenPoint = nil
-            state.nosePoint = settings.showNoseDot ? dotPoint : nil
+            state.set(\.nosePoint, settings.showNoseDot ? dotPoint : nil)
         }
-        state.targetFrame = listeningSession?.frame ?? target?.frame
+        state.set(\.targetFrame, listeningSession?.frame ?? target?.frame)
     }
 
     // MARK: - Screen and version checks
@@ -870,15 +870,19 @@ final class Coordinator: AppCoordinating {
     }
 
     private func updateStatus() {
-        if !settings.enabled || !running { state.status = .off; return }
-        if !accessibilityTrusted { state.status = .needsPermission("Accessibility"); return }
-        if !cameraAllowed { state.status = .needsPermission("Camera"); return }
-        if let problem = cameraProblem { state.status = .error(problem); return }
-        if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
-        if cover.covered { state.status = .cameraCovered; return }
-        if !calibratedHere { state.status = .needsCalibration; return }
-        if !claudeRunning { state.status = .claudeNotRunning; return }
-        state.status = state.listening ? .listening : .watching
+        state.set(\.status, currentStatus())
+    }
+
+    private func currentStatus() -> AppStatus {
+        if !settings.enabled || !running { return .off }
+        if !accessibilityTrusted { return .needsPermission("Accessibility") }
+        if !cameraAllowed { return .needsPermission("Camera") }
+        if let problem = cameraProblem { return .error(problem) }
+        if let failure = trackerFailure { return .error("Face tracking stopped: \(failure)") }
+        if cover.covered { return .cameraCovered }
+        if !calibratedHere { return .needsCalibration }
+        if !claudeRunning { return .claudeNotRunning }
+        return state.listening ? .listening : .watching
     }
 
     /// Re-reads both permissions every second. A grant that arrives while Clutch runs clears the status and

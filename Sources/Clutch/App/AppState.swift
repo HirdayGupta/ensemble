@@ -33,6 +33,12 @@ final class AppState: ObservableObject {
     @Published var cameraName: String?
     @Published var cameraNames: [String] = []
     @Published var calibrating = false
+
+    /// `@Published` announces a change on every write, even of an equal value; the camera loop writes several
+    /// of these on every frame, so those writes go through here and only real changes reach the views.
+    func set<T: Equatable>(_ path: ReferenceWritableKeyPath<AppState, T>, _ value: T) {
+        if self[keyPath: path] != value { self[keyPath: path] = value }
+    }
 }
 
 extension AppStatus {
