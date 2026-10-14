@@ -43,6 +43,9 @@ struct OverlayScreenView: View {
             }
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
+        // Insertions and removals only animate inside an animated change: these drive the highlight's fades.
+        .animation(.smooth(duration: 0.5), value: model.target.map(highlightKey))
+        .animation(.smooth(duration: 0.5), value: model.showHighlight)
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
