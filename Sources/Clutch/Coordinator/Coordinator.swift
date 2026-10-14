@@ -29,7 +29,7 @@ final class Coordinator: AppCoordinating {
     private let dotLeash: CGFloat = 24
     /// Last time exactly one face was seen, and the last time more than one was.
     private var lastOneFaceT: TimeInterval = -.infinity
-    private var multiFace = MultiFaceDetector()
+
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var sessions: [ClaudeSession] = []
     private var target: ClaudeSession?
@@ -308,7 +308,7 @@ final class Coordinator: AppCoordinating {
         latestHead = head
         faceCount = head.faceCount
         if head.faceCount == 1 { lastOneFaceT = head.t }
-        multiFace.record(faceCount: head.faceCount, at: head.t)
+
         headStats.n += 1; headStats.faces[min(head.faceCount, 2)] += 1
         if head.t - headStats.since >= 5 {
             let nose = pointer.point(for: head).map { "\(Int($0.x)),\(Int($0.y))" } ?? "none"
@@ -523,7 +523,6 @@ final class Coordinator: AppCoordinating {
         // The hand often covers the face as it rises: one face within the last 1.5 s counts. Two faces block only
         // when they persist: a stray two-face reading is a false alarm.
         let now = CACurrentMediaTime()
-        if multiFace.isActive(now: now) { return "More than one face in view" }
         if now - lastOneFaceT > 1.5 { return "No face in view" }
         if ClaudeBridge.secondsSinceTypingOrClick() < inputQuiet { return "You just typed or clicked" }
         return nil

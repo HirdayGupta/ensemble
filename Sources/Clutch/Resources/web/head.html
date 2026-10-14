@@ -23,7 +23,7 @@ async function create(which) {
   const lm = await FaceLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: BASE + '/face_landmarker.task', delegate: which },
     runningMode: 'VIDEO',
-    numFaces: 2,
+    numFaces: 1,   // one face only: no second-person check (a raised hand was misread as a face)
     outputFacialTransformationMatrixes: true,
   });
   landmarker = lm;
