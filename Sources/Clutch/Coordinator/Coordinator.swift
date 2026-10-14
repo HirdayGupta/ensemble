@@ -44,6 +44,7 @@ final class Coordinator: AppCoordinating {
     private var lastRaiseBlockLog: TimeInterval = 0
     /// Session to focus once a dictation stop (caused by looking at it) completes.
     private var focusAfterStop: ClaudeSession?
+    private var pendingFocus: (session: ClaudeSession, until: TimeInterval)?   // a look-away focus that was deferred by busy or typing
     private var listeningSession: ClaudeSession?
     private var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
     private var pendingSend: (session: ClaudeSession, started: Date, text: String)?
@@ -72,6 +73,9 @@ final class Coordinator: AppCoordinating {
     /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
     private var holdInputDevice: String?
     private var lastHoldAudioCheck: TimeInterval = 0
+    private var audioCheckInFlight = false
+    private var calibratedCache: (value: Bool, at: TimeInterval)?
+    private var claudeRunningCache: (value: Bool, at: TimeInterval)?
     private var listeningSince: TimeInterval = 0
 
     /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
@@ -226,7 +230,7 @@ final class Coordinator: AppCoordinating {
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
                 self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = fingerprint
+                self.settings.calibrationDisplays = fingerprint; self.calibratedCache = nil
                 self.pointer.resetFilter()
             } else {
                 self.refuse("Calibration did not fit; try again sitting where you normally work")
@@ -408,6 +412,10 @@ final class Coordinator: AppCoordinating {
 
     private func tick() {
         dropStaleReadings()
+        if let p = pendingFocus {
+            if CACurrentMediaTime() > p.until || target?.id != p.session.id { pendingFocus = nil }
+            else if !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet { pendingFocus = nil; lookedAt(p.session) }
+        }
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, pendingScroll != 0 {
@@ -421,12 +429,23 @@ final class Coordinator: AppCoordinating {
             if ClaudeBridge.secondsSinceTypingOrClick() < 0.3 { refuse("Typing or a click; dictation stopped"); endTalk(reason: "input"); return }
             if now - lastOneFaceT > 10 { refuse("No face for 10 seconds; dictation stopped"); endTalk(reason: "away"); return }
         }
-        if listeningSession != nil, !busy, now - lastHoldAudioCheck >= 0.5 {
+        if let session = listeningSession, !busy, !audioCheckInFlight, now - lastHoldAudioCheck >= 0.5 {
             lastHoldAudioCheck = now
-            if let other = bridge.otherProcessCapturingInput() {
-                refuse("\(other) started using a microphone; dictation stopped"); endTalk(reason: "other capturer")
-            } else if let device = holdInputDevice, bridge.defaultInputDeviceName() != device {
-                refuse("The input device changed; dictation stopped"); endTalk(reason: "input device changed")
+            audioCheckInFlight = true
+            let bridge = self.bridge, device = holdInputDevice
+            // CoreAudio can stall for a while when a device is changing; never wait on it from the main thread.
+            Task.detached {
+                let other = bridge.otherProcessCapturingInput()
+                let current = device == nil ? nil : bridge.defaultInputDeviceName()
+                await MainActor.run {
+                    self.audioCheckInFlight = false
+                    guard self.listeningSession?.id == session.id, !self.busy else { return }
+                    if let other {
+                        self.refuse("\(other) started using a microphone; dictation stopped"); self.endTalk(reason: "other capturer")
+                    } else if let device, current != device {
+                        self.refuse("The input device changed; dictation stopped"); self.endTalk(reason: "input device changed")
+                    }
+                }
             }
         }
     }
@@ -461,7 +480,10 @@ final class Coordinator: AppCoordinating {
     // MARK: - Intents and guards
 
     private func apply(_ intent: GestureIntent) {
-        if case .scroll = intent {} else { ClutchLog.write("gesture: \(intent)") }
+        switch intent {
+        case .scroll, .dragScroll: break
+        default: ClutchLog.write("gesture: \(intent)")
+        }
         switch intent {
         case .talkBegan: beginTalk()
         case .talkEnded(let reason): if listeningSession != nil { endTalk(reason: reason.rawValue) }
@@ -488,14 +510,25 @@ final class Coordinator: AppCoordinating {
         return nil
     }
 
+    /// The machine already flipped to talking when it announced the start; a refusal must flip it back,
+    /// or the next double tap would be read as a stop.
+    private func refuseStart(_ why: String) {
+        gestures.abortTalk()
+        refuse(why)
+    }
+
     private func beginTalk() {
-        guard listeningSession == nil, !busy, !disarming else { return }
-        if let why = commonRefusal() { refuse(why); return }
-        guard calibratedHere else { refuse("Calibrate first (or recalibrate for this screen arrangement)"); return }
-        guard let session = target else { refuse("Your nose is not on a Claude session"); return }
-        if let other = bridge.otherProcessCapturingInput() { refuse("\(other) is using a microphone"); return }
+        guard listeningSession == nil, !busy, !disarming else {
+            if listeningSession == nil || busy { gestures.abortTalk() }
+            return
+        }
+        if let why = commonRefusal() { refuseStart(why); return }
+        guard calibratedHere else { refuseStart("Calibrate first (or recalibrate for this screen arrangement)"); return }
+        guard let session = target else { refuseStart("Your nose is not on a Claude session"); return }
+        if let other = bridge.otherProcessCapturingInput() { refuseStart("\(other) is using a microphone"); return }
         pendingSend = nil; state.countdown = nil
-        guard safety.episodeStarting(session: session) else { refuse("Could not write the safety record; not starting"); return }
+        sendAfterStop = false; focusAfterStop = nil; pendingFocus = nil
+        guard safety.episodeStarting(session: session) else { refuseStart("Could not write the safety record; not starting"); return }
         busy = true
         listeningSession = session
         state.listening = true
@@ -514,6 +547,7 @@ final class Coordinator: AppCoordinating {
                 self.listeningSession = nil
                 self.state.listening = false
                 self.safety.episodeEnded()
+                self.gestures.abortTalk()
                 ClutchLog.write("start dictation \(result): \(self.bridge.micSnapshot)")
                 self.refuse("Could not start dictation: \(why)")
                 self.checkClaudeUpdate()
@@ -535,13 +569,18 @@ final class Coordinator: AppCoordinating {
             self.state.listening = false
             self.safety.episodeEnded()
             if self.gestures.talking { self.gestures.reset() }
-            if case .done = result {} else { self.sendAfterStop = false }
+            if case .done = result {} else { self.sendAfterStop = false; self.focusAfterStop = nil }
             switch result {
             case .done:
                 ClutchLog.write("dictation stopped")
                 if let next = self.focusAfterStop {
                     self.focusAfterStop = nil
-                    Task { @MainActor in try? await Task.sleep(nanoseconds: 400_000_000); _ = await self.bridge.focus(next) }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        // Typing or a new dictation during the pause means the user is working here: do not move focus.
+                        guard self.listeningSession == nil, !self.busy, ClaudeBridge.secondsSinceTypingOrClick() >= self.inputQuiet else { return }
+                        _ = await self.bridge.focus(next)
+                    }
                 }
                 self.settings.lastClaudeVersion = self.bridge.claudeVersion
                 self.lastSpoken = (session, Date())
@@ -568,12 +607,15 @@ final class Coordinator: AppCoordinating {
             refuse("Nothing dictated in the last \(Int(sendWindow)) seconds"); return
         }
         let session = spoken.session
-        if ClaudeBridge.secondsSinceUserInput() < Date().timeIntervalSince(spoken.stoppedAt) { refuse("Keyboard or mouse used since dictation; not sending"); return }
+        if ClaudeBridge.secondsSinceTypingOrClick() < Date().timeIntervalSince(spoken.stoppedAt) { refuse("Typed or clicked since dictation; not sending"); return }
         if let other = bridge.otherProcessCapturingInput() { refuse("\(other) is using a microphone"); return }
         Task { @MainActor in
             guard let text = await self.bridge.draftText(session), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.refuse("The draft is empty"); return
             }
+            // The draft read takes a moment; a new dictation, countdown or keystroke may have started meanwhile.
+            guard self.pendingSend == nil, self.listeningSession == nil, !self.busy else { self.refuse("Send dropped: something else started"); return }
+            if ClaudeBridge.secondsSinceTypingOrClick() < Date().timeIntervalSince(spoken.stoppedAt) { self.refuse("Typed or clicked since dictation; not sending"); return }
             ClutchLog.write("sending (\(text.count) characters)")
             self.sendNow(session, shown: text)
         }
@@ -598,7 +640,7 @@ final class Coordinator: AppCoordinating {
         let duration = settings.sendCountdownSeconds + words * 0.03
         let elapsed = Date().timeIntervalSince(send.started)
         // Cancel on any keyboard or mouse use, or when the nose leaves the session.
-        if ClaudeBridge.secondsSinceUserInput() < elapsed || cover.covered {
+        if ClaudeBridge.secondsSinceTypingOrClick() < elapsed || cover.covered {
             refuse(cover.covered ? "Send cancelled: camera covered" : "Send cancelled: keyboard or mouse used")
             pendingSend = nil; state.countdown = nil; pushOverlay(); Notifier.shared.playCue(.refused); return
         }
@@ -633,7 +675,12 @@ final class Coordinator: AppCoordinating {
     /// The nose settled on a different session. Focus follows it; a dictation running elsewhere stops first,
     /// keeping its text unsent (switching sessions in Claude while recording would discard it).
     private func lookedAt(_ session: ClaudeSession) {
-        guard !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet else { return }
+        guard !busy, ClaudeBridge.secondsSinceTypingOrClick() >= inputQuiet else {
+            // The nose has already settled and will not "settle" again, so retry from the tick for a few seconds.
+            pendingFocus = (session, CACurrentMediaTime() + 3)
+            return
+        }
+        pendingFocus = nil
         if let listening = listeningSession {
             guard listening.id != session.id else { return }
             focusAfterStop = session
@@ -674,7 +721,20 @@ final class Coordinator: AppCoordinating {
     /// The calibration is usable only on the screen arrangement it was made on.
     private var calibratedHere: Bool {
         guard pointer.isCalibrated else { return false }
-        return settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+        // Read on every camera frame; the screen arrangement only changes in screensChanged, so cache briefly.
+        let now = CACurrentMediaTime()
+        if let c = calibratedCache, now - c.at < 1 { return c.value }
+        let value = settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+        calibratedCache = (value, now)
+        return value
+    }
+
+    private var claudeRunning: Bool {
+        let now = CACurrentMediaTime()
+        if let c = claudeRunningCache, now - c.at < 1 { return c.value }
+        let value = bridge.claudeIsRunning()
+        claudeRunningCache = (value, now)
+        return value
     }
 
     private func claudeInFront(at p: CGPoint, t: TimeInterval) -> Bool {
@@ -685,6 +745,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func screensChanged() {
+        calibratedCache = nil
         ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
         if listeningSession != nil { endTalk(reason: "screens changed") }
         if state.calibrating { CalibrationController.shared.cancel() }
@@ -723,7 +784,7 @@ final class Coordinator: AppCoordinating {
         if let failure = trackerFailure { state.status = .error("Face tracking stopped: \(failure)"); return }
         if cover.covered { state.status = .cameraCovered; return }
         if !calibratedHere { state.status = .needsCalibration; return }
-        if !bridge.claudeIsRunning() { state.status = .claudeNotRunning; return }
+        if !claudeRunning { state.status = .claudeNotRunning; return }
         state.status = state.listening ? .listening : .watching
     }
 
