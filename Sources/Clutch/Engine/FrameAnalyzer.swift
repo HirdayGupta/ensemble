@@ -22,6 +22,19 @@ final class FrameAnalyzer: @unchecked Sendable {
         // Twice a second while a hand is in view, log why it was or wasn't read as a pose (numbers only).
         if let h, t - lastDiag >= 0.5, let f = classifier.features(h) {
             lastDiag = t
+            // Fingertip cluster, for the "gather" (all fingertips pinched together) gesture being tuned.
+            let tips: [Joint] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
+            let pts = tips.compactMap { h[$0] }
+            var spread = -1.0, reach = -1.0
+            if pts.count == 5, let w = h[.wrist], let m = h[.middleMCP] {
+                let palm = Double(hypot(w.x - m.x, w.y - m.y))
+                var maxD = 0.0
+                for i in 0..<5 { for j in (i + 1)..<5 { maxD = max(maxD, Double(hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y))) } }
+                let cx = pts.map(\.x).reduce(0, +) / 5, cy = pts.map(\.y).reduce(0, +) / 5
+                spread = palm > 0 ? maxD / palm : -1
+                reach = palm > 0 ? Double(hypot(cx - w.x, cy - w.y)) / palm : -1
+            }
+            ClutchLog.write(String(format: "gather: tipSpread=%.2f tipReach=%.2f", spread, reach))
             ClutchLog.write(String(format: "hand: pose=%@ curled=%d ext=%d tipReach=%.2f thumbStraight=%d thumbClear=%d thumbUp=%d span=%.2f upright=%.2f extent=%.2f tooSmall=%d angled=%d joints=%d",
                 f.gesture?.rawValue ?? "-", f.curled, f.extendedCount, f.tipReach, f.thumbStraight ? 1 : 0, f.thumbClear ? 1 : 0, f.thumbUp ? 1 : 0,
                 f.span, f.upright, f.extent, f.tooSmall ? 1 : 0, f.angled ? 1 : 0, h.points.count))
