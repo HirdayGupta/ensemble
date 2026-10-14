@@ -39,11 +39,11 @@ Video is analysed on this Mac and is never stored or sent. The camera is used fo
 ```
 swift build            # debug build
 swift test             # core logic tests
-scripts/bundle.sh      # release build -> build/Clutch.app (signed with an Apple Development identity if present, else ad-hoc)
+scripts/bundle.sh      # release build -> build/Clutch.app (signed with the "Clutch Local Signing" identity)
 open build/Clutch.app
 ```
 
-An ad-hoc signature changes on every build, so macOS may ask for camera permission again after each rebuild. Signing with a stable Apple Development identity avoids that.
+`scripts/bundle.sh` signs with the identity named `Clutch Local Signing` (override with `CLUTCH_SIGN_IDENTITY`) and stops with an error if it is missing; it never signs ad-hoc, because an ad-hoc signature is a new identity on every build and macOS then asks for Camera and Accessibility again. Each build writes the signature's designated requirement to `build/designated-requirement.txt` and warns when it changes.
 
 `swift scripts/make-icon.swift` redraws the app icon (`Assets/AppIcon.iconset`, `Assets/AppIcon.icns`, `Assets/logo.png`) from code.
 

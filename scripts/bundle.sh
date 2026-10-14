@@ -37,17 +37,38 @@ else
   exit 1
 fi
 
-# Prefer an Apple Development identity; else a local self-signed "Clutch Local Signing" identity (stable, so
-# Camera and Accessibility grants survive rebuilds); else ad-hoc.
-IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | grep 'Apple Development' | head -1 | awk '{print $2}' || true)"
-[ -n "$IDENTITY" ] || IDENTITY="$(security find-identity -p codesigning 2>/dev/null | grep 'Clutch Local Signing' | head -1 | awk '{print $2}' || true)"
-if [ -n "$IDENTITY" ]; then
-  echo "[$(date -u +%FT%TZ)] signing with identity $IDENTITY" | tee -a "$LOG"
-  codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | tee -a "$LOG"
-else
-  echo "[$(date -u +%FT%TZ)] no Apple Development identity; signing ad-hoc" | tee -a "$LOG"
-  codesign --force --sign - "$APP" 2>&1 | tee -a "$LOG"
+# Signing uses one pinned identity so the designated requirement (what Camera and Accessibility grants are tied
+# to) is the same on every build. Set CLUTCH_SIGN_IDENTITY to use another identity name; there is no ad-hoc
+# fallback, because an ad-hoc signature is a new identity on every build and silently invalidates the grants.
+IDENTITY_NAME="${CLUTCH_SIGN_IDENTITY:-Clutch Local Signing}"
+HASHES="$(security find-identity -p codesigning 2>/dev/null | grep -F "\"$IDENTITY_NAME\"" | awk '{print $2}' | sort -u || true)"
+COUNT="$(printf '%s' "$HASHES" | grep -c . || true)"
+if [ "$COUNT" -eq 0 ]; then
+  echo "error: no code-signing identity named \"$IDENTITY_NAME\" in the keychain." | tee -a "$LOG" >&2
+  echo "       Create it (Keychain Access > Certificate Assistant > Create a Certificate, type Code Signing) or set CLUTCH_SIGN_IDENTITY." | tee -a "$LOG" >&2
+  exit 1
+elif [ "$COUNT" -gt 1 ]; then
+  echo "error: $COUNT identities are named \"$IDENTITY_NAME\"; delete the extras so the choice is unambiguous:" | tee -a "$LOG" >&2
+  echo "$HASHES" | tee -a "$LOG" >&2
+  exit 1
 fi
+IDENTITY="$HASHES"
+echo "[$(date -u +%FT%TZ)] signing with \"$IDENTITY_NAME\" ($IDENTITY)" | tee -a "$LOG"
+codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | tee -a "$LOG"
 
-codesign --verify --strict "$APP" 2>&1 | tee -a "$LOG" || true
+codesign --verify --strict "$APP" 2>&1 | tee -a "$LOG"
+
+REQ_FILE="build/designated-requirement.txt"
+REQ="$(codesign -dr - "$APP" 2>&1 | sed -n 's/^designated => //p')"
+if [ -z "$REQ" ]; then
+  echo "error: could not read the designated requirement" | tee -a "$LOG" >&2
+  exit 1
+fi
+if [ -f "$REQ_FILE" ] && [ "$(cat "$REQ_FILE")" != "$REQ" ]; then
+  echo "WARNING: the designated requirement changed since the last build; macOS will ask for Camera and Accessibility again." | tee -a "$LOG" >&2
+  echo "  was: $(cat "$REQ_FILE")" | tee -a "$LOG" >&2
+  echo "  now: $REQ" | tee -a "$LOG" >&2
+fi
+printf '%s\n' "$REQ" > "$REQ_FILE"
+echo "[$(date -u +%FT%TZ)] designated requirement: $REQ" | tee -a "$LOG"
 echo "$ROOT/$APP"
