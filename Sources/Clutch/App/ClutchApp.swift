@@ -24,6 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { Self.printResourcePath() }
             exit(0)
         }
+        // One copy only: a second launch (e.g. login agent plus a manual open) exits cleanly.
+        let me = NSRunningApplication.current
+        if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.clutch.app")
+            .contains(where: { $0.processIdentifier != me.processIdentifier }) {
+            exit(0)
+        }
         NSApp.setActivationPolicy(.accessory)
         MainActor.assumeIsolated { AppEnvironment.shared.start() }
     }

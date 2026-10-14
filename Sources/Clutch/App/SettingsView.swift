@@ -35,7 +35,7 @@ private struct GeneralSettings: View {
                     Text("Automatic").tag(String?.none)
                     ForEach(cameraChoices, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
-                Toggle("Open at login", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.setLaunchAtLogin($0) }))
+                Toggle("Open at login (restarts after a crash)", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.setLaunchAtLogin($0) }))
                 if let error = settings.launchAtLoginError {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }

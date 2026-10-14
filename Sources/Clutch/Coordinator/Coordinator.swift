@@ -32,6 +32,11 @@ final class Coordinator: AppCoordinating {
     private var refreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var running = false
+    /// Front-window check cache: who owns the window under the nose, refreshed at most every 0.15 s.
+    private var topOwner: (at: CGPoint, t: TimeInterval, pid: pid_t?)?
+    /// Input device and other-capturer state at the start of a hold; a change mid-hold stops dictation.
+    private var holdInputDevice: String?
+    private var lastHoldAudioCheck: TimeInterval = 0
 
     /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
     private let inputQuiet = 1.5
@@ -70,8 +75,17 @@ final class Coordinator: AppCoordinating {
             Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
         }
         safety.onMuted = { [weak self] muted in self?.state.muted = muted }
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+        let ws = NSWorkspace.shared.notificationCenter
+        ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.sweep() }
+        }
+        ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard app?.bundleIdentifier?.hasPrefix("com.anthropic.claudefordesktop") == true else { return }
+            MainActor.assumeIsolated { ClutchLog.write("Claude launched; sweeping"); self?.sweep() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screensChanged() }
         }
     }
 
@@ -122,6 +136,7 @@ final class Coordinator: AppCoordinating {
             if self.pointer.fit(samples), let data = self.pointer.calibration {
                 self.settings.calibration = data
                 self.settings.calibratedAt = Date()
+                self.settings.calibrationDisplays = ScreenFacts.displayFingerprint()
                 self.pointer.resetFilter()
             } else {
                 self.refuse("Calibration did not fit; try again sitting where you normally work")
@@ -144,9 +159,10 @@ final class Coordinator: AppCoordinating {
         latestHead = head
         faceCount = head.faceCount
         guard !state.calibrating else { return }
-        if head.faceCount == 1, pointer.isCalibrated, let p = pointer.point(for: head) {
-            state.nosePoint = p
-            let under = sessions.first { $0.frame.contains(p) }
+        if head.faceCount == 1, calibratedHere, let p = pointer.point(for: head) {
+            // Claude only: the nose counts only over a Claude session whose window is actually in front there.
+            let under = sessions.first { $0.frame.contains(p) && claudeInFront(at: p, t: head.t) }
+            state.nosePoint = under == nil ? nil : p
             if under?.id == target?.id {
                 candidate = nil
             } else if let c = candidate, c.session?.id == under?.id {
@@ -166,7 +182,8 @@ final class Coordinator: AppCoordinating {
         if listeningSession != nil, hand.present, hand.pose == settings.mapping.talk { safety.heartbeat() }
         guard !state.calibrating else { return }
         for intent in gestures.push(hand) { apply(intent) }
-        overlay.setGesture(cover.covered || !settings.enabled ? nil : gestures.progress)
+        let onClaude = target != nil || listeningSession != nil || pendingSend != nil
+        overlay.setGesture(cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress)
     }
 
     private func handle(light: FrameLight) {
@@ -202,6 +219,15 @@ final class Coordinator: AppCoordinating {
         for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
         if let send = pendingSend { advanceCountdown(send) }
         if let s = scrollSession, Date().timeIntervalSince(s.lastAt) > 0.6 { scrollSession = nil }
+        let now = CACurrentMediaTime()
+        if listeningSession != nil, !busy, now - lastHoldAudioCheck >= 0.5 {
+            lastHoldAudioCheck = now
+            if let other = bridge.otherProcessCapturingInput() {
+                refuse("\(other) started using a microphone; dictation stopped"); endTalk(reason: "other capturer")
+            } else if let device = holdInputDevice, bridge.defaultInputDeviceName() != device {
+                refuse("The input device changed; dictation stopped"); endTalk(reason: "input device changed")
+            }
+        }
     }
 
     private func refreshSessions() {
@@ -209,7 +235,9 @@ final class Coordinator: AppCoordinating {
             sessions = []; target = nil; updateStatus(); return
         }
         Task { @MainActor in
-            self.sessions = await self.bridge.refreshSessions()
+            let found = await self.bridge.refreshSessions()
+            if found.isEmpty != self.sessions.isEmpty { ClutchLog.write("Claude sessions with a microphone found: \(found.count)") }
+            self.sessions = found
             self.updateStatus()
         }
     }
@@ -239,7 +267,7 @@ final class Coordinator: AppCoordinating {
     private func beginTalk() {
         guard listeningSession == nil, !busy else { return }
         if let why = commonRefusal() { refuse(why); return }
-        guard pointer.isCalibrated else { refuse("Calibrate first"); return }
+        guard calibratedHere else { refuse("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = target else { refuse("Your nose is not on a Claude session"); return }
         if let other = bridge.otherProcessCapturingInput() { refuse("\(other) is using a microphone"); return }
         pendingSend = nil; state.countdown = nil
@@ -254,6 +282,7 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation started")
+                self.holdInputDevice = self.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()
                 Notifier.shared.playCue(.listenStart)
             case .refused(let why), .unknown(let why):
@@ -261,6 +290,7 @@ final class Coordinator: AppCoordinating {
                 self.state.listening = false
                 self.safety.episodeEnded()
                 self.refuse("Could not start dictation: \(why)")
+                self.checkClaudeUpdate()
             }
             // The hand may already have opened while the press was in flight.
             if !self.gestures.talking, self.listeningSession != nil { self.endTalk(reason: "released") }
@@ -281,10 +311,12 @@ final class Coordinator: AppCoordinating {
             switch result {
             case .done:
                 ClutchLog.write("dictation stopped")
+                self.settings.lastClaudeVersion = self.bridge.claudeVersion
                 self.lastSpoken = (session, Date())
                 Notifier.shared.playCue(.listenEnd)
             case .refused(let why), .unknown(let why):
                 self.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
+                self.checkClaudeUpdate()
             }
             self.pushOverlay()
         }
@@ -343,6 +375,38 @@ final class Coordinator: AppCoordinating {
         bridge.scroll(session, dy: dy)
     }
 
+    // MARK: - Screen and version checks
+
+    /// The calibration is usable only on the screen arrangement it was made on.
+    private var calibratedHere: Bool {
+        guard pointer.isCalibrated else { return false }
+        if settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
+        return settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+    }
+
+    private func claudeInFront(at p: CGPoint, t: TimeInterval) -> Bool {
+        if let c = topOwner, t - c.t < 0.15, hypot(c.at.x - p.x, c.at.y - p.y) < 40 { return c.pid == bridge.claudePID }
+        let pid = ScreenFacts.topWindowOwner(at: p)
+        topOwner = (p, t, pid)
+        return pid != nil && pid == bridge.claudePID
+    }
+
+    private func screensChanged() {
+        ClutchLog.write("screens changed; calibration valid here: \(calibratedHere)")
+        if listeningSession != nil { endTalk(reason: "screens changed") }
+        pendingSend = nil
+        target = nil
+        updateStatus()
+    }
+
+    /// A failure right after Claude updated may mean its controls changed: switch off and say why.
+    private func checkClaudeUpdate() {
+        guard let now = bridge.claudeVersion, let last = settings.lastClaudeVersion, now != last else { return }
+        ClutchLog.write("Claude updated \(last) -> \(now) and a dictation step failed; switching off")
+        Notifier.shared.notify(title: "Clutch switched off", body: "Claude updated to \(now) and its microphone controls did not respond as before.")
+        settings.enabled = false
+    }
+
     // MARK: - Output
 
     private func sweep() {
@@ -359,7 +423,7 @@ final class Coordinator: AppCoordinating {
         if case .needsPermission = state.status { return }
         if case .error = state.status, !engine.isRunning { return }
         if cover.covered { state.status = .cameraCovered; return }
-        if !pointer.isCalibrated { state.status = .needsCalibration; return }
+        if !calibratedHere { state.status = .needsCalibration; return }
         if !bridge.claudeIsRunning() { state.status = .claudeNotRunning; return }
         state.status = state.listening ? .listening : .watching
     }

@@ -17,6 +17,8 @@ final class SettingsStore: ObservableObject {
         static let launchAtLogin = "launchAtLogin"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
+        static let calibrationDisplays = "calibrationDisplays"
+        static let lastClaudeVersion = "lastClaudeVersion"
     }
 
     static let countdownRange: ClosedRange<Double> = 1...5
@@ -44,6 +46,10 @@ final class SettingsStore: ObservableObject {
     /// Opaque blob written by the coordinator.
     @Published var calibration: Data? { didSet { defaults.set(calibration, forKey: Key.calibration) } }
     @Published var calibratedAt: Date? { didSet { defaults.set(calibratedAt, forKey: Key.calibratedAt) } }
+    /// The screen arrangement the calibration was made on; a different arrangement needs a new calibration.
+    @Published var calibrationDisplays: String? { didSet { defaults.set(calibrationDisplays, forKey: Key.calibrationDisplays) } }
+    /// The Claude version the last confirmed dictation ran on.
+    @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
 
     init(defaults: UserDefaults? = nil) {
         // In the packaged app the bundle identifier is "dev.clutch.app", so the standard domain already is that
@@ -58,9 +64,11 @@ final class SettingsStore: ObservableObject {
         showHighlight = bool(Key.showHighlight, true)
         cameraName = store.string(forKey: Key.cameraName)
         playSounds = bool(Key.playSounds, true)
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
+        calibrationDisplays = store.string(forKey: Key.calibrationDisplays)
+        lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 2.0
@@ -75,12 +83,12 @@ final class SettingsStore: ObservableObject {
 
     func setLaunchAtLogin(_ on: Bool) {
         do {
-            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            if on { try LoginAgent.enable() } else { try LoginAgent.disable() }
             launchAtLoginError = nil
         } catch {
-            launchAtLoginError = "Could not change launch at login: \(error.localizedDescription)"
+            launchAtLoginError = "Could not change open at login: \(error.localizedDescription)"
         }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        launchAtLogin = LoginAgent.isEnabled
         defaults.set(launchAtLogin, forKey: Key.launchAtLogin)
     }
 
