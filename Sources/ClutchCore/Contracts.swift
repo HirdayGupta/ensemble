@@ -68,3 +68,19 @@ public struct ClaudeSession: Equatable, Sendable {
     public var windowNumber: Int
     public init(id: String, frame: CGRect, windowNumber: Int) { self.id = id; self.frame = frame; self.windowNumber = windowNumber }
 }
+
+/// One calibration reading: where the user was asked to point their nose (global, top-left) and the
+/// head angles averaged while they did.
+public struct CalibrationSample: Codable, Equatable, Sendable {
+    public var yaw: Double
+    public var pitch: Double
+    public var target: CGPoint
+    public init(yaw: Double, pitch: Double, target: CGPoint) { self.yaw = yaw; self.pitch = pitch; self.target = target }
+}
+
+/// The result of asking Claude to do something.
+public enum BridgeResult: Equatable, Sendable {
+    case done
+    case refused(String)    // a guard said no; nothing was pressed
+    case unknown(String)    // pressed, but the outcome could not be confirmed
+}
