@@ -16,9 +16,9 @@ struct SettingsView: View {
             GeneralSettings(state: state, settings: settings, updates: updates, replayTour: replayTour)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
-            GestureSettings(settings: settings)
-                .tabItem { Label("Gestures", systemImage: "hand.raised") }
-                .tag(SettingsTab.gestures)
+            ActionSettings(settings: settings)
+                .tabItem { Label("Actions", systemImage: "bolt") }
+                .tag(SettingsTab.actions)
             DisplaySettings(settings: settings)
                 .tabItem { Label("Display", systemImage: "rectangle.on.rectangle") }
                 .tag(SettingsTab.display)
@@ -90,27 +90,57 @@ private struct GeneralSettings: View {
     }
 }
 
-private struct GestureSettings: View {
+/// Settings, Actions: one row per thing Ensemble can do, with the action's own icon, and on the right the gesture
+/// that does it. Talk and Scroll have one fixed gesture each (pinch twice, pinch and move); Send can be any pose
+/// or off; the pose-held "Scroll up" and "Scroll down" are optional extras, off by default because pinch and move
+/// already scrolls and a held pose would scroll whenever the hand happened to rest in that shape.
+private struct ActionSettings: View {
     @ObservedObject var settings: SettingsStore
 
     var body: some View {
         Form {
             Section {
-                ForEach([GestureSlot.talk, .send, .scrollUp, .scrollDown], id: \.self) { slot in
-                    GestureRow(slot: slot, pose: settings.mapping[slot]) {
-                        Picker(slot.title, selection: Binding(
-                            get: { settings.mapping[slot] },
-                            set: { settings.assign($0, to: slot) }
-                        )) {
-                            if slot.allowsOff { Text("Off").tag(Pose?.none) }
-                            ForEach(Pose.allCases, id: \.self) { Text($0.title).tag(Pose?.some($0)) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 130)
+                ActionRow(symbol: GestureSlot.talk.actionSymbol, title: "Talk",
+                          detail: "Starts dictation in the session you are facing; the same gesture stops it. One headphone press does the same.") {
+                    FixedGesture(symbol: "hand.pinch", title: "Pinch twice")
+                }
+                ActionRow(symbol: GestureSlot.send.actionSymbol, title: "Send", detail: GestureSlot.send.detail) {
+                    posePicker(for: .send)
+                }
+                LabeledContent("Hold to send") {
+                    HStack {
+                        Slider(value: $settings.sendCountdownSeconds, in: SettingsStore.countdownRange, step: 0.25)
+                            .frame(width: 160)
+                        Text(String(format: "%.1f s", settings.sendCountdownSeconds))
+                            .monospacedDigit()
+                            .frame(width: 46, alignment: .trailing)
                     }
                 }
+                .disabled(settings.mapping.send == nil)
+                ActionRow(symbol: "arrow.up.and.down", title: "Scroll",
+                          detail: "Pinch, then move your hand up or down. Let go quickly and it glides on; let go slowly and it stops.") {
+                    FixedGesture(symbol: "hand.pinch", title: "Pinch and move")
+                }
+                Toggle("Reverse the scroll direction", isOn: $settings.reverseScroll)
+                ActionRow(symbol: GestureSlot.cancel.actionSymbol, title: "Cancel", detail: GestureSlot.cancel.detail) {
+                    FixedGesture(symbol: settings.mapping.cancel.symbolName, title: settings.mapping.cancel.title)
+                }
             } footer: {
-                Text("Each gesture can only do one thing. Picking one that is in use swaps it with the other action.")
+                Text(settings.reverseScroll
+                     ? "Moving your pinch up scrolls toward earlier messages. Cancel takes whichever gesture is left over."
+                     : "Moving your pinch up drags the page up, toward later messages, as your Mac scrolls. Cancel takes whichever gesture is left over.")
+            }
+            Section {
+                ActionRow(symbol: GestureSlot.scrollUp.actionSymbol, title: "Scroll up", detail: GestureSlot.scrollUp.detail) {
+                    posePicker(for: .scrollUp)
+                }
+                ActionRow(symbol: GestureSlot.scrollDown.actionSymbol, title: "Scroll down", detail: GestureSlot.scrollDown.detail) {
+                    posePicker(for: .scrollDown)
+                }
+            } header: {
+                Text("Other ways to scroll")
+            } footer: {
+                Text("Pinch and move already scrolls, so these are off unless you also want a held gesture for each direction. Each gesture does one thing: picking one in use swaps it with that action.")
             }
             Section {
                 Toggle("Warn when my look leaves Claude", isOn: $settings.warnWhenLeavingClaude)
@@ -122,32 +152,50 @@ private struct GestureSettings: View {
             } footer: {
                 Text("One press starts or stops dictation in the session you look at. Two presses send.")
             }
-            Section {
-                GestureRow(slot: .cancel, pose: settings.mapping.cancel) {
-                    Text(settings.mapping.cancel.title).foregroundStyle(.secondary)
-                }
-            } footer: {
-                Text("Cancel takes whichever gesture is left over.")
-            }
         }
         .formStyle(.grouped)
     }
+
+    private func posePicker(for slot: GestureSlot) -> some View {
+        Picker(slot.title, selection: Binding(
+            get: { settings.mapping[slot] },
+            set: { settings.assign($0, to: slot) }
+        )) {
+            if slot.allowsOff { Text("Off").tag(Pose?.none) }
+            ForEach(Pose.allCases, id: \.self) { Label($0.title, systemImage: $0.symbolName).tag(Pose?.some($0)) }
+        }
+        .labelsHidden()
+        .frame(width: 170)
+    }
 }
 
-private struct GestureRow<Control: View>: View {
-    let slot: GestureSlot
-    let pose: Pose?
+/// A gesture that cannot be changed, shown where the other rows have their picker.
+private struct FixedGesture: View {
+    let symbol: String
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .foregroundStyle(.secondary)
+            .frame(width: 170, alignment: .leading)
+    }
+}
+
+private struct ActionRow<Control: View>: View {
+    let symbol: String
+    let title: String
+    let detail: String
     @ViewBuilder var control: () -> Control
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: pose?.symbolName ?? "hand.raised.slash")
-                .font(.system(size: 18))
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .medium))
                 .frame(width: 38, height: 38)
                 .glassSurface(RoundedRectangle(cornerRadius: 11, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(slot.title).font(.headline)
-                Text(slot.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(title).font(.headline)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             control()
@@ -190,24 +238,6 @@ private struct DisplaySettings: View {
                      : "A blinking microphone shows Claude is listening. Ensemble never uses the microphone.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Scrolling") {
-                Toggle("Reverse pinch-and-drag direction", isOn: $settings.reverseScroll)
-                Text(settings.reverseScroll
-                     ? "Moving your pinch up scrolls toward earlier messages."
-                     : "Moving your pinch up drags the page up, toward later messages (follows your Mac's scroll direction).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Sending") {
-                LabeledContent("Hold thumbs-up to send") {
-                    HStack {
-                        Slider(value: $settings.sendCountdownSeconds, in: SettingsStore.countdownRange, step: 0.25)
-                            .frame(width: 180)
-                        Text(String(format: "%.1f s", settings.sendCountdownSeconds))
-                            .monospacedDigit()
-                            .frame(width: 46, alignment: .trailing)
-                    }
-                }
-            }
         }
         .formStyle(.grouped)
     }
@@ -222,6 +252,26 @@ private struct CalibrationSettings: View {
 
     var body: some View {
         Form {
+            if !state.screenChoices.isEmpty {
+                Section {
+                    ScreenArrangementView(screens: state.screenChoices, spotInUse: state.spotInUse, calibrating: state.calibrating,
+                                          width: 440, maxHeight: 150, recalibrate: { calibrate(.screen($0)) })
+                        .padding(.vertical, 4)
+                    ForEach(state.screenChoices) { screen in
+                        HStack {
+                            Label(screen.name, systemImage: screen.isMain ? "menubar.rectangle" : "display")
+                            Spacer(minLength: 8)
+                            Text(ScreenArrangementView.calibrationLabel(screen, spotInUse: state.spotInUse)).font(.caption).foregroundStyle(screen.calibrated ? Color.secondary : Color.orange)
+                            Button("Recalibrate") { calibrate(.screen(screen.id)) }
+                                .disabled(state.calibrating)
+                        }
+                    }
+                } header: {
+                    Text("Screens")
+                } footer: {
+                    Text("Arranged as macOS has them. Click a screen, or its Recalibrate button, to redo only that one; the others keep theirs.")
+                }
+            }
             Section {
                 LabeledContent("Last calibrated") {
                     if let date = settings.calibratedAt {
@@ -235,26 +285,6 @@ private struct CalibrationSettings: View {
                     .ensembleButtonStyle(prominent: true)
             } footer: {
                 Text("A dot visits five points on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera.")
-            }
-            if !state.screenChoices.isEmpty {
-                Section {
-                    ForEach(state.screenChoices) { screen in
-                        HStack {
-                            Label(screen.name, systemImage: "display")
-                            Spacer(minLength: 8)
-                            if state.screenChoices.count > 1 {
-                                Button("Recalibrate") { calibrate(.screen(screen.id)) }
-                                    .disabled(state.calibrating)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Screens")
-                } footer: {
-                    if state.screenChoices.count > 1 {
-                        Text("Recalibrate one screen to redo only that one; the others keep theirs.")
-                    }
-                }
             }
             Section {
                 ForEach(state.calibrationSpots) { spot in

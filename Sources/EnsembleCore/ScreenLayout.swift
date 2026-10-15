@@ -50,4 +50,40 @@ public enum ScreenLayout {
         if valid >= connected { return "Calibrated for \(connected) screen\(connected == 1 ? "" : "s")" }
         return "Calibrated for \(valid) of \(connected) screens"
     }
+
+    /// The arrangement drawn small, as System Settings > Displays draws it: every frame scaled by one factor so
+    /// the whole arrangement fits `width` by `maxHeight`, moved so its top-left corner is the origin. Relative
+    /// positions and sizes are kept exactly; `size` is the drawing's own size. Empty or degenerate input gives
+    /// no rects and a zero size.
+    public static func fit(_ frames: [CGRect], width: CGFloat, maxHeight: CGFloat) -> (rects: [CGRect], size: CGSize) {
+        let finite = frames.allSatisfy { $0.origin.x.isFinite && $0.origin.y.isFinite && $0.width.isFinite && $0.height.isFinite }
+        guard finite, let first = frames.first, width > 0, maxHeight > 0 else { return ([], .zero) }
+        let bounds = frames.dropFirst().reduce(first) { $0.union($1) }
+        guard bounds.width > 0, bounds.height > 0 else { return ([], .zero) }
+        let scale = min(width / bounds.width, maxHeight / bounds.height)
+        let rects = frames.map {
+            CGRect(x: ($0.minX - bounds.minX) * scale, y: ($0.minY - bounds.minY) * scale,
+                   width: $0.width * scale, height: $0.height * scale)
+        }
+        return (rects, CGSize(width: bounds.width * scale, height: bounds.height * scale))
+    }
+
+    /// A screen's calibration as the arrangement labels it: "Calibrated Oct 15" (the date already formatted),
+    /// "Calibrated" when no date is known, "Not calibrated" when its calibration is not usable now (a new or moved
+    /// screen, or none yet).
+    public static func calibrationState(valid: Bool, calibratedOn: String?) -> String {
+        guard valid else { return "Not calibrated" }
+        return calibratedOn.map { "Calibrated \($0)" } ?? "Calibrated"
+    }
+
+    /// The panel's camera line. The camera's rate and the dot's are different numbers: a webcam delivers at most its
+    /// own rate (30 a second for most), while the dot window moves on every refresh of the screen it is on. Only the
+    /// name while off or before the first rate report: "HD Pro Webcam C920 · camera 30 fps · dot 60 Hz".
+    public static func cameraLine(name: String?, running: Bool, cameraFPS: Int, dotHz: Int) -> String {
+        let name = name ?? "No camera"
+        guard running, cameraFPS > 0 else { return name }
+        var parts = [name, "camera \(cameraFPS) fps"]
+        if dotHz > 0 { parts.append("dot \(dotHz) Hz") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
 }

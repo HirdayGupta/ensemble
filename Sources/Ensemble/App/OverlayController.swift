@@ -88,6 +88,14 @@ final class OverlayController {
     }
 
     private var latestNose: CGPoint?
+
+    /// The refresh rate of the screen the dot is on (where the nose last was, else the main screen). Read once a
+    /// second with the camera's rate report, never per frame.
+    var dotRefreshRate: Int {
+        let screen = latestNose.flatMap { ScreenGeometry.screen(containing: $0) } ?? NSScreen.main
+        return screen?.maximumFramesPerSecond ?? 0
+    }
+
     private var glassDotStore: AnyObject?
     /// The dot is its own small window (GlassDot); the SwiftUI overlay never draws it.
     private func syncGlassDot() {

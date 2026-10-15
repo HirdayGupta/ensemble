@@ -1,10 +1,13 @@
 import SwiftUI
+import EnsembleCore
 
 struct PanelActions {
     var calibrate: () -> Void
     var openSettings: () -> Void
     /// Settings, opened at Calibration: the screens, with a Recalibrate button for each.
     var openCalibration: () -> Void
+    /// Recalibrates one screen (stable id) in the position in use; the others keep theirs.
+    var recalibrateScreen: (String) -> Void
     var checkForUpdates: () -> Void
     var startTour: () -> Void
     var dismissTourBanner: () -> Void
@@ -18,6 +21,7 @@ struct MenuPanelView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var updates: UpdateController
     let actions: PanelActions
+    @State private var showScreens = false
 
     var body: some View {
         GlassGroup(spacing: 10) {
@@ -78,17 +82,21 @@ struct MenuPanelView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
-            if let line = state.calibratedLine {
-                Button { actions.openCalibration() } label: {
+            if !state.screenChoices.isEmpty {
+                Button {
+                    withAnimation(.smooth(duration: 0.35)) { showScreens.toggle() }
+                } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        row(symbol: "display.2", text: line)
+                        row(symbol: "display.2", text: state.calibratedLine ?? "Not calibrated")
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(showScreens ? 90 : 0))
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("See your screens and recalibrate one of them")
+                .help(showScreens ? "Hide your screens" : "See your screens and recalibrate one of them")
+                if showScreens { screensSection.transition(.opacity) }
             }
             if settings.enabled, case .needsPermission(let what) = state.status {
                 row(symbol: "exclamationmark.circle", text: Permissions.guidance(for: what), tint: .orange)
@@ -121,9 +129,30 @@ struct MenuPanelView: View {
         .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    /// The arrangement, opened from the "Calibrated for" row: click a screen to recalibrate only that one.
+    private var screensSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScreenArrangementView(screens: state.screenChoices, spotInUse: state.spotInUse, calibrating: state.calibrating,
+                                  width: 268, maxHeight: 130, recalibrate: actions.recalibrateScreen)
+                .padding(.top, 2)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(screensCaption).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button("Settings…") { actions.openCalibration() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private var screensCaption: String {
+        let click = "Click a screen to recalibrate only that one."
+        guard state.calibrationSpots.count > 1, let name = state.calibrationSpots.first(where: { $0.id == state.spotInUse })?.name else { return click }
+        return "\(click) Position in use: \(name)."
+    }
+
     private var cameraLine: String {
-        let name = state.cameraName ?? "No camera"
-        return settings.enabled && state.fps > 0 ? "\(name) · \(state.fps) fps" : name
+        ScreenLayout.cameraLine(name: state.cameraName, running: settings.enabled, cameraFPS: state.fps, dotHz: state.dotRate)
     }
 
     private func row(symbol: String, text: String, tint: Color = .secondary) -> some View {

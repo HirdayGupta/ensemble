@@ -20,6 +20,9 @@ final class AppEnvironment {
         calibrate: { [weak self] in self?.dismissMenuPanel(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
         openCalibration: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show(tab: .calibration) },
+        recalibrateScreen: { [weak self] id in
+            self?.dismissMenuPanel(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate(.screen(id))
+        },
         // The panel stays open so the button itself can say what the check found.
         checkForUpdates: { [weak self] in self?.updates.checkForUpdates() },
         startTour: { [weak self] in self?.dismissMenuPanel(); self?.tourWindow.show() },
@@ -73,6 +76,9 @@ final class AppEnvironment {
             calibrate: { [weak self] in self?.floatingPanel.hide(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
             openCalibration: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show(tab: .calibration) },
+            recalibrateScreen: { [weak self] id in
+                self?.floatingPanel.hide(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate(.screen(id))
+            },
             checkForUpdates: { [weak self] in self?.updates.checkForUpdates() },
             startTour: { [weak self] in self?.floatingPanel.hide(); self?.tourWindow.show() },
             dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
