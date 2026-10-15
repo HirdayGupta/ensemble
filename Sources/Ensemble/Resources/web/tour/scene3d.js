@@ -2,7 +2,11 @@
  * Needs three.js r128 globals (THREE, THREE.GLTFLoader, THREE.CCDIKSolver).
  * Hand model: WebXR generic hand (MIT), loaded from opts.handUrl (default 'assets/hand.glb').
  *
- *   window.EnsembleScene.mount(el, { scene, reducedMotion, onFrame, handUrl }) -> { setScene, destroy }
+ *   window.EnsembleScene.mount(el, { scene, reducedMotion, onFrame, handUrl }) -> { setScene, destroy, canvas }
+ *   The welcome and calibrate scenes fill el with one 3D canvas (desk, head, monitors). The gesture scenes (dictate,
+ *   send, scroll) mount the frame layout instead: a flat 2D Claude window with one focused session, and over its
+ *   right COLUMN share a top panel holding the 3D hand alone. The bottom half of that column is left empty for the
+ *   app to draw the camera's hand skeleton in. A mounted instance keeps its layout; setScene switches within it.
  *   window.EnsembleScene._seek(name, t)   debug: freeze a frame on the last mounted instance
  */
 (function () {
@@ -440,24 +444,27 @@
   }
 
   // ------------------------------------------------------------------
-  // Gesture stage: one monitor, flat to the viewer, lit by a drawn Claude desktop session
+  // Gesture frame: a flat, front-on Claude window drawn in 2D (crisp text at any size). Several sessions
+  // side by side; one is focused (blue outline, never filled) and never changes, the rest are skeletons.
+  // The focused session reacts to the gesture on the shared clock.
   // ------------------------------------------------------------------
-  var SCR = { W: 8.6, H: 4.8375, cx: 1.2, cy: 3.35, z: -9.0 };
   var DRAFT_TEXT = 'Log each retry with its attempt number.';
   var SANS = '-apple-system, "SF Pro Text", "Segoe UI", system-ui, Helvetica, Arial, sans-serif';
   var MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
   var C = {
     bg: '#1f1e1d', side: '#181716', pane: '#262624', line: '#3a3935', text: '#eeece6', dim: '#a09e96', faint: '#6f6d66',
-    bubble: '#3a3935', code: '#171716', orange: '#d97757', blue: '#5aa0ff'
+    bubble: '#3a3935', code: '#171716', orange: '#d97757', blue: '#5aa0ff', bone: '#33322e', bone2: '#2d2c2a'
   };
+  // The window is laid out in a 960 x 600 design space and scaled to the canvas. The right 18% is where the page
+  // and the app overlay the hand column, so the last session sits under it.
+  var FW = 960, FH = 600;
+  var COLUMN = 0.18;   // width of the overlay column as a share of the canvas; Swift's TourGestureColumn uses the same number
+  var PANES = [{ x: 6, w: 162 }, { x: 174, w: 450, focus: true }, { x: 630, w: 156 }, { x: 792, w: 162 }];
+  var PANE_Y = 42, PANE_H = 552;
 
-  function makeScreen() {
-    var W = 1280, H = 720, S = 1.5;
-    var cv = document.createElement('canvas');
-    cv.width = W * S; cv.height = H * S;
-    var ctx = cv.getContext('2d');
-    var tex = new THREE.CanvasTexture(cv);
-    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+  function makeFrameView(canvas) {
+    var ctx = canvas.getContext('2d');
+    var cssW = FW, dpr = 1;
 
     function rr(x, y, w, h, r) {
       ctx.beginPath();
@@ -476,7 +483,13 @@
       if (cur) lines.push(cur);
       return lines;
     }
-    var F = '21px ' + SANS, LH = 31;
+
+    // ---- the focused session ----
+    var FP = PANES[1], PX = FP.x, PY = PANE_Y, PW = FP.w, PH = PANE_H;
+    var F = '16px ' + SANS, LH = 24, GAP = 18;
+    var X0 = PX + 38, X1 = PX + PW - 18;                 // assistant column left edge, user bubble right edge
+    var CX0 = PX + 14, CW = PW - 28, CH = 84, CY0 = PY + PH - 14 - CH;   // composer
+    var CONV_T = PY + 62, CONV_B = CY0 - 12;
     var CODE = [
       ['async function', ' drain', '(q: Queue) {'],
       ['  for', ' (let n = 0; n < 5; n++) {', ''],
@@ -485,46 +498,44 @@
       ['  }', '', ''],
       ['}', '', '']
     ];
-    var X0 = 296, X1 = 1236;   // conversation column
 
-    // returns [{kind,h,draw(y)}]
     function userBubble(text) {
-      var lines = wrap(text, 520, F), w = 0;
+      var lines = wrap(text, 280, F), w = 0;
       lines.forEach(function (l) { w = Math.max(w, ctx.measureText(l).width); });
-      var bw = w + 40, bh = lines.length * LH + 26;
+      var bw = w + 32, bh = lines.length * LH + 20;
       return { h: bh, draw: function (y, a) {
         ctx.globalAlpha = a === undefined ? 1 : a;
-        ctx.fillStyle = C.bubble; rr(X1 - bw, y, bw, bh, 18); ctx.fill();
+        ctx.fillStyle = C.bubble; rr(X1 - bw, y, bw, bh, 14); ctx.fill();
         ctx.fillStyle = C.text; ctx.font = F; ctx.textBaseline = 'alphabetic';
-        lines.forEach(function (l, i) { ctx.fillText(l, X1 - bw + 20, y + 13 + 22 + i * LH - 3); });
+        lines.forEach(function (l, i) { ctx.fillText(l, X1 - bw + 16, y + 10 + 17 + i * LH - 2); });
         ctx.globalAlpha = 1;
       } };
     }
     function asst(text) {
-      var lines = wrap(text, 880, F);
+      var lines = wrap(text, X1 - X0, F);
       return { h: lines.length * LH + 4, draw: function (y) {
-        ctx.fillStyle = C.orange; ctx.font = '600 24px ' + SANS; ctx.fillText('✻', X0 - 30, y + 22);
+        ctx.fillStyle = C.orange; ctx.font = '600 18px ' + SANS; ctx.fillText('✻', X0 - 22, y + 17);
         ctx.fillStyle = C.text; ctx.font = F;
-        lines.forEach(function (l, i) { ctx.fillText(l, X0, y + 22 + i * LH); });
+        lines.forEach(function (l, i) { ctx.fillText(l, X0, y + 17 + i * LH); });
       } };
     }
     function tool(label, arg) {
-      return { h: 44, draw: function (y) {
-        ctx.fillStyle = '#2d2c2a'; rr(X0, y, 430, 40, 10); ctx.fill();
+      return { h: 34, draw: function (y) {
+        ctx.fillStyle = '#2d2c2a'; rr(X0, y, 330, 30, 8); ctx.fill();
         ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-        ctx.fillStyle = C.dim; ctx.font = '600 17px ' + SANS; ctx.fillText(label, X0 + 16, y + 26);
-        ctx.fillStyle = C.text; ctx.font = '17px ' + MONO; ctx.fillText(arg, X0 + 16 + ctx.measureText(label).width + 22, y + 26);
+        ctx.fillStyle = C.dim; ctx.font = '600 13px ' + SANS; ctx.fillText(label, X0 + 12, y + 20);
+        ctx.fillStyle = C.text; ctx.font = '13px ' + MONO; ctx.fillText(arg, X0 + 12 + ctx.measureText(label).width + 16, y + 20);
       } };
     }
     function code() {
-      var h = CODE.length * 27 + 44;
+      var h = CODE.length * 21 + 38, w = X1 - X0;
       return { h: h, draw: function (y) {
-        ctx.fillStyle = C.code; rr(X0, y, 760, h, 14); ctx.fill();
+        ctx.fillStyle = C.code; rr(X0, y, w, h, 10); ctx.fill();
         ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-        ctx.fillStyle = C.faint; ctx.font = '600 14px ' + SANS; ctx.fillText('sync.ts', X0 + 20, y + 26);
-        ctx.font = '18px ' + MONO;
+        ctx.fillStyle = C.faint; ctx.font = '600 12px ' + SANS; ctx.fillText('sync.ts', X0 + 14, y + 22);
+        ctx.font = '13.5px ' + MONO;
         CODE.forEach(function (ln, i) {
-          var x = X0 + 20, yy = y + 56 + i * 27;
+          var x = X0 + 14, yy = y + 46 + i * 21;
           ctx.fillStyle = '#e8a47e'; ctx.fillText(ln[0], x, yy); x += ctx.measureText(ln[0]).width;
           ctx.fillStyle = ln[1].indexOf(' drain') === 0 ? '#8ec0ff' : '#d9d7cf'; ctx.fillText(ln[1], x, yy); x += ctx.measureText(ln[1]).width;
           ctx.fillStyle = '#d9d7cf'; ctx.fillText(ln[2], x, yy);
@@ -540,15 +551,14 @@
     var longList = shortList.concat([
       userBubble('Log each retry with its attempt number.'),
       asst('Added a debug line in the catch block. It prints the attempt and the wait.'),
-      tool('Edit', 'src/worker/sync.ts   +3 −1'),
+      tool('Edit', 'src/worker/sync.ts  +3 -1'),
       asst('All 14 tests pass. Want a metric for the final failure as well?')
     ]);
     var newBubble = userBubble(DRAFT_TEXT);
-    var GAP = 24;
     function total(list) { var h = 0; list.forEach(function (m) { h += m.h + GAP; }); return h - GAP; }
+    var SCROLL_DIST = Math.min(Math.max(0, total(longList) - (CONV_B - CONV_T)), 340);
 
-    var CONV_T = 116, CONV_B = 584;
-
+    // The Ensemble capsule sits in the title bar over the focused session.
     function capsule(st, t) {
       var mode = 'ready';
       if (st.gesture === 'dictate') mode = st.listening ? 'listen' : 'ready';
@@ -556,11 +566,14 @@
       else if (st.gesture === 'scroll') mode = st.scroll > 0.02 ? 'scroll' : 'ready';
       var label = { ready: 'Ready', listen: 'Listening', hold: 'Hold to send', sent: 'Sent', scroll: 'Scrolling' }[mode];
       var w = { ready: 150, listen: 252, hold: 300, sent: 150, scroll: 190 }[mode], h = 42, x = 640 - w / 2, y = 4;
+      var Q = 0.78;
+      ctx.save();
+      ctx.translate(PX + PW / 2 - 640 * Q, 0); ctx.scale(Q, Q);
       ctx.fillStyle = '#000'; rr(x, y, w, h, 21); ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.2; ctx.stroke();
       var dot = { ready: '#6f6d66', listen: C.orange, hold: C.blue, sent: '#58c27d', scroll: C.blue }[mode];
       ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6, 0, 6.2832); ctx.fill();
-      if (mode === 'listen') { ctx.fillStyle = dot; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6 + 4 * (0.5 + 0.5 * Math.sin(t * 7)), 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
+      if (mode === 'listen') { ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6 + 4 * (0.5 + 0.5 * Math.sin(t * 7)), 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
       ctx.fillStyle = '#fff'; ctx.font = '600 19px ' + SANS; ctx.textBaseline = 'alphabetic';
       ctx.fillText(label, x + 44, y + h / 2 + 7);
       if (mode === 'listen') {
@@ -573,87 +586,92 @@
         var bx = x + 168, bw = 112;
         ctx.fillStyle = 'rgba(255,255,255,0.16)'; rr(bx, y + h / 2 - 4, bw, 8, 4); ctx.fill();
         ctx.fillStyle = C.blue; rr(bx, y + h / 2 - 4, Math.max(8, bw * st.hold), 8, 4); ctx.fill();
-      } else if (mode === 'sent') {
-        ctx.strokeStyle = dot; ctx.lineWidth = 0;
       }
+      ctx.restore();
     }
 
-    function draw(st, name, t) {
-      var ev = eventsFor(name);
-      ctx.setTransform(S, 0, 0, S, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
-      // menu bar
-      ctx.fillStyle = '#121110'; ctx.fillRect(0, 0, W, 30);
-      ctx.fillStyle = C.dim; ctx.font = '600 15px ' + SANS; ctx.fillText('Claude', 22, 21);
-      ctx.font = '15px ' + SANS; ctx.fillStyle = C.faint;
-      ['File', 'Edit', 'View', 'Window', 'Help'].forEach(function (m, i) { ctx.fillText(m, 100 + i * 62, 21); });
-      ctx.textAlign = 'right'; ctx.fillText('Tue 9:41', W - 22, 21); ctx.textAlign = 'left';
-      // sidebar
-      ctx.fillStyle = C.side; ctx.fillRect(0, 30, 232, H - 30);
-      [['#ff5f57', 0], ['#febc2e', 1], ['#28c840', 2]].forEach(function (d) { ctx.fillStyle = d[0]; ctx.beginPath(); ctx.arc(24 + d[1] * 22, 56, 6, 0, 6.2832); ctx.fill(); });
-      ctx.fillStyle = C.text; ctx.font = '600 18px ' + SANS; ctx.fillText('Code', 22, 106);
-      ctx.fillStyle = C.faint; ctx.font = '600 13px ' + SANS; ctx.fillText('SESSIONS', 22, 146);
-      var sess = [['ensemble-tour', 1], ['billing-fix', 0], ['docs-cleanup', 0], ['eval-harness', 0]];
-      sess.forEach(function (s, i) {
-        var y = 160 + i * 52;
-        if (s[1]) { ctx.fillStyle = '#2b2a28'; rr(10, y, 212, 44, 10); ctx.fill(); }
-        ctx.fillStyle = s[1] ? C.orange : '#4b4a45'; ctx.beginPath(); ctx.arc(30, y + 22, 5, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = s[1] ? C.text : C.dim; ctx.font = '17px ' + SANS; ctx.fillText(s[0], 46, y + 28);
+    // ---- skeleton sessions: grey bars, no text ----
+    var SKEL = [
+      ['u:0.6', 'a:3', 'c', 'a:2', 'u:0.45'],
+      null,
+      ['a:3', 'u:0.7', 'a:2', 'c', 'a:3'],
+      ['u:0.5', 'a:2', 'a:3', 'u:0.65', 'a:2']
+    ];
+    function skeleton(p, variant) {
+      var x = p.x, y = PANE_Y, w = p.w, h = PANE_H;
+      ctx.fillStyle = C.pane; rr(x, y, w, h, 12); ctx.fill();
+      ctx.fillStyle = C.bone; rr(x + 14, y + 20, w * 0.42, 9, 4.5); ctx.fill();
+      ctx.fillStyle = C.bone2; rr(x + w - 14 - w * 0.2, y + 20, w * 0.2, 9, 4.5); ctx.fill();
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y + 50); ctx.lineTo(x + w, y + 50); ctx.stroke();
+      var yy = y + 70;
+      SKEL[variant].forEach(function (it) {
+        var kind = it.charAt(0), arg = parseFloat(it.slice(2));
+        if (kind === 'u') {
+          var bw = (w - 28) * arg;
+          ctx.fillStyle = C.bone; rr(x + w - 14 - bw, yy, bw, 30, 11); ctx.fill(); yy += 48;
+        } else if (kind === 'a') {
+          ctx.fillStyle = C.bone2;
+          for (var i = 0; i < arg; i++) { rr(x + 14, yy + i * 15, (w - 28) * (i === arg - 1 ? 0.55 : 0.92), 8, 4); ctx.fill(); }
+          yy += arg * 15 + 18;
+        } else {
+          ctx.fillStyle = '#1b1a19'; rr(x + 14, yy, w - 28, 84, 9); ctx.fill();
+          ctx.fillStyle = C.bone2;
+          for (var j = 0; j < 4; j++) { rr(x + 26, yy + 16 + j * 16, (w - 52) * (0.4 + 0.5 * ((j * 5 % 4) / 4)), 7, 3.5); ctx.fill(); }
+          yy += 102;
+        }
       });
-      // main pane
-      var PX = 246, PY = 42, PW = W - PX - 10, PH = H - PY - 10;
-      ctx.fillStyle = C.pane; rr(PX, PY, PW, PH, 16); ctx.fill();
-      // header
-      ctx.fillStyle = C.text; ctx.font = '600 21px ' + SANS; ctx.fillText('ensemble-tour', PX + 30, PY + 46);
-      ctx.fillStyle = '#34332f'; rr(PX + 190, PY + 26, 192, 32, 16); ctx.fill();
-      ctx.fillStyle = C.dim; ctx.font = '15px ' + MONO; ctx.fillText('feature/onboarding', PX + 206, PY + 48);
-      ctx.fillStyle = C.faint; ctx.font = '16px ' + SANS; ctx.textAlign = 'right'; ctx.fillText('Local  ·  Opus', PX + PW - 28, PY + 46); ctx.textAlign = 'left';
-      ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PX, PY + 74); ctx.lineTo(PX + PW, PY + 74); ctx.stroke();
+      ctx.fillStyle = '#30302d'; rr(x + 10, y + h - 14 - 62, w - 20, 62, 14); ctx.fill();
+      ctx.fillStyle = C.bone; rr(x + 24, y + h - 14 - 62 + 18, (w - 20) * 0.45, 8, 4); ctx.fill();
+      ctx.fillStyle = C.bone; ctx.beginPath(); ctx.arc(x + w - 28, y + h - 14 - 31, 12, 0, 6.2832); ctx.fill();
+    }
+
+    function focused(st, name, t) {
+      var ev = eventsFor(name);
+      ctx.fillStyle = C.pane; rr(PX, PY, PW, PH, 12); ctx.fill();
+      ctx.fillStyle = C.text; ctx.font = '600 17px ' + SANS; ctx.fillText('ensemble-tour', PX + 20, PY + 34);
+      ctx.fillStyle = '#34332f'; rr(PX + 148, PY + 16, 156, 26, 13); ctx.fill();
+      ctx.fillStyle = C.dim; ctx.font = '12px ' + MONO; ctx.fillText('feature/onboarding', PX + 162, PY + 34);
+      ctx.fillStyle = C.faint; ctx.font = '13px ' + SANS; ctx.textAlign = 'right'; ctx.fillText('Opus', PX + PW - 20, PY + 34); ctx.textAlign = 'left';
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PX, PY + 50); ctx.lineTo(PX + PW, PY + 50); ctx.stroke();
 
       // conversation (clipped)
       ctx.save();
-      ctx.beginPath(); ctx.rect(PX + 4, CONV_T - 8, PW - 8, CONV_B - CONV_T + 8); ctx.clip();
-      var list, y0;
-      var sendK = 0, sendA = 0, push = 0;
+      ctx.beginPath(); ctx.rect(PX + 2, CONV_T - 6, PW - 4, CONV_B - CONV_T + 6); ctx.clip();
+      var list, y0, sendK = 0, push = 0, showNew = false;
       if (name === 'scroll') {
         list = longList;
-        var maxS = Math.max(0, total(list) - (CONV_B - CONV_T));
-        y0 = CONV_T - Math.min(maxS, 250) * st.scroll;
+        y0 = CONV_T - SCROLL_DIST * st.scroll;
       } else {
         list = shortList;
-        var showNew = name === 'send' && t >= ev.sentAt;
+        showNew = name === 'send' && t >= ev.sentAt;
         if (showNew) {
           sendK = sstep((t - ev.sentAt) / 0.55);
           push = sendK * (newBubble.h + GAP) * (1 - sstep((t - ev.pushOff) / 0.5));
         }
         y0 = CONV_B - total(list) - push;
-        if (name === 'send' && showNew) sendA = 1;
       }
       var y = y0;
       list.forEach(function (m) { m.draw(y); y += m.h + GAP; });
-      if (name === 'send' && sendA) {
+      if (showNew) {
         // the draft travels up from the message box to the end of the conversation
         var finalY = CONV_B - newBubble.h;
-        var startY = 640 - newBubble.h / 2;
+        var startY = CY0 + 38 - newBubble.h / 2;
         var yy = startY + (finalY - startY) * sendK;
         var fade = t > ev.fadeAt ? 1 - sstep((t - ev.fadeAt) / 0.4) : 1;
         ctx.restore(); ctx.save();
-        ctx.beginPath(); ctx.rect(PX + 4, CONV_T - 8, PW - 8, 700); ctx.clip();
+        ctx.beginPath(); ctx.rect(PX + 2, CONV_T - 6, PW - 4, PH); ctx.clip();
         newBubble.draw(yy, fade);
       }
       ctx.restore();
 
       // composer
-      var CX0 = PX + 30, CY0 = 596, CW = PW - 60, CH = 100;
-      ctx.fillStyle = '#30302d'; rr(CX0, CY0, CW, CH, 18); ctx.fill();
-      ctx.strokeStyle = '#4a4944'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#30302d'; rr(CX0, CY0, CW, CH, 16); ctx.fill();
+      ctx.strokeStyle = '#4a4944'; ctx.lineWidth = 1.2; ctx.stroke();
       var text = '', caret = false, textA = 1;
       if (name === 'dictate') {
         var words = DRAFT_TEXT.split(' '), n = Math.round(st.draft * words.length);
         text = words.slice(0, n).join(' ');
-        // words clear at the loop end so the cycle restarts empty
-        if (t > ev.clearAt) text = '';
+        if (t > ev.clearAt) text = '';   // the words clear at the loop end so the cycle restarts empty
         caret = st.listening && Math.floor(t * 2.4) % 2 === 0;
       } else if (name === 'send') {
         if (t < ev.sentAt || t > ev.textBack) text = DRAFT_TEXT;
@@ -661,52 +679,40 @@
       }
       ctx.font = F; ctx.textBaseline = 'alphabetic';
       if (text) {
-        ctx.globalAlpha = textA; ctx.fillStyle = C.text; ctx.fillText(text, CX0 + 26, CY0 + 44); ctx.globalAlpha = 1;
-        if (caret) { var cw = ctx.measureText(text).width; ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 28 + cw, CY0 + 24, 2.5, 26); }
+        ctx.globalAlpha = textA; ctx.fillStyle = C.text; ctx.fillText(text, CX0 + 20, CY0 + 38); ctx.globalAlpha = 1;
+        if (caret) { var cw = ctx.measureText(text).width; ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 22 + cw, CY0 + 21, 2, 22); }
       } else {
-        if (caret) { ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 28, CY0 + 24, 2.5, 26); }
-        ctx.fillStyle = C.faint; ctx.fillText(caret || st.listening ? '' : 'Reply to Claude…', CX0 + 26, CY0 + 44);
+        if (caret) { ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 22, CY0 + 21, 2, 22); }
+        ctx.fillStyle = C.faint; ctx.fillText(caret || st.listening ? '' : 'Reply to Claude...', CX0 + 20, CY0 + 38);
       }
-      ctx.fillStyle = C.faint; ctx.font = '16px ' + SANS; ctx.fillText('Plan mode   ·   Opus   ·   Auto-accept off', CX0 + 26, CY0 + 82);
-      var sendOn = !!text;
-      ctx.fillStyle = sendOn ? C.orange : '#4a4944'; ctx.beginPath(); ctx.arc(CX0 + CW - 38, CY0 + CH / 2, 21, 0, 6.2832); ctx.fill();
-      ctx.strokeStyle = '#1f1e1d'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
-      ctx.moveTo(CX0 + CW - 38, CY0 + CH / 2 + 8); ctx.lineTo(CX0 + CW - 38, CY0 + CH / 2 - 8);
-      ctx.moveTo(CX0 + CW - 46, CY0 + CH / 2 - 1); ctx.lineTo(CX0 + CW - 38, CY0 + CH / 2 - 9); ctx.lineTo(CX0 + CW - 30, CY0 + CH / 2 - 1); ctx.stroke();
-
-      // Ensemble focus: blue outline only, never filled
-      ctx.strokeStyle = C.blue; ctx.lineWidth = 4; rr(PX - 2, PY - 2, PW + 4, PH + 4, 18); ctx.stroke();
-      capsule(st, t);
-      tex.needsUpdate = true;
+      ctx.fillStyle = C.faint; ctx.font = '12.5px ' + SANS; ctx.fillText('Plan mode  ·  Opus  ·  Auto-accept off', CX0 + 20, CY0 + 68);
+      var bx = CX0 + CW - 30, by = CY0 + CH / 2;
+      ctx.fillStyle = text ? C.orange : '#4a4944'; ctx.beginPath(); ctx.arc(bx, by, 17, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = '#1f1e1d'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath();
+      ctx.moveTo(bx, by + 6.5); ctx.lineTo(bx, by - 6.5);
+      ctx.moveTo(bx - 6.5, by - 1); ctx.lineTo(bx, by - 7.5); ctx.lineTo(bx + 6.5, by - 1); ctx.stroke();
     }
-    return { tex: tex, draw: draw, canvas: cv };
-  }
 
-  function buildGestureStage(scene, disposables) {
-    var g = new THREE.Group();
-    scene.add(g);
-    function track(o) { disposables.push(o); return o; }
-    var w = SCR.W, h = SCR.H;
-    var mon = new THREE.Group();
-    mon.position.set(SCR.cx, SCR.cy, SCR.z);
-    g.add(mon);
-    var boxGeo = track(new THREE.BoxGeometry(w + 0.34, h + 0.34, 0.2));
-    mon.add(new THREE.Mesh(boxGeo, track(new THREE.MeshBasicMaterial({ color: 0x0a1018 }))));
-    mon.add(new THREE.LineSegments(track(new THREE.EdgesGeometry(boxGeo)), track(lineMat(0x9db5d8, 1))));
-    var screen = makeScreen();
-    var sm = new THREE.Mesh(track(new THREE.PlaneGeometry(w, h)), track(new THREE.MeshBasicMaterial({ map: screen.tex })));
-    sm.position.z = 0.102;
-    mon.add(sm);
-    disposables.push(screen.tex);
-    var sf = new THREE.Mesh(track(frameGeometry(w + 0.03, h + 0.03, 0.03)), track(new THREE.MeshBasicMaterial({ color: 0x5c7298 })));
-    sf.position.z = 0.104; mon.add(sf);
-    // stand and base, floor level
-    var yb = -SCR.cy + 0.02;
-    var stand = [];
-    [-0.12, 0, 0.12].forEach(function (dx) { stand.push(new THREE.Vector3(dx, -h / 2 - 0.17, -0.12), new THREE.Vector3(dx, yb, -0.3)); });
-    mon.add(new THREE.LineSegments(track(new THREE.BufferGeometry().setFromPoints(stand)), track(lineMat(0x6f84a6, 1))));
-    g.visible = false;
-    return { group: g, screen: screen };
+    function draw(st, name, t) {
+      ctx.setTransform(cssW / FW * dpr, 0, 0, cssW / FW * dpr, 0, 0);
+      ctx.clearRect(0, 0, FW, FH);
+      ctx.fillStyle = C.side; ctx.fillRect(0, 0, FW, FH);
+      // title bar
+      ctx.fillStyle = '#121110'; ctx.fillRect(0, 0, FW, 38);
+      [['#ff5f57', 0], ['#febc2e', 1], ['#28c840', 2]].forEach(function (d) { ctx.fillStyle = d[0]; ctx.beginPath(); ctx.arc(20 + d[1] * 18, 19, 5, 0, 6.2832); ctx.fill(); });
+      ctx.fillStyle = C.dim; ctx.font = '600 13px ' + SANS; ctx.textBaseline = 'alphabetic'; ctx.fillText('Claude', 82, 23);
+      PANES.forEach(function (p, i) { if (!p.focus) skeleton(p, i); });
+      focused(st, name, t);
+      // Ensemble focus: blue outline only, never filled
+      ctx.strokeStyle = C.blue; ctx.lineWidth = 3; rr(PX - 2, PY - 2, PW + 4, PH + 4, 14); ctx.stroke();
+      capsule(st, t);
+    }
+
+    function resize(w, h, ratio) {
+      cssW = w; dpr = ratio;
+      canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio);
+    }
+    return { draw: draw, resize: resize };
   }
 
   // ------------------------------------------------------------------
@@ -1699,9 +1705,10 @@
     var capSrc = opts.capture !== undefined ? opts.capture : (!CAPTURE && window.ENSEMBLE_CAPTURE_DEFAULT) || null;
     if (capSrc) { try { loadCapture(capSrc, opts.captureOptions); } catch (e) { if (window.console) console.warn('[EnsembleScene] capture ignored', e); } }
 
+    var frameMode = !!HAND_SCENES[current];
     var renderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'low-power' });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: frameMode, powerPreference: 'low-power' });
       if (!renderer.getContext()) throw new Error('no context');
     } catch (e) {
       var msg = document.createElement('p');
@@ -1710,22 +1717,40 @@
       container.appendChild(msg);
       return noop();
     }
-    renderer.setClearColor(0x04070c, 1);
-    container.appendChild(renderer.domElement);
+    renderer.setClearColor(0x04070c, frameMode ? 0 : 1);
     renderer.domElement.style.cssText = 'display:block;width:100%;height:100%';
     if (!container.style.position) container.style.position = 'relative';
+    var sizeBox = container, frameView = null, frameCanvas = null, column = null;
+    if (frameMode) {
+      frameCanvas = document.createElement('canvas');
+      frameCanvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:block';
+      frameView = makeFrameView(frameCanvas);
+      // The column: the 3D hand panel on top, an empty half below it for the app's camera panel. Margins, radius and
+      // the 50 / 50 split are mirrored by the app's TourGestureColumn.
+      column = document.createElement('div');
+      column.style.cssText = 'position:absolute;top:0;right:0;bottom:0;width:' + COLUMN * 100 + '%;box-sizing:border-box;padding:8px;display:flex;flex-direction:column;gap:8px;pointer-events:none';
+      var panel = document.createElement('div');
+      panel.style.cssText = 'flex:1 1 0;min-height:0;position:relative;overflow:hidden;border-radius:12px;box-sizing:border-box;border:1px solid rgba(255,255,255,0.12);background:linear-gradient(180deg,rgba(18,30,50,0.86),rgba(4,7,12,0.9))';
+      var spacer = document.createElement('div');
+      spacer.style.cssText = 'flex:1 1 0;min-height:0';
+      panel.appendChild(renderer.domElement);
+      column.appendChild(panel); column.appendChild(spacer);
+      container.appendChild(frameCanvas); container.appendChild(column);
+      sizeBox = panel;
+    } else {
+      container.appendChild(renderer.domElement);
+    }
 
     var scene = new THREE.Scene();
     var disposables = [];
-    var stage = buildStage(scene, disposables);
-    var desk = buildDesk(scene, disposables);
-    var gstage = buildGestureStage(scene, disposables);
+    var stage = frameMode ? null : buildStage(scene, disposables);
+    var desk = frameMode ? null : buildDesk(scene, disposables);
     var camera = new THREE.PerspectiveCamera(40, 1.6, 0.1, 500);
     var hand = null, handLoading = false, handFailed = false;
 
     var CAMS = {
       desk: { pos: new THREE.Vector3(1.2, 3.6, 4.3), look: new THREE.Vector3(-0.25, 1.45, -1.2), fov: 48 },
-      hand: { pos: new THREE.Vector3(1.2, 4.0, 1.4), look: new THREE.Vector3(1.2, 3.3, -9.0), fov: 33 }
+      hand: { pos: new THREE.Vector3(3.35, 3.3, 5.0), look: new THREE.Vector3(3.35, 2.85, -3.2), fov: 43 }
     };
 
     function loadHand() {
@@ -1752,44 +1777,38 @@
     var destroyed = false, raf = null, t0 = performance.now(), frozen = null, frozenDirty = false;
 
     function resize() {
-      var w = container.clientWidth || 640, h = container.clientHeight || 400;
+      var w = sizeBox.clientWidth || 640, h = sizeBox.clientHeight || 400;
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
       renderer.setPixelRatio(dpr);
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      if (frameView) frameView.resize(container.clientWidth || 640, container.clientHeight || 400, dpr);
     }
     resize();
     var ro = null;
-    if (window.ResizeObserver) { ro = new ResizeObserver(resize); ro.observe(container); } else window.addEventListener('resize', resize);
+    if (window.ResizeObserver) { ro = new ResizeObserver(resize); ro.observe(container); if (sizeBox !== container) ro.observe(sizeBox); } else window.addEventListener('resize', resize);
 
     function renderFrame(name, t, drift) {
       var isHand = !!HAND_SCENES[name];
       var c = isHand ? (window.__camHand || CAMS.hand) : (window.__camDesk || CAMS.desk);
       var d = drift ? t : 0;
-      var kind = isHand ? 1 : 0;
       camera.fov = c.fov;
       camera.position.set(c.pos.x + Math.sin(d * 0.35) * 0.18 * (isHand ? 0.7 : 1), c.pos.y + Math.sin(d * 0.27) * 0.06, c.pos.z + Math.cos(d * 0.3) * 0.08);
       camera.lookAt(c.look);
       camera.updateProjectionMatrix();
-      stage.gridMat.uniforms.uCam.value.copy(camera.position);
+      if (stage) stage.gridMat.uniforms.uCam.value.copy(camera.position);
 
       var extra = {};
       if (isHand) {
         loadHand();
-        desk.root.visible = false;
-        gstage.group.visible = true;
-        var gst = stateFor(name, t);
-        gstage.screen.draw(gst, name, t);
+        frameView.draw(stateFor(name, t), name, t);
         if (hand) {
           hand.pivot.visible = true;
           var ctk = capTake(name);
           if (ctk) poseHandCapture(hand, ctk, t, name); else poseHand(hand, handPose(name, t));
         }
       } else {
-        desk.root.visible = true;
-        gstage.group.visible = false;
-        if (hand) hand.pivot.visible = false;
         extra = desk.update(name, t);
       }
       renderer.render(scene, camera);
@@ -1811,8 +1830,9 @@
     if (reduced) { renderNow(); } else { raf = requestAnimationFrame(loop); }
 
     var handle = {
+      canvas: renderer.domElement,
       setScene: function (name) {
-        if (!DURATIONS[name]) return;
+        if (!DURATIONS[name] || !!HAND_SCENES[name] !== frameMode) return;   // the layout is fixed per mount
         current = name; t0 = performance.now(); frozen = null;
         if (HAND_SCENES[name]) loadHand();
         if (reduced) renderNow();
@@ -1824,11 +1844,11 @@
         if (ro) ro.disconnect(); else window.removeEventListener('resize', resize);
         disposables.forEach(function (d) { if (d && d.dispose) d.dispose(); });
         renderer.dispose();
-        if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
+        [renderer.domElement, frameCanvas, column].forEach(function (el) { if (el && el.parentNode) el.parentNode.removeChild(el); });
         if (lastInstance === handle) lastInstance = null;
       },
       _seek: function (name, t) {
-        if (!DURATIONS[name]) name = current;
+        if (!DURATIONS[name] || !!HAND_SCENES[name] !== frameMode) name = current;
         current = name;
         frozen = { name: name, t: t }; frozenDirty = true;
         if (HAND_SCENES[name]) loadHand();

@@ -32,7 +32,7 @@
     try {
       instance = window.EnsembleScene.mount(stage, { scene: current, reducedMotion: reduced, handUrl: 'hand.glb' });
     } catch (e) { post({ failed: 'mount' }); return; }
-    var canvas = stage.querySelector('canvas');
+    var canvas = instance && instance.canvas;
     if (!canvas) { post({ failed: 'webgl' }); return; }
     canvas.addEventListener('webglcontextlost', function (e) { e.preventDefault(); post({ failed: 'webgl' }); });
     post({ ready: true });
