@@ -64,10 +64,16 @@ import Testing
 
     @Test func aRepeatedCameraReportIsNotNews() {
         var f = SetupChangeFilter()
-        #expect(f.cameraReported(id: "cam", name: "Camera"))
-        for _ in 0..<5 { #expect(!f.cameraReported(id: "cam", name: "Camera")) }
-        #expect(f.cameraReported(id: "other", name: "Other"))
-        #expect(f.cameraReported(id: "cam", name: "Camera"))
+        let first = f.cameraReported(id: "cam", name: "Camera")
+        #expect(first)
+        for _ in 0..<5 {
+            let repeated = f.cameraReported(id: "cam", name: "Camera")
+            #expect(!repeated)
+        }
+        let other = f.cameraReported(id: "other", name: "Other")
+        #expect(other)
+        let back = f.cameraReported(id: "cam", name: "Camera")
+        #expect(back)
     }
 
     @Test func aRepeatedEvaluationDoesNotRefit() {
