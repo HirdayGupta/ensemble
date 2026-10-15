@@ -36,6 +36,11 @@ die() { log "error: $*" >&2; exit 1; }
 apple() { if [ "$DRY_RUN" = "1" ]; then log "DRY-RUN: $*"; else "$@"; fi; }
 
 IDENTITY_NAME="${ENSEMBLE_SIGN_IDENTITY:-Ensemble Local Signing}"
+# Same fallback as bundle.sh, so the summary names the identity that actually signed.
+if [ -z "${ENSEMBLE_SIGN_IDENTITY:-}" ] && ! security find-identity -p codesigning 2>/dev/null | grep -qF '"Ensemble Local Signing"' \
+  && security find-identity -p codesigning 2>/dev/null | grep -qF '"Clutch Local Signing"'; then
+  IDENTITY_NAME="Clutch Local Signing"
+fi
 case "$IDENTITY_NAME" in
   "Developer ID Application"*) DISTRIBUTION=1 ;;
   *) DISTRIBUTION=0 ;;

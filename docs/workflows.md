@@ -4,8 +4,7 @@ The three GitHub workflows and what each one guards. Back to the [contributing g
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| ci | Every pull request and push to main | Builds in release mode, runs the unit tests, then the network check and the size check. Keeps the logs as an artifact. |
-| hygiene | Every pull request and push to main | Audits workflows with zizmor, verifies every action is pinned to the commit its version comment names with pinact, scans the whole history for secrets with gitleaks, and runs the website logic tests (`docs/live/test/logic.test.mjs`). |
+| ci | Every pull request and push to main | One workflow, six jobs. `ci` builds in release mode, runs the unit tests, then the network check and the size check, and keeps the logs as an artifact. `hygiene` audits workflows with zizmor, verifies every action is pinned to the commit its version comment names with pinact, and scans the whole history for secrets with gitleaks. `website-tests` runs the website logic tests (`docs/live/test/logic.test.mjs`). `coverage` measures line coverage of `Sources/EnsembleCore`, fails if any line the change adds or edits there is untested (diff-cover against main) or if total coverage falls below `.github/coverage-baseline.json` (`.github/coverage-ratchet.py`). `periphery` fails on unused declarations in EnsembleCore. `gate` waits for the other five and fails unless each succeeded; it is the one check a branch ruleset should require. |
 | Release | A pushed tag named v followed by a version | Builds, tests, signs, notarizes, publishes the disk image and updates the update feed. Stays disabled on the repository until Developer ID signing exists. The steps are in [RELEASING.md](RELEASING.md). |
 
 ## Rules every workflow follows

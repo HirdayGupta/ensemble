@@ -1,5 +1,6 @@
-# Build and test on every pull request and every push to main. `ci` is the one job a branch ruleset should require.
-# Workflow-file hygiene (zizmor, pinact, secrets scan) lives in hygiene.yml.
+# Every check on every pull request and every push to main, in one workflow. `gate` is the one job a branch ruleset
+# should require: it waits for all the others and fails unless each one succeeded, so a skipped or cancelled job
+# cannot read as a pass.
 name: ci
 
 on:
@@ -62,3 +63,155 @@ jobs:
           path: /tmp/ensemble-ci-*.log
           if-no-files-found: ignore
           retention-days: 7
+
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # gitleaks-action reads pull request metadata to report what it finds.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The secrets scan covers the whole history, not the working tree.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The three checks below each run even when an earlier one failed, so one run reports every finding.
+      - name: Audit workflows and dependabot.yml
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+
+      # Every `uses:` must be a full commit SHA, and that SHA must be the commit the trailing version comment names.
+      # fix "false" only checks; it never rewrites a workflow file or pushes.
+      - name: Verify actions are pinned
+        if: ${{ !cancelled() }}
+        uses: suzuki-shunsuke/pinact-action@896d595f299e71d65b9d28349d6956abe144390a # v3.0.0
+        with:
+          fix: "false"
+          verify: "true"
+          skip_push: "true"
+
+      - name: Secrets scan
+        if: ${{ !cancelled() }}
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  website-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Website logic tests
+        run: node --test docs/live/test/logic.test.mjs
+
+  # Line coverage of EnsembleCore only: the app target needs a camera and Accessibility, so it is not measured. Every
+  # line this change adds or edits under Sources/EnsembleCore must be covered, and the total may not fall below the
+  # recorded baseline.
+  coverage:
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # diff-cover compares against origin/main, so it needs the history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tests with coverage
+        run: swift test --enable-code-coverage
+
+      - name: Export EnsembleCore line coverage
+        run: |
+          codecov_json=$(swift test --show-codecov-path)
+          profdata="$(dirname "$codecov_json")/default.profdata"
+          bin_path=$(swift build --show-bin-path)
+          test_binary=$(find "$bin_path" -path '*.xctest/Contents/MacOS/*' -type f | head -n 1)
+          echo "profdata: $profdata"
+          echo "test binary: $test_binary"
+          xcrun llvm-cov export -format=lcov -instr-profile "$profdata" "$test_binary" > "$RUNNER_TEMP/all.lcov"
+          # Keep only the EnsembleCore records, with paths relative to the repository root.
+          awk -v root="$PWD/" '
+            /^SF:/ {
+              keep = index($0, "/Sources/EnsembleCore/") > 0
+              if (index($0, "SF:" root) == 1) $0 = "SF:" substr($0, length(root) + 4)
+            }
+            keep { print }
+            /^end_of_record/ { keep = 0 }
+          ' "$RUNNER_TEMP/all.lcov" > coverage.lcov
+          grep -c '^SF:' coverage.lcov
+
+      - name: Install diff-cover
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -r .github/requirements-ci.txt
+
+      - name: Every changed EnsembleCore line is covered
+        run: |
+          "$RUNNER_TEMP/venv/bin/diff-cover" coverage.lcov --compare-branch=origin/main --fail-under=100
+
+      - name: Total coverage has not fallen
+        run: python3 .github/coverage-ratchet.py EnsembleCore coverage.lcov
+
+  # Declarations in EnsembleCore that nothing uses. Public API is retained, because the app target is the consumer.
+  periphery:
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A pinned release, checked against its published digest, rather than whatever a package manager serves today.
+      - name: Install Periphery
+        env:
+          PERIPHERY_VERSION: "3.8.0"
+          PERIPHERY_SHA256: "07d4e286e31dd79164df39097e0b59f533c94badbe18158464a455ea88a166d7"
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/periphery.zip" "https://github.com/peripheryapp/periphery/releases/download/${PERIPHERY_VERSION}/periphery-${PERIPHERY_VERSION}.zip"
+          echo "${PERIPHERY_SHA256}  $RUNNER_TEMP/periphery.zip" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/periphery"
+          unzip -q "$RUNNER_TEMP/periphery.zip" -d "$RUNNER_TEMP/periphery"
+          "$RUNNER_TEMP/periphery/periphery" version
+
+      - name: Scan EnsembleCore
+        run: |
+          "$RUNNER_TEMP/periphery/periphery" scan --strict --retain-public --exclude-targets Ensemble --report-include "Sources/EnsembleCore/**"
+
+  # The one required check. It runs even when a job it needs failed, was skipped or was cancelled, and fails unless
+  # every one of them succeeded.
+  gate:
+    if: ${{ always() }}
+    needs: [ci, hygiene, website-tests, coverage, periphery]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
