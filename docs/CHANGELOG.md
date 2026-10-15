@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- Pointing follows your nose when you slide along the desk: Ensemble reads where your head is as well as which way it points, so the screen you aim at stays the one you aim at without recalibrating. It is on by default and can be switched off in Settings, Display, "Correct for where I sit". Calibrations saved before this version keep pointing by angle until you recalibrate.
 - A five-step tour opens on first launch (look, calibrate, four gestures practised on a 3D hand, permissions), can be skipped at any step, and replays from the menu bar panel, the Option-Command-K panel or Settings. While its gesture step is open, gestures only drive the tour and nothing reaches Claude.
 
 ## 0.1.1
