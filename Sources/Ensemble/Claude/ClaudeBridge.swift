@@ -261,17 +261,45 @@ final class ClaudeBridge: @unchecked Sendable {
         return hits
     }
 
-    /// Index into `mics[i].path` of the highest ancestor (below the web area) whose subtree holds only mic `i`.
+    /// Index into `mics[i].path` of the session's pane. The choice itself is `PaneChoice`; this reads the
+    /// facts it needs (frame, which session parts and whether the sidebar each ancestor holds) in one walk.
     static func paneIndex(for i: Int, among mics: [MicHit]) -> Int? {
         let me = mics[i]
         let lowest = (me.roles.lastIndex(of: "AXWebArea") ?? 0) + 1
         let micIndex = me.path.count - 1
         guard lowest < micIndex else { return nil }
-        for k in lowest..<micIndex {
-            let sharing = mics.filter { $0.path.count > k && CFEqual($0.path[k], me.path[k]) }.count
-            if sharing == 1 { return k }
+        let ks = Array(lowest..<micIndex)
+        let found = ownParts(under: me.path, from: lowest)
+        let ancestors = ks.map { k -> PaneAncestor in
+            PaneAncestor(frame: AX.frame(me.path[k]) ?? .zero,
+                         hasHeader: found.header >= k, hasTranscript: found.transcript >= k,
+                         hasComposer: found.composer >= k, hasSidebar: found.sidebar >= k,
+                         otherMics: mics.filter { $0.path.count > k && CFEqual($0.path[k], me.path[k]) }.count - 1)
         }
-        return micIndex - 1
+        return PaneChoice.index(among: ancestors).map { ks[$0] }
+    }
+
+    /// For each page part, the deepest index on `path` whose subtree holds it (-1 when not found).
+    private static func ownParts(under path: [AXUIElement], from lowest: Int, maxNodes: Int = 12_000)
+        -> (header: Int, transcript: Int, composer: Int, sidebar: Int) {
+        var r = (header: -1, transcript: -1, composer: -1, sidebar: -1)
+        var count = 0
+        func go(_ el: AXUIElement, _ shared: Int, _ depth: Int) {
+            count += 1
+            if count > maxNodes || depth > 70 { return }
+            var shared = shared
+            if shared + 1 < path.count, CFEqual(el, path[shared + 1]) { shared += 1 }
+            let v = AX.multi(el, walkAttrs)
+            let role = (v[0] as? String) ?? ""
+            let desc = v[1] as? String
+            if desc == ClaudeLabels.transcript { r.transcript = max(r.transcript, shared); return }
+            if desc == ClaudeLabels.sidebar { r.sidebar = max(r.sidebar, shared) }
+            if role == "AXButton", let desc, desc.hasSuffix(ClaudeLabels.renameSuffix) { r.header = max(r.header, shared) }
+            if role == "AXTextArea", desc == ClaudeLabels.composer { r.composer = max(r.composer, shared) }
+            for c in (v[3] as? [AXUIElement]) ?? [] { go(c, shared, depth + 1) }
+        }
+        go(path[lowest], lowest, 0)
+        return r
     }
 
     struct PaneScan {

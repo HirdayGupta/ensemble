@@ -4,6 +4,8 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+
+- With one chat session open in Claude, the highlight, focus and edge warnings cover just that session, not the whole window with its top bar and left navigation. Two or more sessions side by side are unchanged.
 - Calibrate puts its full-screen window up at once, even when Ensemble was off or the camera is still starting; it says what it is waiting for ("Starting the camera...", "Looking for your face...") and shows the first dot only after a face reading arrives. The log records the time from click to window and from click to first face reading.
 - A calibration dot is captured only when your head has turned toward it and holds still for 0.4 s; the ring does not fill before that. The text reads "Turn your nose to the dot", then "Move your head, not just your eyes" after 4 s, and after 12 s offers Skip this point or Retry (a skipped point leaves that screen uncalibrated).
 - Calibration opens with "Found 2 screens", listing each screen's name, size, orientation and place in the display arrangement and the order they will be calibrated in, on every screen at once; each step names its screen ("Screen 2 of 2 - DELL U2723QE - turn to face it"). The menu bar panel says "Calibrated for 2 screens".
