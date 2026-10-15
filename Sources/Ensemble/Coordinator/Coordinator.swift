@@ -487,10 +487,12 @@ final class Coordinator: AppCoordinating {
     private func updateHandsBusy(now: TimeInterval) {
         handsBusy.quiet = settings.pauseAfterInputSeconds
         let input = ClaudeBridge.lastHardwareInput(now: now)
+        let ownPointerAt = HandsBusy.ownPointerAt(drags: ClaudeBridge.ownPointerEventsNow(),
+                                                  ownScrollAt: ClaudeBridge.ownPointerMove.withLock { $0 }, now: now)
         let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
                                     pointer: NSEvent.mouseLocation,
                                     ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
-                                    ownPointerAt: ClaudeBridge.ownPointerMove.withLock { $0 })
+                                    ownPointerAt: ownPointerAt)
         ctx.overlay.setHandsOnInput(busy)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
@@ -503,6 +505,7 @@ final class Coordinator: AppCoordinating {
         if busy {
             focus.clearDeferred()
             scroll.cancel()
+            panes.cancel()
             if send.earlyArmed { send.dropEarly() }
             if send.afterStop, !send.returnSendPending { send.afterStop = false }
             ctx.gestureShowing = false

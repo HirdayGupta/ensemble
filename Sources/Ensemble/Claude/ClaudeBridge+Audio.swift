@@ -139,6 +139,12 @@ extension ClaudeBridge {
     private static let ownPointerLock = NSLock()
     nonisolated(unsafe) private static var ownPointerEvents = OwnPointerEvents()
 
+    /// Ensemble's own press windows so far, for `HandsBusy`.
+    static func ownPointerEventsNow() -> OwnPointerEvents {
+        ownPointerLock.lock(); defer { ownPointerLock.unlock() }
+        return ownPointerEvents
+    }
+
     /// Ensemble starts or ends posting its own mouse presses; see `OwnPointerEvents`.
     static func ownPointerEvents(began: Bool) {
         let now = CACurrentMediaTime()

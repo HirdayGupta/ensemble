@@ -49,6 +49,13 @@ public struct HandsBusy: Equatable {
 
     public func isPaused(at now: TimeInterval) -> Bool { now - lastInputAt < quiet }
 
+    /// The `ownPointerAt` to feed `update`: while one of Ensemble's divider drags runs (`OwnPointerEvents`) the
+    /// pointer is Ensemble's, else when its own scroll last moved it. Its posted presses never reach the hardware
+    /// state the clicks are read from, so a real click during a drag still counts.
+    public static func ownPointerAt(drags: OwnPointerEvents, ownScrollAt: TimeInterval, now: TimeInterval) -> TimeInterval {
+        drags.isOwn(now) ? now : ownScrollAt
+    }
+
     private mutating func note(_ t: TimeInterval) {
         if t.isFinite, t > lastInputAt { lastInputAt = t }
     }

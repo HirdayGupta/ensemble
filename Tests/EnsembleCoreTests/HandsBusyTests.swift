@@ -97,4 +97,21 @@ import Testing
         #expect(read(&s, 10, key: 9.5))
         #expect(!read(&s, 11.6, key: 9.5))
     }
+
+    @Test func ensemblesOwnDividerDragIsNotUse() {
+        var own = OwnPointerEvents()
+        own.begin(at: 10)
+        // Mid-drag the pointer Ensemble is moving is not yours, even when it lands as movement.
+        let during = HandsBusy.ownPointerAt(drags: own, ownScrollAt: never, now: 10.2)
+        #expect(during == 10.2)
+        var s = HandsBusy()
+        _ = read(&s, 10)
+        #expect(!read(&s, 10.2, move: 10.19, at: CGPoint(x: 800, y: 400), ownPointer: during))
+        // A real click during the drag still counts.
+        var t = HandsBusy()
+        #expect(read(&t, 10.25, click: 10.24, ownPointer: HandsBusy.ownPointerAt(drags: own, ownScrollAt: never, now: 10.25)))
+        own.end(at: 10.5)
+        // After the drag, the last own scroll is what counts again.
+        #expect(HandsBusy.ownPointerAt(drags: own, ownScrollAt: 9, now: 11) == 9)
+    }
 }
