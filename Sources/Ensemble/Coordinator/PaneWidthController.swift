@@ -37,8 +37,10 @@ final class PaneWidthController {
     /// Frames are read again after this many keys while a glide runs.
     private static let refreshEvery = 6
 
-    /// Claude's chat column, as last measured from a pane wide enough to show it.
+    /// Claude's chat column, as measured reliably from a pane wide enough to show it.
     private var column = ChatColumn.Memory()
+    /// Which panes recent fits widened and narrowed, so one glance never undoes the last fit.
+    private var hold = SessionFit.Hold()
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
@@ -53,6 +55,8 @@ final class PaneWidthController {
         guard let target else { ctx.refuse("Look at a Claude session first", title: what, resolves: .whenOnSession); return }
         if let why = blocker() { ctx.refuse(why, title: what); return }
         begin()
+        // A layout you asked for replaces whatever earlier fits were holding.
+        hold.reset()
         EnsembleLog.write("pane widths: \(maximize ? "maximize" : "even out") around \(place(of: target))")
         Task { @MainActor in
             let outcome = await self.run(target: target) { widths, k, minimum, _ in
@@ -66,10 +70,16 @@ final class PaneWidthController {
 
     /// Focus has settled on `target`: widen it to Claude's chat column if it is narrower, taking the width equally
     /// from the other panes in its row. Silent: it is not something you asked for, so it never shows a refusal;
-    /// anything in the way (a dictation, a send, your hands on the keyboard or mouse, another app in front) skips it.
-    func autoFit(_ target: ClaudeSession) {
+    /// anything in the way (a dictation, a send, your hands on the keyboard or mouse, another app in front) skips it,
+    /// and so do the fit hold (`SessionFit.Hold`: a pane a recent fit narrowed, a fit that would undo a recent one)
+    /// and the seconds after a calibration (`calibratedAt`, when one last ran).
+    func autoFit(_ target: ClaudeSession, calibratedAt: TimeInterval) {
         guard !isRunning else { return }
         if let why = ctx.commonRefusal() ?? blocker() { EnsembleLog.write("pane widths: no fit (\(why))"); return }
+        if let why = hold.refusal(target.id, now: CACurrentMediaTime(), calibratedAt: calibratedAt) {
+            EnsembleLog.write("pane widths: no fit of \(place(of: target)) (\(why))")
+            return
+        }
         if ClaudeBridge.secondsSincePhysicalInput() < CoordinatorContext.inputQuiet {
             EnsembleLog.write("pane widths: no fit (the keyboard or mouse is in use)")
             return
@@ -79,13 +89,32 @@ final class PaneWidthController {
         begin()
         Task { @MainActor in
             let readings = await self.ctx.bridge.chatColumns(in: row)
-            self.column.note(row.map { readings[$0.id]?.column })
+            self.column.note(row.map { readings[$0.id]?.column }, panes: row.map { Double($0.frame.width) })
             let column = self.column.width
-            let outcome = await self.run(target: target) { widths, k, minimum, frames in
-                let want = ChatColumn.paneWidth(column: column, pane: frames[k], transcript: readings[target.id]?.transcript)
-                return SessionFit.widths(current: widths, focus: k, width: want, minimum: max(PaneWidths.narrowWidth, minimum))
+            var fit: (ids: [String], from: [Double], to: [Double], k: Int)?
+            var heldBack = false
+            let outcome = await self.run(target: target) { widths, k, minimum, row in
+                let want = ChatColumn.paneWidth(column: column, pane: row[k].frame, transcript: readings[target.id]?.transcript)
+                let ids = row.map(\.id)
+                let floors = self.hold.floors(ids, focus: k, now: CACurrentMediaTime())
+                guard let planned = SessionFit.widths(current: widths, focus: k, width: want,
+                                                      minimum: max(PaneWidths.narrowWidth, minimum), floors: floors) else { return nil }
+                guard SessionFit.Hold.allows(planned: planned, focus: k, width: want, floors: floors) else {
+                    heldBack = true
+                    return nil
+                }
+                if fit == nil { fit = (ids, widths, planned, k) }
+                return planned
             }
             await self.end(target)
+            if case .done(let n) = outcome, n > 0, let f = fit {
+                let narrowed = f.ids.indices.filter { $0 != f.k && f.to[$0] < f.from[$0] - PaneWidths.tolerance }.map { f.ids[$0] }
+                self.hold.noteFit(target.id, width: f.to[f.k], narrowed: narrowed, at: CACurrentMediaTime())
+            }
+            if heldBack {
+                EnsembleLog.write("pane widths: no fit of \(self.place(of: target)) (it would undo a recent fit)")
+                return
+            }
             if case .done(presses: 0) = outcome { return }
             EnsembleLog.write("pane widths: fit \(self.place(of: target)) to the chat column "
                               + "(\(Int(column)) pt, \(self.column.measured == nil ? "default" : "measured")): \(outcome)")
@@ -128,8 +157,8 @@ final class PaneWidthController {
     }
 
     /// Plans and presses toward the widths `goal` asks for. `goal` gets the row's pane widths, the target's index,
-    /// Claude's minimum pane width and the panes' frames, and answers nil when there is nothing to do.
-    private func run(target: ClaudeSession, goal: ([Double], Int, Double, [CGRect]) -> [Double]?) async -> Outcome {
+    /// Claude's minimum pane width and the row's sessions, and answers nil when there is nothing to do.
+    private func run(target: ClaudeSession, goal: ([Double], Int, Double, [ClaudeSession]) -> [Double]?) async -> Outcome {
         var total = 0
         for pass in 0..<Self.passes {
             let sessions = await ctx.bridge.refreshSessions().sessions
@@ -147,7 +176,7 @@ final class PaneWidthController {
             let widths = PaneWidths.layout(panes: row.map(\.frame), dividers: xs).widths
             let pairs = (0..<(widths.count - 1)).map { widths[$0] + widths[$0 + 1] }
             let minimum = PaneKeys.minimum(pairWidths: pairs, minPercents: dividers.map(\.minPercent))
-            guard let want = goal(widths, k, minimum, row.map(\.frame)) else { return .done(presses: total) }
+            guard let want = goal(widths, k, minimum, row) else { return .done(presses: total) }
             let presses = PaneKeys.plan(from: widths, to: want, minimum: minimum)
             guard !presses.isEmpty else { return .done(presses: total) }
             EnsembleLog.write("pane widths: pass \(pass + 1), \(presses.count) keys, "

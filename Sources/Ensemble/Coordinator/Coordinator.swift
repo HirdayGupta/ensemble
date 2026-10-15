@@ -22,6 +22,8 @@ final class Coordinator: AppCoordinating {
     private var returnKeys = ReturnKeys()
     /// Fits the focused session to Claude's chat column once focus has settled on it; see `fitFocusedSession`.
     private var fitTrigger = SessionFit.Trigger()
+    /// The last tick a calibration was running: no fit for a few seconds after it (`SessionFit.Hold`).
+    private var lastCalibratingAt: TimeInterval = -.infinity
     /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
     private var handsBusy = HandsBusy()
     /// The last key the Return watch held back from Claude: your command to Ensemble, not typing.
@@ -476,11 +478,12 @@ final class Coordinator: AppCoordinating {
     /// focus change. Never while away, paused for the keyboard or mouse, in the tour, dictating, sending, mid-gesture
     /// or mid-resize; the controller adds the checks every action on Claude makes (Claude in front, no recent input).
     private func fitFocusedSession(now: TimeInterval) {
+        if state.calibrating { lastCalibratingAt = now }
         guard let id = fitTrigger.observe(focus.target?.id, at: now), let target = focus.target, target.id == id else { return }
         guard settings.fitFocusedSession, health.running, !awayState.isAway, !ctx.handsBusy, !tourOpen, practiceSink == nil,
               ctx.listening == nil, !ctx.busy, !send.inFlight, !send.afterStop, !send.earlyArmed,
               gestures.progress == nil, !panes.isRunning, !focus.userLeftClaude else { return }
-        panes.autoFit(target)
+        panes.autoFit(target, calibratedAt: lastCalibratingAt)
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized
