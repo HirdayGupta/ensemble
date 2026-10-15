@@ -18,6 +18,7 @@ final class SettingsStore: ObservableObject {
         static let warnWhenLeavingClaude = "warnWhenLeavingClaude"
         static let playSounds = "playSounds"
         static let pauseMediaWhileDictating = "pauseMediaWhileDictating"
+        static let headphonePresses = "headphonePresses"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
@@ -53,6 +54,8 @@ final class SettingsStore: ObservableObject {
     }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: Key.playSounds) } }
     @Published var pauseMediaWhileDictating: Bool { didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMediaWhileDictating) } }
+    /// Stem presses on Bluetooth headphones drive dictation and send. On by default.
+    @Published var headphonePresses: Bool { didSet { defaults.set(headphonePresses, forKey: Key.headphonePresses) } }
     /// Set only through `setLaunchAtLogin`, which talks to the system first.
     @Published private(set) var launchAtLogin: Bool
     @Published var launchAtLoginError: String?
@@ -82,6 +85,7 @@ final class SettingsStore: ObservableObject {
         cameraName = store.string(forKey: Key.cameraName)
         playSounds = bool(Key.playSounds, true)
         pauseMediaWhileDictating = bool(Key.pauseMediaWhileDictating, true)
+        headphonePresses = bool(Key.headphonePresses, true)
         LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)

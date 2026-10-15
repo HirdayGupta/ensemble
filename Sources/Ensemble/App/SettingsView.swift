@@ -88,6 +88,11 @@ private struct GestureSettings: View {
                 Text("While dictating, the edge you are looking toward glows amber if what lies beyond it is not a Claude session. Looking toward another Claude session is always shown.")
             }
             Section {
+                Toggle("Headphone presses", isOn: $settings.headphonePresses)
+            } footer: {
+                Text("One press starts or stops dictation in the session you look at. Two presses send.")
+            }
+            Section {
                 GestureRow(slot: .cancel, pose: settings.mapping.cancel) {
                     Text(settings.mapping.cancel.title).foregroundStyle(.secondary)
                 }
