@@ -42,7 +42,7 @@ Look elsewhere when:
 - You use an Intel Mac or a macOS older than 14.2.
 - You use Claude in a browser, since Ensemble drives the desktop app only.
 
-It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, grant Camera and Accessibility, and choose Calibrate from the menu bar icon.
+It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, grant Camera and Accessibility, and choose Calibrate from the menu bar icon. Ensemble remembers a calibration for each camera and screen, so changing your desk asks only for what is new: a restored setup shows a short notice, a new screen asks to calibrate just that screen (about 11 seconds) while your other screens keep working, and a new camera asks for a full calibration before looking and dictation resume. Answer with the button or a held thumbs-up, or choose Later to keep working without it.
 
 ## How it compares
 
@@ -55,7 +55,7 @@ It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your 
 
 ## Security and limits
 
-No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility, and for the microphone only if you turn on the optional live sound bars.
+No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility, and for the microphone only if you turn on the optional live sound bars, which also let Ensemble hold a session switch back while you are speaking.
 
 - Never stores or sends a camera frame.
 - Never records what you dictate or what is on your screen: it presses Claude's buttons and logs events and numbers only.

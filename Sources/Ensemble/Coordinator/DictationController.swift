@@ -34,7 +34,11 @@ final class DictationController {
         self.focus = focus
         self.send = send
         safety = DictationSafety(bridge: ctx.bridge)
-        meter.onLevel = { [weak self] v in self?.ctx.overlay.setAudioLevel(v) }
+        meter.onLevel = { [weak self] v in
+            guard let self else { return }
+            self.ctx.overlay.setAudioLevel(v)
+            if self.meter.isRunning { self.ctx.speech.note(level: v, at: CACurrentMediaTime()) } else { self.ctx.speech.meterStopped() }
+        }
         ctx.overlay.setLiveSoundBars(ctx.settings.liveSoundBars)
         ctx.settings.$liveSoundBars.dropFirst().sink { [weak self] on in
             guard let self else { return }

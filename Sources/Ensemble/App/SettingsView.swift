@@ -83,6 +83,11 @@ private struct GestureSettings: View {
                 Text("Each gesture can only do one thing. Picking one that is in use swaps it with the other action.")
             }
             Section {
+                Toggle("Warn when my look leaves Claude", isOn: $settings.warnWhenLeavingClaude)
+            } footer: {
+                Text("While dictating, the edge you are looking toward glows amber if what lies beyond it is not a Claude session. Looking toward another Claude session is always shown.")
+            }
+            Section {
                 Toggle("Headphone presses", isOn: $settings.headphonePresses)
             } footer: {
                 Text("One press starts or stops dictation in the session you look at. Two presses send.")

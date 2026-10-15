@@ -15,8 +15,12 @@ final class CoordinatorContext {
     let gestures = GestureMachine()
     let cover = CoverDetector()
     let pointer = NosePointer()
+    /// Created lazily: it needs `self` fully formed first (it reads settings, the pointer and the overlay back).
+    lazy var setup = SetupController(ctx: self)
 
     var latestHead: HeadObservation?
+    /// Whether the person is speaking, from the level meter; never active while the meter is not running.
+    var speech = SpeechLock()
     var sessions: [ClaudeSession] = []
     /// The session being dictated into, from the press until the stop is confirmed.
     var listening: ClaudeSession?
@@ -39,13 +43,15 @@ final class CoordinatorContext {
         self.overlay = overlay
     }
 
-    /// The calibration is usable only on the screen arrangement it was made on.
+    /// True while the pointer is fit and at least one connected screen has usable samples for the camera
+    /// in use. A screen with no samples (or whose frame moved) is simply not among them: pointing and
+    /// dictation still work on the screens that are, while that one screen is treated as uncalibrated.
     var calibratedHere: Bool {
         guard pointer.isCalibrated else { return false }
-        // Read on every camera frame; the screen arrangement only changes in screensChanged, so cache briefly.
+        // Read on every camera frame; the setup only changes in setup.screensChanged/cameraInUse, so cache briefly.
         let now = CACurrentMediaTime()
         if let c = calibratedCache, now - c.at < 1 { return c.value }
-        let value = settings.calibrationDisplays == ScreenFacts.displayFingerprint()
+        let value = !setup.validScreenIDs.isEmpty
         calibratedCache = (value, now)
         return value
     }
