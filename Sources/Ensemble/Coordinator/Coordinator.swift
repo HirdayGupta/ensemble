@@ -305,7 +305,8 @@ final class Coordinator: AppCoordinating {
                 guard let self, self.health.running, self.health.cameraFailed else { return nil }
                 return self.health.cameraAllowed ? "The camera did not start: \(self.health.failure ?? "no reading")" : "Calibration needs Camera permission"
             })
-        CalibrationController.shared.run(screens: plan.screens, note: plan.note, feed: feed, clickedAt: clickedAt) { [weak self] results in
+        CalibrationController.shared.run(screens: plan.screens, note: plan.note, firstDotFrom: plan.firstDotFrom, feed: feed,
+                                         clickedAt: clickedAt) { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
             EnsembleLog.write("calibration samples: \(results.map(\.samples.count))")
@@ -318,9 +319,16 @@ final class Coordinator: AppCoordinating {
                 self.ctx.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
                 return
             }
-            let ok = self.ctx.setup.storeCalibration(results, purpose: plan.purpose)
-            if !ok { self.ctx.refuse("Calibration did not fit; try again sitting where you normally work") }
-            else if let failure { self.ctx.refuse(failure) }
+            switch self.ctx.setup.storeCalibration(results, purpose: plan.purpose) {
+            case .saved:
+                if let failure { self.ctx.refuse(failure) }
+            case .didNotFit:
+                self.ctx.refuse("Calibration did not fit; try again sitting where you normally work")
+            case .repeats(let screen, let other):
+                let setup = self.ctx.setup
+                self.ctx.refuse("Not saved: the points on \(setup.name(ofScreenID: screen)) matched where you look at \(setup.name(ofScreenID: other)). "
+                                + "Follow the dot on \(setup.name(ofScreenID: screen)), or recalibrate every screen if the camera moved")
+            }
             self.health.update()
         }
         // Calibration owns the hands and the head: end any dictation first, because
