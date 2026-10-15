@@ -13,6 +13,7 @@ final class Coordinator: AppCoordinating {
     private let focus: FocusController
     private let dot: DotPlacement
     private let scroll: ScrollController
+    private let panes: PaneWidthController
     private let send: SendController
     private let dictation: DictationController
     private let headphone: HeadphoneRemote
@@ -48,7 +49,7 @@ final class Coordinator: AppCoordinating {
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
     var isBusy: Bool {
-        ctx.busy || ctx.listening != nil || send.afterStop || send.inFlight || gestures.progress != nil
+        ctx.busy || ctx.listening != nil || send.afterStop || send.inFlight || gestures.progress != nil || panes.isRunning
     }
 
     init(state: AppState, settings: SettingsStore, overlay: OverlayController) {
@@ -58,12 +59,14 @@ final class Coordinator: AppCoordinating {
         focus = FocusController(ctx: ctx)
         dot = DotPlacement(ctx: ctx)
         scroll = ScrollController(ctx: ctx)
+        panes = PaneWidthController(ctx: ctx)
         send = SendController(ctx: ctx)
         dictation = DictationController(ctx: ctx, focus: focus, send: send)
         headphone = HeadphoneRemote(settingOn: { [weak settings] in (settings?.headphonePresses ?? false) && (settings?.enabled ?? false) },
                                     claudeRunning: { [weak ctx] in ctx?.bridge.claudeIsRunning() ?? false })
         headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
+        panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
         dictation.stopResolved = { [weak self] confirmed in self?.stopResolved(confirmed: confirmed) }
@@ -88,9 +91,13 @@ final class Coordinator: AppCoordinating {
         gestures.mapping = settings.mapping
         ctx.pointer.setSmoothing(settings.pointerSmoothing)
         gestures.sendHold = settings.sendCountdownSeconds
+        gestures.maximizeByPeace = settings.maximizeByPeace
+        gestures.evenOutByScissors = settings.evenOutByScissors
 
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
         settings.$sendCountdownSeconds.dropFirst().sink { [weak self] v in self?.gestures.sendHold = v }.store(in: &cancellables)
+        settings.$maximizeByPeace.dropFirst().sink { [weak self] on in self?.gestures.maximizeByPeace = on }.store(in: &cancellables)
+        settings.$evenOutByScissors.dropFirst().sink { [weak self] on in self?.gestures.evenOutByScissors = on }.store(in: &cancellables)
         settings.$correctForPosition.dropFirst().sink { [weak self] on in self?.ctx.pointer.correctsForPosition = on }.store(in: &cancellables)
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.ctx.pointer.setSmoothing(k) }.store(in: &cancellables)
         settings.$enabled.removeDuplicates().dropFirst().sink { [weak self] on in
@@ -462,6 +469,7 @@ final class Coordinator: AppCoordinating {
     private var needsFullRate: Bool {
         ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating
             || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil || practiceSink != nil
+            || gestures.peaceOpen || panes.isRunning
     }
 
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
@@ -519,6 +527,8 @@ final class Coordinator: AppCoordinating {
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
         case .dragScrollEnded: scroll.released()
         case .dragScroll(let handDy): scroll.drag(handDy: handDy, target: focus.target)
+        case .maximizeSession: panes.request(true, target: focus.target)
+        case .evenOutSessions: panes.request(false, target: focus.target)
         }
     }
 
@@ -604,6 +614,7 @@ final class Coordinator: AppCoordinating {
         returnKeys.reset()
         send.forget()
         scroll.cancel()
+        panes.cancel()
         gestures.reset()
         guard ctx.listening != nil else { pushOverlay(); return }
         if ctx.busy {
