@@ -17,9 +17,12 @@ final class FloatingPanelController {
     func show() {
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        let host = NSHostingView(rootView: makeContent())
-        panel.contentView = host
-        let size = host.fittingSize
+        // A hosting controller that reports its content's size, so the window follows the panel opening the screen
+        // arrangement and closing it again (FloatingPanel keeps the top edge where it is).
+        let host = NSHostingController(rootView: makeContent())
+        host.sizingOptions = [.preferredContentSize]
+        panel.contentViewController = host
+        let size = host.view.fittingSize
         panel.setContentSize(size)
 
         let mouse = NSEvent.mouseLocation
@@ -32,7 +35,7 @@ final class FloatingPanelController {
 
     func hide() {
         panel?.orderOut(nil)
-        panel?.contentView = nil
+        panel?.contentViewController = nil
     }
 
     private func makePanel() -> FloatingPanel {
@@ -58,6 +61,14 @@ private final class FloatingPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// A size change alone (the content grew or shrank) keeps the top edge in place, so the panel opens downward
+    /// from where it hangs instead of growing up off the screen.
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        var rect = frameRect
+        if isVisible, rect.height != frame.height, rect.minY == frame.minY { rect.origin.y = frame.maxY - rect.height }
+        super.setFrame(rect, display: flag)
+    }
 
     override func resignKey() {
         super.resignKey()

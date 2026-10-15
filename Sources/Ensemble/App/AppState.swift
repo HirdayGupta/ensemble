@@ -31,10 +31,21 @@ struct CalibrationSpotSummary: Identifiable, Equatable {
     let detail: String
 }
 
-/// A connected screen, as the screen picker lists it: "DELL U2723QE, left".
-struct ScreenChoice: Identifiable, Hashable {
+/// A connected screen, as Settings and the panel's screen arrangement show it.
+struct ScreenChoice: Identifiable, Equatable {
     let id: String
+    /// "DELL U2723QE, left" with several screens, the bare name with one.
     let name: String
+    /// The name macOS gives the screen (`NSScreen.localizedName`).
+    let displayName: String
+    /// Global, top-left origin: where the screen sits in the arrangement.
+    let frame: CGRect
+    /// The screen with the menu bar (the first in `NSScreen.screens`).
+    let isMain: Bool
+    /// Its calibration is usable now (not a new or moved screen).
+    let calibrated: Bool
+    /// When each saved position last calibrated this screen, by position id.
+    let calibratedAt: [String: Date]
 }
 
 /// Read by the UI, written by the coordinator. Screen-space values are global, top-left origin.
@@ -46,6 +57,8 @@ final class AppState: ObservableObject {
     @Published var listening = false
     @Published var muted = false
     @Published var fps = 0
+    /// The refresh rate of the screen the nose dot is on: the dot window moves once per refresh.
+    @Published var dotRate = 0
     @Published var cameraName: String?
     @Published var cameraNames: [String] = []
     @Published var calibrating = false

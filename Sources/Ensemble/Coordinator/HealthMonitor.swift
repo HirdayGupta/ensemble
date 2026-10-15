@@ -42,6 +42,7 @@ final class HealthMonitor {
         case .running(let fps, let camera, let cameraID):
             cameraProblem = nil
             ctx.state.set(\.fps, fps)
+            ctx.state.set(\.dotRate, ctx.overlay.dotRefreshRate)
             ctx.state.set(\.cameraName, camera)
             ctx.setup.cameraInUse(id: cameraID, name: camera)
         case .permissionDenied:

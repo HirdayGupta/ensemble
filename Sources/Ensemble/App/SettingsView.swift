@@ -222,6 +222,26 @@ private struct CalibrationSettings: View {
 
     var body: some View {
         Form {
+            if !state.screenChoices.isEmpty {
+                Section {
+                    ScreenArrangementView(screens: state.screenChoices, spotInUse: state.spotInUse, calibrating: state.calibrating,
+                                          width: 440, maxHeight: 150, recalibrate: { calibrate(.screen($0)) })
+                        .padding(.vertical, 4)
+                    ForEach(state.screenChoices) { screen in
+                        HStack {
+                            Label(screen.name, systemImage: screen.isMain ? "menubar.rectangle" : "display")
+                            Spacer(minLength: 8)
+                            Text(ScreenArrangementView.calibrationLabel(screen, spotInUse: state.spotInUse)).font(.caption).foregroundStyle(screen.calibrated ? Color.secondary : Color.orange)
+                            Button("Recalibrate") { calibrate(.screen(screen.id)) }
+                                .disabled(state.calibrating)
+                        }
+                    }
+                } header: {
+                    Text("Screens")
+                } footer: {
+                    Text("Arranged as macOS has them. Click a screen, or its Recalibrate button, to redo only that one; the others keep theirs.")
+                }
+            }
             Section {
                 LabeledContent("Last calibrated") {
                     if let date = settings.calibratedAt {
@@ -235,26 +255,6 @@ private struct CalibrationSettings: View {
                     .ensembleButtonStyle(prominent: true)
             } footer: {
                 Text("A dot visits five points on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera.")
-            }
-            if !state.screenChoices.isEmpty {
-                Section {
-                    ForEach(state.screenChoices) { screen in
-                        HStack {
-                            Label(screen.name, systemImage: "display")
-                            Spacer(minLength: 8)
-                            if state.screenChoices.count > 1 {
-                                Button("Recalibrate") { calibrate(.screen(screen.id)) }
-                                    .disabled(state.calibrating)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Screens")
-                } footer: {
-                    if state.screenChoices.count > 1 {
-                        Text("Recalibrate one screen to redo only that one; the others keep theirs.")
-                    }
-                }
             }
             Section {
                 ForEach(state.calibrationSpots) { spot in

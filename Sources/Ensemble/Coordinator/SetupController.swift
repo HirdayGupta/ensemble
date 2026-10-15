@@ -116,6 +116,8 @@ final class SetupController {
     /// That report then confirms it (the same camera and screens change nothing) or replaces it. False when there
     /// is nothing saved that fits the screens connected now.
     func restoreAtLaunch() -> Bool {
+        // The screen arrangement in Settings and the panel shows from launch, before the camera reports.
+        defer { publish() }
         guard let id = ctx.settings.lastCameraID, let profile = profiles.profile(forCameraID: id),
               case .ready(_, let valid, _, _) = SetupEvaluator.evaluate(
                 profiles: profiles, cameraID: id, cameraName: profile.cameraName, previousCameraName: nil, screens: currentScreens()),
@@ -400,10 +402,17 @@ final class SetupController {
         ctx.state.set(\.spotInUse, spotInUseID)
         let all = NSScreen.screens
         let descriptions = all.enumerated().map { ScreenDescription(name: $0.element.localizedName, frame: ScreenGeometry.topLeftFrame(of: $0.element), isMain: $0.offset == 0) }
+        let spots = profile?.spots ?? []
         let choices = all.enumerated().compactMap { index, screen -> ScreenChoice? in
             guard let id = ScreenGeometry.stableID(of: screen) else { return nil }
             let place = ScreenLayout.position(of: descriptions[index], among: descriptions)
-            return ScreenChoice(id: id, name: all.count > 1 ? "\(screen.localizedName), \(place)" : screen.localizedName)
+            var dates: [String: Date] = [:]
+            for spot in spots {
+                if let screenCalibration = spot.screens.first(where: { $0.screenID == id }) { dates[spot.id] = screenCalibration.calibratedAt }
+            }
+            return ScreenChoice(id: id, name: all.count > 1 ? "\(screen.localizedName), \(place)" : screen.localizedName,
+                                displayName: screen.localizedName, frame: descriptions[index].frame, isMain: index == 0,
+                                calibrated: validScreenIDs.contains(id), calibratedAt: dates)
         }
         ctx.state.set(\.screenChoices, choices)
     }

@@ -173,4 +173,73 @@ import Testing
         #expect(ScreenLayout.calibratedLine(valid: 1, connected: 2) == "Calibrated for 1 of 2 screens")
         #expect(ScreenLayout.calibratedLine(valid: 0, connected: 2) == nil)
     }
+
+    /// The owner's desk on 2026-10-15: a 2560 by 1440 main screen and the same model turned portrait to its left,
+    /// 734 points higher. The drawing keeps both relative sizes and the offset, at one scale.
+    @Test func fitKeepsTheArrangementAtOneScale() {
+        let main = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let left = CGRect(x: -1440, y: -734, width: 1440, height: 2560)
+        let (rects, size) = ScreenLayout.fit([main, left], width: 400, maxHeight: 200)
+        #expect(rects.count == 2)
+        let scale = 200.0 / 2560.0   // the height binds: 4000 by 2560 into 400 by 200
+        #expect(abs(size.width - 4000 * scale) < 0.001)
+        #expect(abs(size.height - 200) < 0.001)
+        #expect(abs(rects[1].minX) < 0.001 && abs(rects[1].minY) < 0.001)
+        #expect(abs(rects[0].minX - 1440 * scale) < 0.001)
+        #expect(abs(rects[0].minY - 734 * scale) < 0.001)
+        #expect(abs(rects[0].width / rects[0].height - 2560.0 / 1440.0) < 0.001)
+        #expect(abs(rects[1].width / rects[0].width - 1440.0 / 2560.0) < 0.001)
+    }
+
+    @Test func fitBindsOnWidthForAWideRow() {
+        let (rects, size) = ScreenLayout.fit([CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)],
+                                             width: 300, maxHeight: 300)
+        #expect(abs(size.width - 300) < 0.001)
+        #expect(abs(size.height - 300 * 1080 / 3840) < 0.001)
+        #expect(abs(rects[1].minX - 150) < 0.001)
+    }
+
+    @Test func fitOfNothingIsEmpty() {
+        #expect(ScreenLayout.fit([], width: 300, maxHeight: 100).rects.isEmpty)
+        #expect(ScreenLayout.fit([CGRect(x: 0, y: 0, width: 0, height: 0)], width: 300, maxHeight: 100).size == .zero)
+        #expect(ScreenLayout.fit([CGRect(x: .nan, y: 0, width: 10, height: 10)], width: 300, maxHeight: 100).rects.isEmpty)
+    }
+
+    @Test func calibrationStates() {
+        #expect(ScreenLayout.calibrationState(valid: true, calibratedOn: "Oct 15") == "Calibrated Oct 15")
+        #expect(ScreenLayout.calibrationState(valid: true, calibratedOn: nil) == "Calibrated")
+        #expect(ScreenLayout.calibrationState(valid: false, calibratedOn: "Oct 15") == "Not calibrated")
+    }
+
+    @Test func cameraLineNamesBothRates() {
+        #expect(ScreenLayout.cameraLine(name: "HD Pro Webcam C920", running: true, cameraFPS: 30, dotHz: 75)
+                == "HD Pro Webcam C920 \u{00B7} camera 30 fps \u{00B7} dot 75 Hz")
+        #expect(ScreenLayout.cameraLine(name: "HD Pro Webcam C920", running: true, cameraFPS: 30, dotHz: 0)
+                == "HD Pro Webcam C920 \u{00B7} camera 30 fps")
+        #expect(ScreenLayout.cameraLine(name: "HD Pro Webcam C920", running: false, cameraFPS: 30, dotHz: 75) == "HD Pro Webcam C920")
+        #expect(ScreenLayout.cameraLine(name: nil, running: true, cameraFPS: 0, dotHz: 60) == "No camera")
+    }
+}
+
+/// The camera on the owner's desk, as AVFoundation lists it (2026-10-15): every format of the Logitech C920 tops
+/// out at 30 frames a second, so nothing faster exists to prefer and capture stays at 640 by 480, 30 fps,
+/// uncompressed.
+@Suite struct C920FormatTests {
+    static let c920: [CameraFormatChoice.Format] = [
+        .init(width: 320, height: 240, maxRate: 30, compressed: false),
+        .init(width: 640, height: 360, maxRate: 30, compressed: true),
+        .init(width: 640, height: 480, maxRate: 30, compressed: false),
+        .init(width: 640, height: 480, maxRate: 30, compressed: true),
+        .init(width: 800, height: 600, maxRate: 24, compressed: false),
+        .init(width: 960, height: 720, maxRate: 15, compressed: false),
+        .init(width: 1280, height: 720, maxRate: 30, compressed: true),
+        .init(width: 1280, height: 720, maxRate: 10, compressed: false),
+        .init(width: 1920, height: 1080, maxRate: 30, compressed: true),
+    ]
+
+    @Test func picksSixFortyByFourEightyUncompressedAtThirty() {
+        let index = CameraFormatChoice.pick(Self.c920)
+        #expect(index == 2)
+        if let index { #expect(CameraFormatChoice.rate(for: Self.c920[index]) == 30) }
+    }
 }
