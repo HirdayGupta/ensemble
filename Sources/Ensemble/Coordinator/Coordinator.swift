@@ -374,6 +374,8 @@ final class Coordinator: AppCoordinating {
     /// begins only on the session the nose is on, with calibration and every common refusal), a double press is the
     /// thumbs-up (the narrow send rules in SendController, unchanged).
     private func apply(headphone action: HeadphoneAction) {
+        // Tour practice promises nothing reaches Claude; a stem press is no exception.
+        guard practiceSink == nil else { return }
         ctx.headphoneUntil = CACurrentMediaTime() + 5
         ctx.overlay.clearBanner()
         switch action {
