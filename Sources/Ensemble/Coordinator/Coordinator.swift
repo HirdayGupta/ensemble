@@ -20,6 +20,8 @@ final class Coordinator: AppCoordinating {
     /// Return while dictating: the first press stops, a second sends. See `handleKey`.
     private let keyTap = ReturnKeyTap()
     private var returnKeys = ReturnKeys()
+    /// Fits the focused session to Claude's chat column once focus has settled on it; see `fitFocusedSession`.
+    private var fitTrigger = SessionFit.Trigger()
     /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
     private var handsBusy = HandsBusy()
     /// The last key the Return watch held back from Claude: your command to Ensemble, not typing.
@@ -452,6 +454,7 @@ final class Coordinator: AppCoordinating {
         }
         dictation.supervise(now: now)
         refreshDictatingFrame(now: now)
+        fitFocusedSession(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
         if send.earlyHoldPending { send.earlyObserve(holding: gestures.holdingSend) }
         if state.lastRefusal != nil {
@@ -460,6 +463,17 @@ final class Coordinator: AppCoordinating {
         }
         keyTap.setActive(health.running && (ctx.listening != nil || claudeDictatingHere
                                             || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
+    }
+
+    /// Focus that has rested on one session for `SessionFit.settle` widens it to Claude's chat column, once per
+    /// focus change. Never while away, paused for the keyboard or mouse, in the tour, dictating, sending, mid-gesture
+    /// or mid-resize; the controller adds the checks every action on Claude makes (Claude in front, no recent input).
+    private func fitFocusedSession(now: TimeInterval) {
+        guard let id = fitTrigger.observe(focus.target?.id, at: now), let target = focus.target, target.id == id else { return }
+        guard settings.fitFocusedSession, health.running, !awayState.isAway, !ctx.handsBusy, !tourOpen, practiceSink == nil,
+              ctx.listening == nil, !ctx.busy, !send.inFlight, !send.afterStop, !send.earlyArmed,
+              gestures.progress == nil, !panes.isRunning, !focus.userLeftClaude else { return }
+        panes.autoFit(target)
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized

@@ -2,7 +2,8 @@ import AppKit
 import EnsembleCore
 
 /// Peace sign and scissors: resizes the session panes of the Claude window you are facing by dragging the
-/// dividers between them, one divider at a time, each along the app's one smooth curve.
+/// dividers between them, one divider at a time, each along the app's one smooth curve. Focus settling on a pane
+/// narrower than Claude's chat column widens it to the column the same way (`autoFit`), unless Settings turns it off.
 ///
 /// A drag is a synthetic left-button press, moves and release on the divider, posted through the session event
 /// tap like scrolling. The pointer goes to the divider for the drag and is put back exactly where it was after the
@@ -23,6 +24,9 @@ final class PaneWidthController {
     /// More drags than any row needs (two passes over a row of five), so a layout Claude refuses cannot loop.
     private static let maxDrags = 8
     private static let frameRate = 60.0
+
+    /// Claude's chat column, as last measured from a pane wide enough to show it.
+    private var column = ChatColumn.Memory()
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
@@ -45,9 +49,46 @@ final class PaneWidthController {
                 if self.posted, let saved { CGWarpMouseCursorPosition(saved) }
                 self.isRunning = false
             }
-            let outcome = await self.run(maximize: maximize, target: target)
+            let outcome = await self.run(target: target) { _, _, k in maximize ? .maximize(k) : .evenOut }
             EnsembleLog.write("pane widths: \(outcome)")
             if let refusal = outcome.refusal { self.ctx.refuse(refusal, title: what) }
+        }
+    }
+
+    /// Focus has settled on `target`: widen it to Claude's chat column if it is narrower, taking the width equally
+    /// from the other panes in its row. Silent: it is not something you asked for, so it never shows a refusal;
+    /// anything in the way (a dictation, a send, your hands on the keyboard or mouse, another app in front) skips it.
+    func autoFit(_ target: ClaudeSession) {
+        guard !isRunning else { return }
+        if let why = ctx.commonRefusal() ?? blocker() { EnsembleLog.write("pane widths: no fit (\(why))"); return }
+        if ClaudeBridge.secondsSincePhysicalInput() < CoordinatorContext.inputQuiet {
+            EnsembleLog.write("pane widths: no fit (the keyboard or mouse is in use)")
+            return
+        }
+        let row = PaneWidths.row(of: target, in: ctx.sessions)
+        guard row.count >= 2 else { return }
+        isRunning = true
+        cancelled = false
+        posted = false
+        startedAt = CACurrentMediaTime()
+        let saved = CGEvent(source: nil)?.location
+        Task { @MainActor in
+            defer {
+                if self.posted, let saved { CGWarpMouseCursorPosition(saved) }
+                self.isRunning = false
+            }
+            let readings = await self.ctx.bridge.chatColumns(in: row)
+            self.column.note(row.map { readings[$0.id]?.column })
+            let column = self.column.width
+            let outcome = await self.run(target: target) { frames, dividers, k in
+                let pane = frames[k]
+                let want = ChatColumn.paneWidth(column: column, pane: pane, transcript: readings[target.id]?.transcript)
+                let widths = PaneWidths.layout(panes: frames, dividers: dividers).widths
+                return SessionFit.widths(current: widths, focus: k, width: want).map { .widths($0) }
+            }
+            if case .done(drags: 0) = outcome { return }
+            EnsembleLog.write("pane widths: fit \(self.ctx.name(of: target)) to the chat column "
+                              + "(\(Int(column)) pt, \(self.column.measured == nil ? "default" : "measured")): \(outcome)")
         }
     }
 
@@ -65,9 +106,13 @@ final class PaneWidthController {
         }
     }
 
-    private func run(maximize: Bool, target: ClaudeSession) async -> Outcome {
+    /// Drags dividers until the planner's goal is met. `plan` is asked once, with the row's pane frames, its
+    /// dividers and the target's index, before the first drag; nil means there is nothing to do.
+    private func run(target: ClaudeSession,
+                     plan: ([CGRect], [Double], Int) -> PaneWidths.Goal?) async -> Outcome {
         var stuck = Set<Int>()
         var last: (divider: Int, fromX: Double)?
+        var goal: PaneWidths.Goal?
         for drags in 0...Self.maxDrags {
             let sessions = await ctx.bridge.refreshSessions().sessions
             if !sessions.isEmpty { ctx.sessions = sessions; ctx.changed() }
@@ -81,7 +126,8 @@ final class PaneWidthController {
             }
             // A divider that did not follow its last drag has met Claude's own minimum width: leave it there.
             if let l = last, abs(dividers[l.divider] - l.fromX) < 2 { stuck.insert(l.divider) }
-            let goal: PaneWidths.Goal = maximize ? .maximize(k) : .evenOut
+            if goal == nil { goal = plan(row.map(\.frame), dividers, k) }
+            guard let goal else { return .done(drags: 0) }
             guard let move = PaneWidths.nextMove(panes: row.map(\.frame), dividers: dividers, goal: goal, stuck: stuck) else {
                 return .done(drags: drags)
             }
@@ -98,6 +144,7 @@ final class PaneWidthController {
     private func blocker() -> String? {
         if !ctx.settings.enabled { return "Ensemble is off" }
         if !ctx.bridge.claudeIsFrontmost() { return "Claude is not in front" }
+        if ctx.handsBusy { return "Paused while you type or use the mouse" }
         if ctx.listening != nil || ctx.busy { return "Dictation is starting or stopping" }
         if sendBusy() { return "A send is in progress" }
         if cancelled { return "interrupted" }

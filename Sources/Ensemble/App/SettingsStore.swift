@@ -23,6 +23,7 @@ final class SettingsStore: ObservableObject {
         static let headphonePresses = "headphonePresses"
         static let maximizeByPeace = "maximizeByPeace"
         static let evenOutByScissors = "evenOutByScissors"
+        static let fitFocusedSession = "fitFocusedSession"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
@@ -79,6 +80,8 @@ final class SettingsStore: ObservableObject {
     @Published var maximizeByPeace: Bool { didSet { defaults.set(maximizeByPeace, forKey: Key.maximizeByPeace) } }
     /// Scissors (a peace sign closed quickly) gives every session in that window an equal share. On by default.
     @Published var evenOutByScissors: Bool { didSet { defaults.set(evenOutByScissors, forKey: Key.evenOutByScissors) } }
+    /// The session focus settles on widens to Claude's chat column when it is narrower. On by default.
+    @Published var fitFocusedSession: Bool { didSet { defaults.set(fitFocusedSession, forKey: Key.fitFocusedSession) } }
     /// Set only through `setLaunchAtLogin`, which talks to the system first.
     @Published private(set) var launchAtLogin: Bool
     @Published var launchAtLoginError: String?
@@ -120,6 +123,7 @@ final class SettingsStore: ObservableObject {
         headphonePresses = bool(Key.headphonePresses, true)
         maximizeByPeace = bool(Key.maximizeByPeace, true)
         evenOutByScissors = bool(Key.evenOutByScissors, true)
+        fitFocusedSession = bool(Key.fitFocusedSession, true)
         LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
