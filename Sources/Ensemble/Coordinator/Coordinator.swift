@@ -24,6 +24,9 @@ final class Coordinator: AppCoordinating {
     private var fitTrigger = SessionFit.Trigger()
     /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
     private var handsBusy = HandsBusy()
+    private var pausedSince: TimeInterval = 0
+    /// The face runs at the planner's slow rate; kept so each change is logged once.
+    private var faceSlow = false
     /// The last key the Return watch held back from Claude: your command to Ensemble, not typing.
     private var lastHeldBackKeyAt: TimeInterval = -.infinity
     private var state: AppState { ctx.state }
@@ -445,9 +448,9 @@ final class Coordinator: AppCoordinating {
         for intent in gestures.tick(now: CACurrentMediaTime()) {
             if let sink = practiceSink { sink.tourPractice(intent: intent) } else if !tourOpen { apply(intent) }
         }
-        engine.setForceFullRate(needsFullRate)
-        scroll.tick()
         let now = CACurrentMediaTime()
+        updateFaceRate(now: now)
+        scroll.tick()
         if now - lastAwayCheck >= 0.5 {
             lastAwayCheck = now
             if ctx.listening != nil ? !ctx.busy : scroll.isRunning, ScreenFacts.sessionAway() { interrupt("screen locked") }
@@ -512,6 +515,7 @@ final class Coordinator: AppCoordinating {
                                     ownPointerAt: ownPointerAt, ownFocusAt: focus.lastOwnFocusAt)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
+        if busy { pausedSince = now }
         EnsembleLog.write(busy ? "paused: keyboard or mouse in use (\(handsBusy.lastInputKind?.rawValue ?? "input"))" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
         // Gestures are deliberate and keep working through a pause (a hand raised from the keyboard to pinch would
         // otherwise land inside the quiet time and do nothing): the pause only holds focus, the highlight and resizes.
@@ -532,6 +536,21 @@ final class Coordinator: AppCoordinating {
     private var actingThroughPause: Bool {
         ctx.busy || ctx.headphoneActive || send.inFlight || send.afterStop || send.earlyArmed || gestures.pinchHeld
             || gestures.progress != nil || gestures.peaceOpen || scroll.isActive || scroll.isCoasting
+    }
+
+    /// The face runs at 10 Hz while nothing follows the nose closely (`FrameRatePlanner.wantsSlowFace`) and at full rate
+    /// again on the next tick once that ends or a gesture, dictation or send needs every frame.
+    private func updateFaceRate(now: TimeInterval) {
+        let full = needsFullRate
+        engine.setForceFullRate(full)
+        let slow = FrameRatePlanner.wantsSlowFace(needsFull: full, tourOpen: tourOpen, otherAppInFront: focus.userLeftClaude,
+                                                  sessionsOnScreen: !ctx.sessions.isEmpty,
+                                                  pausedFor: ctx.handsBusy ? now - pausedSince : nil)
+        engine.setSlowFace(slow)
+        guard slow != faceSlow else { return }
+        faceSlow = slow
+        let why = focus.userLeftClaude ? "another app in front" : ctx.sessions.isEmpty ? "no Claude session on screen" : "paused for the keyboard or mouse"
+        EnsembleLog.write(slow ? "face tracking at 10 Hz (\(why))" : "face tracking at full rate")
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.

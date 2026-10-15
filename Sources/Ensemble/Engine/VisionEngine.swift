@@ -41,7 +41,7 @@ final class VisionEngine {
     private let handNote = OSAllocatedUnfairLock<(present: Bool, t: TimeInterval)?>(initialState: nil)
     /// Owned by the camera queue. Decides which analyses run on each frame.
     nonisolated(unsafe) private var planner = FrameRatePlanner()
-    private struct RateHints { var forceFull = false; var lastFaceSeenAt: TimeInterval? }
+    private struct RateHints { var forceFull = false; var slowFace = false; var lastFaceSeenAt: TimeInterval? }
     private let hints = OSAllocatedUnfairLock(initialState: RateHints())
     nonisolated(unsafe) private var generation = 0
     nonisolated(unsafe) private var cameraLabel = ""
@@ -113,6 +113,9 @@ final class VisionEngine {
 
     /// True while something needs every hand frame (dictating, a send pending, calibrating, a gesture held).
     func setForceFullRate(_ on: Bool) { hints.withLock { if $0.forceFull != on { $0.forceFull = on } } }
+
+    /// True while the face may run at the planner's slow rate (`FrameRatePlanner.wantsSlowFace`).
+    func setSlowFace(_ on: Bool) { hints.withLock { if $0.slowFace != on { $0.slowFace = on } } }
 
     /// A camera (re)appeared. In automatic mode, a camera the owner would now be picked over the one running
     /// (an external camera just plugged in, say) restarts the session onto it.
@@ -228,7 +231,7 @@ final class VisionEngine {
             planner.noteHand(present: note.present, at: note.t)
         }
         let hint = hints.withLock { $0 }
-        let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt)
+        let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt, slowFace: hint.slowFace)
 
         // The face frame goes out first: the nose dot waits on the face tracker.
         if plan.runFace, face.gate.tryEnter(now: t) {
