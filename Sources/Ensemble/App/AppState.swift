@@ -25,6 +25,8 @@ final class AppState: ObservableObject {
     @Published var cameraName: String?
     @Published var cameraNames: [String] = []
     @Published var calibrating = false
+    /// "Calibrated for 2 screens", or nil when none of the connected screens is calibrated.
+    @Published var calibratedLine: String?
 
     /// `@Published` announces a change on every write, even of an equal value; the camera loop writes several
     /// of these on every frame, so those writes go through here and only real changes reach the views.
