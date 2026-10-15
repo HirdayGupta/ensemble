@@ -46,19 +46,41 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// The microphone alarm: the on-screen banner is shown at once and stays until `resolveAlarm`, because the
+    /// system notification depends on a permission the owner may have refused and on Focus, which hides it.
+    func alarm(title: String, body: String) {
+        overlay?.showAlarm(title: title, body: body)
+        guard isAppBundle else { return }
+        let center = UNUserNotificationCenter.current()
+        if !delegateInstalled {
+            center.delegate = self
+            delegateInstalled = true
+        }
+        center.getNotificationSettings { [weak self] current in
+            guard current.authorizationStatus == .authorized || current.authorizationStatus == .provisional else { return }
+            Task { @MainActor in self?.addRequest(title: title, body: body) { _ in } }
+        }
+    }
+
+    func resolveAlarm() { overlay?.resolveAlarm() }
+
     func playCue(_ cue: SoundCue) {
         guard settings?.playSounds ?? true else { return }
         NSSound(named: NSSound.Name(cue.rawValue))?.play()
     }
 
     private func post(title: String, body: String, style: OverlayBanner.Style) {
+        addRequest(title: title, body: body) { [weak self] error in
+            if error != nil { Task { @MainActor in self?.overlay?.showBanner(title: title, body: body, style: style) } }
+        }
+    }
+
+    private func addRequest(title: String, body: String, completion: @escaping @Sendable (Error?) -> Void) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            if error != nil { Task { @MainActor in self?.overlay?.showBanner(title: title, body: body, style: style) } }
-        }
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: completion)
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

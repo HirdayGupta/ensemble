@@ -1,4 +1,9 @@
 import Foundation
+import EnsembleCore
+
+struct LoginAgentError: LocalizedError {
+    var errorDescription: String? { InstallLocation.explanation }
+}
 
 /// Open-at-login as a per-user launchd agent rather than a plain login item: launchd restarts Ensemble if it
 /// crashes (KeepAlive on unsuccessful exit), which is what lets the startup sweep switch off a microphone a
@@ -18,6 +23,11 @@ enum LoginAgent {
     }
 
     /// On only when the agent file points at the copy of Ensemble that is running now.
+    /// Running from the disk image, a translocated path or Downloads: the agent would record a path that goes away.
+    static var runningFromTemporaryLocation: Bool {
+        InstallLocation.isTemporary(bundlePath: Bundle.main.bundlePath, home: NSHomeDirectory())
+    }
+
     static var isEnabled: Bool {
         guard let registered = registeredExecutable else { return false }
         return registered == Bundle.main.executablePath
@@ -27,13 +37,14 @@ enum LoginAgent {
     /// A SwiftPM debug build never takes the file over.
     static func repointIfStale() {
         guard let registered = registeredExecutable, let exe = Bundle.main.executablePath,
-              registered != exe, !exe.contains("/.build/") else { return }
+              registered != exe, !exe.contains("/.build/"), !runningFromTemporaryLocation else { return }
         do { try enable(); EnsembleLog.write("open at login: repointed from \(registered) to \(exe)") }
         catch { EnsembleLog.write("open at login: could not repoint (\(error))") }
     }
 
     /// Writes the agent; it takes effect at the next login (loading it now would start a second copy).
     static func enable() throws {
+        guard !runningFromTemporaryLocation else { throw LoginAgentError() }
         guard let exe = Bundle.main.executablePath else { throw CocoaError(.fileNoSuchFile) }
         let plist: [String: Any] = [
             "Label": label,
