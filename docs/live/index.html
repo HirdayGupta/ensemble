@@ -34,27 +34,37 @@
   </header>
 
   <main class="ls-main">
-    <section class="ls-stage" id="stage" aria-label="Four mock Claude sessions">
-      <!-- panes are built by live.js from content.js -->
-    </section>
-
-    <aside class="ls-sees" aria-label="What Ensemble sees">
-      <h2>What Ensemble sees</h2>
-      <canvas id="sees" width="320" height="240" aria-label="Tracking points drawn on a plain background"></canvas>
-      <dl class="ls-readout">
-        <div><dt>Head</dt><dd id="r-head">off</dd></div>
-        <div><dt>Hand</dt><dd id="r-hand">off</dd></div>
-        <div><dt>Gesture</dt><dd id="r-gesture">none</dd></div>
-        <div><dt>Speed</dt><dd id="r-speed">-</dd></div>
-      </dl>
-      <p class="ls-caption">Only these points are used. The video never leaves this tab and is never shown.</p>
-    </aside>
+    <div class="ls-window" aria-label="A mock Claude desktop window with four Code sessions">
+      <div class="ls-titlebar">
+        <span class="ls-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="ls-wintitle">Claude</span>
+        <span class="ls-wintag">Code</span>
+      </div>
+      <div class="ls-body">
+        <nav class="ls-rail" id="rail" aria-label="Sessions"><!-- built by live.js --></nav>
+        <section class="ls-stage" id="stage" aria-label="Four Claude Code sessions"><!-- panes built by live.js --></section>
+      </div>
+    </div>
   </main>
 
+  <aside class="ls-sees" aria-label="What Ensemble sees">
+    <h2 id="sees-title" role="button" tabindex="0">What Ensemble sees</h2>
+    <canvas id="sees" width="240" height="180" aria-label="Tracking points drawn on a plain background"></canvas>
+    <dl class="ls-readout">
+      <div><dt>Head</dt><dd id="r-head">off</dd></div>
+      <div><dt>Hand</dt><dd id="r-hand">off</dd></div>
+      <div><dt>Gesture</dt><dd id="r-gesture">none</dd></div>
+      <div><dt>Speed</dt><dd id="r-speed">-</dd></div>
+    </dl>
+    <p class="ls-caption">Only these points are used. The video never leaves this tab and is never shown.</p>
+  </aside>
+
   <footer class="ls-coach" id="coach" hidden>
-    <ol class="ls-dots" id="dots" aria-hidden="true"></ol>
+    <ul class="ls-ticks" id="ticks">
+      <li data-k="looked">Looked</li><li data-k="dictated">Dictated</li><li data-k="sent">Sent</li><li data-k="scrolled">Scrolled</li>
+    </ul>
     <p class="ls-prompt" id="prompt" role="status" aria-live="polite"></p>
-    <button type="button" class="ls-btn small ghost" id="skip">Skip</button>
+    <button type="button" class="ls-btn small primary" id="done" hidden>See the download</button>
   </footer>
 
   <section class="ls-gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">

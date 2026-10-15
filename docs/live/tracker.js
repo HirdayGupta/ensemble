@@ -25,6 +25,10 @@ export function unsupportedReason() {
   if (!simd) return 'This browser is too old for the trackers (WebAssembly SIMD is missing).';
   if (typeof DecompressionStream !== 'function') return 'This browser is too old to unpack the trackers (DecompressionStream is missing).';
   if (!window.isSecureContext) return 'Camera access needs a secure page (https).';
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+    if (!gl) return 'WebGL is turned off or missing in this browser, and the trackers need it. Turn on hardware acceleration, or use the mouse instead.';
+  } catch { return 'WebGL is not available in this browser, and the trackers need it.'; }
   if (!navigator.mediaDevices?.getUserMedia) return 'This browser cannot reach a camera.';
   return null;
 }
@@ -49,7 +53,8 @@ export class Trackers {
     this.delegate = null;
     this.face = null; this.hand = null; this.lastFaceTs = 0; this.lastHandTs = 0;
     this.blobUrl = null; this.mp = null; this.buffers = null; this.fileset = null;
-    this.stats = { face: { n: 0, sum: 0, last: 0, max: 0 }, hand: { n: 0, sum: 0, last: 0, max: 0 } };
+    this.stats = { face: { n: 0, sum: 0, last: 0, max: 0, recent: [] }, hand: { n: 0, sum: 0, last: 0, max: 0, recent: [] } };
+    this.warming = false;
   }
 
   /** Downloads and starts both trackers. `onProgress(fraction, label)`; `signal` aborts the downloads. */
@@ -66,6 +71,8 @@ export class Trackers {
     this.fileset = { wasmLoaderPath: here(ASSETS.loader.url), wasmBinaryPath: this.blobUrl };
     onProgress?.(0.97, 'Starting the trackers');
     try {
+      // ?delegate=cpu skips the GPU path, to test the fallback.
+      if (new URLSearchParams(location.search).get('delegate') === 'cpu') throw new Error('GPU skipped by request');
       await this.create('GPU');
       log('GPU delegate ready');
     } catch (gpuError) {
@@ -110,7 +117,26 @@ export class Trackers {
 
   record(kind, ms) {
     const s = this.stats[kind];
-    s.n += 1; s.sum += ms; s.last = ms; s.max = Math.max(s.max, ms);
+    s.last = ms;
+    if (this.warming) return;   // the first read compiles the GPU programs; it is not representative
+    s.n += 1; s.sum += ms; s.max = Math.max(s.max, ms);
+    s.recent.push(ms); if (s.recent.length > 600) s.recent.shift();
+  }
+
+  /** Reads one frame with both trackers so the slow first run (shader compile) happens behind the loading screen. */
+  async warmUp(video) {
+    this.warming = true;
+    try {
+      await this.guarded(() => this.detectFace(video, performance.now()));
+      await this.guarded(() => this.detectHand(video, performance.now()));
+    } finally { this.warming = false; }
+  }
+
+  /** Median and 95th percentile of the recent inference times, in ms. */
+  summary(kind) {
+    const v = [...this.stats[kind].recent].sort((a, b) => a - b);
+    if (!v.length) return { n: 0, p50: 0, p95: 0, max: 0 };
+    return { n: this.stats[kind].n, p50: v[Math.floor(v.length * 0.5)], p95: v[Math.min(v.length - 1, Math.floor(v.length * 0.95))], max: this.stats[kind].max };
   }
 
   /** Head reading for a video frame: yaw, pitch, nose offset and the landmarks, or null when no face. */

@@ -2,7 +2,7 @@
 // Wiring only; the rules live in logic.js (ported from the Mac app), the models in tracker.js, the skeleton in sees.js.
 
 import {
-  GestureMachine, FocusTracker, sessionAt, HeadPointer, FrameScheduler, PointerHand, islandMode, wordsTyped,
+  GestureMachine, FocusTracker, FOCUS, sessionAt, HeadPointer, FrameScheduler, PointerHand, islandMode, wordsTyped,
   observationFromHand, handFromLandmarks,
 } from './logic.js';
 import { SESSIONS } from './content.js';
@@ -13,7 +13,7 @@ const $ = (id) => document.getElementById(id);
 const el = {
   app: $('app'), stage: $('stage'), island: $('island'), gate: $('gate'), gateMsg: $('gate-message'), goCamera: $('go-camera'),
   goMouse: $('go-mouse'), progress: $('progress'), bar: $('bar'), progressLabel: $('progress-label'), coach: $('coach'),
-  prompt: $('prompt'), dots: $('dots'), skip: $('skip'), finish: $('finish'), keep: $('keep'), stop: $('stop'), recentre: $('recentre'),
+  prompt: $('prompt'), ticks: $('ticks'), done: $('done'), rail: $('rail'), finish: $('finish'), keep: $('keep'), stop: $('stop'), recentre: $('recentre'),
   sink: $('sink'), sees: $('sees'),
   rHead: $('r-head'), rHand: $('r-hand'), rGesture: $('r-gesture'), rSpeed: $('r-speed'), sizeNote: $('size-note'),
 };
@@ -22,25 +22,55 @@ const now = () => performance.now() / 1000;
 
 // ---- panes ----------------------------------------------------------------------------------------------
 
-const panes = SESSIONS.map((s) => {
+const MODES = [['Edit automatically', 'Opus 5.5'], ['Ask before edits', 'Sonnet 5.5'], ['Plan mode', 'Opus 5.5'], ['Edit automatically', 'Sonnet 5.5']];
+el.rail.innerHTML = '<h3>Code sessions</h3>';
+const panes = SESSIONS.map((s, k) => {
   const root = document.createElement('article');
   root.className = 'ls-pane'; root.dataset.id = s.id;
   root.innerHTML = `<div class="ls-pane-head"><span>${esc(s.name)}</span><small>${esc(s.branch)}</small></div>
     <div class="ls-transcript" tabindex="-1"></div>
-    <div class="ls-composer"><span class="ls-mic"></span><span class="draft"></span></div>`;
+    <div class="ls-composer"><span class="ls-mic"></span><span class="draft"></span></div>
+    <p class="ls-meta">${esc(MODES[k][0])} &middot; ${esc(MODES[k][1])}</p>`;
   el.stage.append(root);
+  const item = document.createElement('div');
+  item.className = 'ls-rail-item'; item.innerHTML = `<i></i>${esc(s.name)}`;
+  el.rail.append(item);
   const pane = {
-    id: s.id, name: s.name, el: root, transcript: root.querySelector('.ls-transcript'), draftEl: root.querySelector('.draft'),
-    draft: '', words: s.dictation.split(' '), reply: s.reply, frame: { x: 0, y: 0, w: 0, h: 0 },
+    id: s.id, name: s.name, el: root, railEl: item, transcript: root.querySelector('.ls-transcript'), draftEl: root.querySelector('.draft'),
+    draft: '', prompts: s.prompts, promptIdx: 0, typed: 0, streams: 0, frame: { x: 0, y: 0, w: 0, h: 0 },
+    get words() { return this.prompts[this.promptIdx % this.prompts.length].say.split(' '); },
+    get reply() { return this.prompts[this.promptIdx % this.prompts.length].reply; },
   };
   for (const [who, text] of s.transcript) addLine(pane, who, text);
   return pane;
 });
 
 function addLine(pane, who, text) {
-  const p = document.createElement('p');
+  const p = document.createElement(who === 'code' ? 'pre' : 'p');
   p.className = `ls-line ${who}`; p.textContent = text;
   pane.transcript.append(p);
+  return p;
+}
+
+const stick = (pane) => { pane.transcript.scrollTop = pane.transcript.scrollHeight; };
+
+/** A mock Claude reply streaming into a session: tool lines and code appear whole, prose types word by word. */
+function streamReply(pane, items) {
+  pane.streams += 1; pane.railEl.firstChild.className = 'working';
+  let k = 0;
+  const next = () => {
+    if (k >= items.length) { if (--pane.streams === 0) pane.railEl.firstChild.className = ''; return; }
+    const [who, text] = items[k++];
+    if (who !== 'claude') { addLine(pane, who, text); stick(pane); setTimeout(next, 550); return; }
+    const line = addLine(pane, 'claude', ''); line.classList.add('streaming');
+    const words = text.split(' '); let n = 0;
+    const tick = () => {
+      line.textContent = words.slice(0, ++n).join(' '); stick(pane);
+      if (n < words.length) setTimeout(tick, 55); else { line.classList.remove('streaming'); setTimeout(next, 350); }
+    };
+    tick();
+  };
+  setTimeout(next, 700);
 }
 
 function setDraft(pane, text) {
@@ -90,7 +120,7 @@ function enterMouse(note) {
   el.gate.hidden = true; el.finish.hidden = true;
   el.stop.hidden = phone; el.stop.textContent = 'Use camera'; el.recentre.hidden = true;
   setState('running'); el.app.dataset.mode = 'mouse';
-  if (S.step < 0) startTutorial();
+  if (S.step < 0) startTutorial(); else renderCoach();
   S.pointerDot = null; S.handSeen = null; S.faceSeen = null;
   S.headText = 'off'; S.handText = phone ? 'touch stands in' : 'mouse stands in'; S.gestureText = 'none';
   S.seesNote = note || (phone ? 'Camera off. Touch stands in for your hand.' : 'Camera off. The mouse stands in for your hand.');
@@ -141,15 +171,28 @@ async function startCamera() {
     showGate(`The trackers could not load (${load.reason?.message || load.reason}). You can use the mouse instead.`);
     return;
   }
-  try { await attachStream(cam.value); } catch (e) { cam.value.getTracks().forEach((t) => t.stop()); showGate(cameraErrorMessage(e)); return; }
+  try {
+    await withTimeout(attachStream(cam.value), 10000, 'no picture');
+    el.progressLabel.textContent = 'Warming up the trackers';
+    await trackers.warmUp(S.video);
+  } catch (e) {
+    cam.value.getTracks().forEach((t) => t.stop());
+    if (S.video) S.video.srcObject = null;
+    showGate(e?.message === 'no picture' ? 'The camera started but sent no picture. Another app may be using it. Close it and try again, or use the mouse instead.' : cameraErrorMessage(e));
+    return;
+  }
   S.mode = 'camera'; S.machine.reset(); S.focus.forgetAll(); S.head.recentre(); S.scheduler = new FrameScheduler();
   S.frames = { seen: 0, processed: 0, start: now() };
   el.gate.hidden = true; el.progress.hidden = true; el.finish.hidden = true;
   el.stop.hidden = false; el.stop.textContent = 'Stop camera'; el.recentre.hidden = false;
   setState('running'); el.app.dataset.mode = 'camera';
   S.seesNote = 'Looking for your face';
-  if (S.step < 0) startTutorial();
+  if (S.step < 0) startTutorial(); else renderCoach();
   S.tracking = true; scheduleFrame();
+}
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(message)), ms))]);
 }
 
 async function attachStream(stream) {
@@ -283,9 +326,9 @@ function intent(i) {
 function beginDictation() {
   const pane = S.focus.target;
   if (!pane) { S.machine.abortTalk(); banner('info', 'No session in focus', 'Look at a session first'); return; }
-  S.dict = { pane, start: now(), base: pane.draft ? `${pane.draft} ` : '', typed: 0 };
+  S.dict = { pane, start: now(), from: pane.typed };
   pane.el.classList.add('dictating');
-  advance('pinch');
+  tick_('dictated');
 }
 
 function endDictation(reason) {
@@ -293,30 +336,28 @@ function endDictation(reason) {
   if (!d) return;
   d.pane.el.classList.remove('dictating');
   S.dict = null;
-  if (reason !== 'switched' && d.pane.draft) {
-    if (!S.sending) banner('stopped', 'Dictation stopped', `Text kept in ${d.pane.name}, thumbs-up to send`, d.pane.name);
-  }
-  if (S.step === 2 && d.pane.draft.trim()) advance('type');
+  if (reason !== 'switched' && d.pane.draft && !S.sending) banner('stopped', 'Dictation stopped', `Text kept in ${d.pane.name}, thumbs-up to send`, d.pane.name);
 }
 
 function typeWords(t) {
   const d = S.dict;
   if (!d) return;
-  const n = wordsTyped(d.pane.words.length, t - d.start);
-  if (n !== d.typed) { d.typed = n; setDraft(d.pane, d.base + d.pane.words.slice(0, n).join(' ')); }
-  if (S.step === 2 && n >= 4) advance('type');
+  const words = d.pane.words;
+  const n = Math.min(words.length, d.from + wordsTyped(words.length, t - d.start));
+  if (n !== d.pane.typed) { d.pane.typed = n; setDraft(d.pane, words.slice(0, n).join(' ')); }
 }
 
 function send() {
   const pane = S.focus.target;
   if (!pane || !pane.draft.trim()) { banner('info', 'Nothing to send', 'Dictate into a session first'); return; }
   S.sending = true; endDictation('sent'); S.sending = false;
+  const reply = pane.reply;
   addLine(pane, 'you', pane.draft.trim());
-  setDraft(pane, '');
-  pane.transcript.scrollTop = pane.transcript.scrollHeight;
+  setDraft(pane, ''); pane.typed = 0; pane.promptIdx += 1;
+  stick(pane);
   banner('sent', null, pane.name);
-  setTimeout(() => { addLine(pane, 'claude', pane.reply); pane.transcript.scrollTop = pane.transcript.scrollHeight; }, 900);
-  advance('send');
+  streamReply(pane, reply);
+  tick_('sent');
 }
 
 function scrollFocused(handDy) {
@@ -325,7 +366,7 @@ function scrollFocused(handDy) {
   const before = pane.transcript.scrollTop;
   pane.transcript.scrollTop += handDy * 0.12;
   S.scrolled += Math.abs(pane.transcript.scrollTop - before);
-  if (S.step === 4 && S.scrolled >= 120) advance('scroll');
+  if (S.scrolled >= 120) tick_('scrolled');
 }
 
 function banner(style, title, body, name) {
@@ -361,57 +402,37 @@ function renderIsland(t) {
     el.island.querySelector('.l2').innerHTML = l2;
     el.island.querySelector('.ls-island-hint').textContent = hint;
   }
-  el.island.style.setProperty('--fill', mode === 'sendHold' ? g.progress.toFixed(3) : '0');
+  const fill = mode === 'sendHold' ? g.progress : mode === 'switching' ? Math.min((t - cand.since) / FOCUS.listeningSwitchDwell, 1) : 0;
+  el.island.style.setProperty('--fill', fill.toFixed(3));
 }
 
-// ---- tutorial -------------------------------------------------------------------------------------------
+// ---- coach: what to try next, ticked off as it happens, in any order ----------------------------------------
 
-const STEPS = [
-  { id: 'look', camera: 'Look at one of the sessions. The blue outline follows your nose.', mouse: 'Move the mouse over one of the sessions.' },
-  { id: 'pinch', camera: '<strong>Double pinch</strong>: tap your thumb and index finger together twice, quickly.', mouse: '<strong>Click twice</strong>, quickly, anywhere on the sessions.' },
-  { id: 'type', camera: 'Say nothing. Dictation is on, and Claude types for you.', mouse: 'Say nothing. Dictation is on, and Claude types for you.' },
-  { id: 'send', camera: 'Hold a <strong>thumbs-up</strong> to send it.', mouse: 'Press and hold still for a moment: that is the <strong>thumbs-up</strong>. It sends.' },
-  { id: 'scroll', camera: '<strong>Pinch and drag</strong> up or down to scroll the session.', mouse: 'Press and <strong>drag</strong> up or down to scroll the session.' },
-];
+const DONE = { looked: false, dictated: false, sent: false, scrolled: false };
+const HINTS = {
+  looked: { camera: 'Look at one of the sessions. The blue outline follows your nose.', mouse: 'Move the mouse over one of the sessions.' },
+  dictated: { camera: '<strong>Double pinch</strong> (thumb and index, twice, quickly) to dictate into the session you are looking at.', mouse: '<strong>Click twice</strong>, quickly, to dictate into the session under the mouse.' },
+  sent: { camera: 'Hold a <strong>thumbs-up</strong> to send what was typed.', mouse: 'Press and hold still: that is the <strong>thumbs-up</strong>. It sends.' },
+  scrolled: { camera: '<strong>Pinch and drag</strong> up or down to scroll the session you are looking at.', mouse: 'Press and <strong>drag</strong> up or down to scroll the session under the mouse.' },
+};
 
-function startTutorial() {
-  S.step = 0; S.scrolled = 0;
-  el.dots.innerHTML = STEPS.map(() => '<li></li>').join('');
+function tick_(k) {
+  if (DONE[k]) return;
+  DONE[k] = true; renderCoach();
+}
+
+function renderCoach() {
   el.coach.hidden = false;
-  renderStep();
+  for (const li of el.ticks.children) li.classList.toggle('done', DONE[li.dataset.k]);
+  const next = Object.keys(DONE).find((k) => !DONE[k]);
+  const m = S.mode === 'camera' ? 'camera' : 'mouse';
+  el.prompt.innerHTML = next ? HINTS[next][m] : 'You have tried all four. Keep playing, or see the download.';
+  el.done.hidden = !!next;
 }
 
-function renderStep() {
-  [...el.dots.children].forEach((li, i) => { li.className = i < S.step ? 'done' : i === S.step ? 'now' : ''; });
-  const s = STEPS[S.step];
-  if (s) el.prompt.innerHTML = s[S.mode === 'camera' ? 'camera' : 'mouse'];
-}
-
-function advance(id) {
-  if (S.step < 0 || STEPS[S.step]?.id !== id) return;
-  S.step += 1;
-  if (S.step >= STEPS.length) return finish();
-  renderStep();
-}
-
-function skip() {
-  const s = STEPS[S.step];
-  if (!s) return;
-  if (s.id === 'look') { S.focus.target = panes[0]; }
-  if (s.id === 'pinch' || s.id === 'type') {
-    const pane = S.focus.target ?? (S.focus.target = panes[0]);
-    if (!pane.draft) setDraft(pane, pane.words.join(' '));
-    if (S.dict) endDictation('skipped');
-    S.step = STEPS.findIndex((x) => x.id === 'send') - 1;
-  }
-  advance(STEPS[S.step].id);
-}
+function startTutorial() { S.step = 0; renderCoach(); }
 
 function finish() {
-  S.step = STEPS.length;
-  renderStep();
-  [...el.dots.children].forEach((li) => { li.className = 'done'; });
-  el.prompt.textContent = 'Done.';
   if (S.mode === 'camera') { S.resumeOnShow = false; stopCamera(); S.machine.reset(); }
   el.finish.hidden = false; setState('finished');
   el.finish.querySelector('#download').focus({ preventScroll: true });
@@ -457,7 +478,8 @@ function render(ms) {
   const target = S.focus.target;
   for (const p of panes) p.el.classList.toggle('focused', p === target);
   if ((target?.id ?? null) !== S.focusId) { S.focusId = target?.id ?? null; S.focusSince = t; }
-  if (S.step === 0 && target && t - S.focusSince > 0.6) advance('look');
+  if (target && t - S.focusSince > 0.6) tick_('looked');
+  for (const p of panes) p.railEl.classList.toggle('focused', p === target);
   if (t - lastSees > 0.033) { lastSees = t; drawSees(t); }
   if (t - lastText > 0.15) { lastText = t; drawText(); }
   requestAnimationFrame(render);
@@ -482,14 +504,20 @@ function drawText() {
 
 el.goCamera.addEventListener('click', () => startCamera());
 el.goMouse.addEventListener('click', () => enterMouse());
-el.skip.addEventListener('click', skip);
+el.done.addEventListener('click', finish);
+{
+  const box = document.querySelector('.ls-sees'), title = $('sees-title');
+  const toggle = () => { box.classList.toggle('collapsed'); sees.resize(); };
+  title.addEventListener('click', toggle);
+  title.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+}
 el.recentre.addEventListener('click', () => { S.head.recentre(); S.focus.forgetAll(); });
 el.stop.addEventListener('click', () => {
   if (S.mode === 'camera') { S.resumeOnShow = false; stopCamera(); S.machine.reset(); endDictation('stopped'); S.mode = 'none'; showGate('The camera is off.'); }
   else showGate(null);
 });
 el.keep.addEventListener('click', () => {
-  el.finish.hidden = true; S.step = STEPS.length;
+  el.finish.hidden = true;
   if (S.mode === 'mouse') setState('running'); else showGate('The camera is off.');
 });
 
@@ -511,8 +539,8 @@ refreshFrames();
 requestAnimationFrame(render);
 
 window.__live = {
-  get mode() { return S.mode; }, get step() { return S.step; }, get delegate() { return trackers.delegate; },
-  stats: () => ({ face: { ...trackers.stats.face }, hand: { ...trackers.stats.hand }, frames: { ...S.frames }, delegate: trackers.delegate, handHz: S.scheduler.handHz, faceHz: S.scheduler.faceHz }),
+  get mode() { return S.mode; }, done: () => ({ ...DONE }), get delegate() { return trackers.delegate; },
+  stats: () => ({ face: trackers.summary('face'), hand: trackers.summary('hand'), warmed: !trackers.warming, frames: { ...S.frames }, delegate: trackers.delegate, handHz: S.scheduler.handHz, faceHz: S.scheduler.faceHz }),
   focus: () => S.focus.target?.id ?? null,
   draft: (id) => panes.find((p) => p.id === id)?.draft ?? null,
   talking: () => S.machine.talking,

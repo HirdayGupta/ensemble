@@ -62,7 +62,13 @@ export class SeesPanel {
     if (hand) this.drawHand(hand, k);
     if (!face && !hand && note) {
       ctx.fillStyle = k.text; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(note, this.w / 2, this.h / 2); ctx.textAlign = 'start';
+      const lines = []; let cur = '';
+      for (const word of note.split(' ')) {
+        if (cur && ctx.measureText(`${cur} ${word}`).width > this.w - 24) { lines.push(cur); cur = word; } else cur = cur ? `${cur} ${word}` : word;
+      }
+      lines.push(cur);
+      lines.forEach((l, i) => ctx.fillText(l, this.w / 2, this.h / 2 + (i - (lines.length - 1) / 2) * 18));
+      ctx.textAlign = 'start';
     }
   }
 
