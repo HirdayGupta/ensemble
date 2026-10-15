@@ -575,6 +575,8 @@ final class Coordinator: AppCoordinating {
         if awayState.isAway { reconcileAway() }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
         guard ctx.listening == nil else { return }
+        // A width step reads the frames itself after its own keys, which Claude reports as divider changes.
+        if notified, panes.isRunning { return }
         guard !refreshInFlight else { refreshAgain = refreshAgain || notified; return }
         // Nobody in front of the camera for 5 s: the window scan (which also costs Claude's own process) runs
         // every 5 s instead of every second, and immediately when a face comes back.
@@ -583,8 +585,8 @@ final class Coordinator: AppCoordinating {
                 || now - lastSessionScan >= Self.sessionScanIdleInterval else { return }
         lastSessionScan = now
         refreshInFlight = true
-        // While a width step runs it reads the frames itself after its own keys; a layout change it causes must not
-        // walk Claude's tree in the middle of it. Its notifications wait for the first check after it.
+        // During a width step the check works the old way: the layout change it causes must not walk Claude's tree in
+        // the middle of it. Its notifications wait for the first check after it.
         let useNotifications = !panes.isRunning
         Task { @MainActor in
             defer {
