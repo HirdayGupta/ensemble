@@ -62,7 +62,8 @@ final class HealthMonitor {
 
     func update() {
         ctx.state.set(\.status, current())
-        let connected = NSScreen.screens.compactMap(ScreenGeometry.stableID(of:))
+        // Runs on every head reading; the screen ids are cached until the arrangement changes.
+        let connected = ctx.setup.connectedScreenIDs
         let valid = connected.filter { ctx.setup.validScreenIDs.contains($0) }.count
         ctx.state.set(\.calibratedLine, ctx.pointer.isCalibrated ? ScreenLayout.calibratedLine(valid: valid, connected: connected.count) : nil)
     }

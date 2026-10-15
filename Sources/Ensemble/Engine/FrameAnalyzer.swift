@@ -4,8 +4,8 @@ import CoreMedia
 import CoreVideo
 import Foundation
 
-/// Per-frame work that runs on the camera queue: hand pose, brightness, and the JPEG for the face tracker.
-/// Not thread-safe; only the camera queue may call it.
+/// Per-frame work: hand pose, brightness, and the JPEG for the face tracker. Not thread-safe per job: `hand` is
+/// called only from the engine's hand queue, `light` and `jpeg` only from the camera queue; they share no state.
 final class FrameAnalyzer: @unchecked Sendable {
     private let detector = HandPoseDetector()
     private let classifier = GestureClassifier()
