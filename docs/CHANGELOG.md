@@ -4,6 +4,9 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- Maximize, even out and the chat-column fit move Claude's dividers with its own keyboard control instead of a mouse drag. Maximize makes the session you look at as wide as Claude allows and every other session in its row as narrow, in about half a second (Home and End on each divider); before, it stopped short, left the other sessions wide and the highlight behind. The highlight follows the session as it resizes, the keyboard goes back to its message box afterwards, the pointer never moves, and Ensemble's own keys never count as your typing.
+- The chat-column fit no longer shrinks its column (a session's padding was read as the column: 832, then 736, then 646 points) and no longer undoes its own last fit on every glance: a session a fit narrowed waits three minutes, a fit that would squeeze a recently fitted session is skipped, and nothing is fitted for five seconds after a calibration.
+- Logs name a session by its place in its row ("pane 2 of 4"), never by its title.
 - Gestures and headphone presses work while Ensemble is paused for the keyboard or mouse: the pause now only holds focus, the highlight and resizes. Before, a double pinch made right after typing landed inside the 2-second quiet time and did nothing, and each pause began or ended by resetting a half-made gesture.
 - Holding an open hand no longer asks for a cancel that nothing acted on: a resting open hand does nothing, and Settings, Actions drops the Cancel row. Saved settings keep their Send and scroll gestures.
 - A face tracker that keeps failing recovers by itself instead of leaving the pointer and focus-follow dead until Ensemble restarts. The first failure retries at once, as before; each later one waits 2, 4, 8, 16, then 30 seconds before the next try and never gives up. The menu panel shows the failure during the wait, and a good head reading or a camera restart starts the count over.
