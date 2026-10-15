@@ -29,6 +29,7 @@ final class Coordinator: AppCoordinating {
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var refreshInFlight = false
     private var promptedAccessibility = false
+    private var recoveredAtLaunch = false
     private var lastAwayCheck: TimeInterval = 0
     private var lastSessionScan: TimeInterval = 0
     /// Set only while the tour's gesture-practice step is open; see `enterGesturePractice`.
@@ -111,15 +112,12 @@ final class Coordinator: AppCoordinating {
     func start() {
         EnsembleLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(ctx.pointer.isCalibrated), accessibility=\(AXIsProcessTrusted()), screens=\(ScreenFacts.displayFingerprint()))")
         state.cameraNames = cameraNames
-        dictation.sweep()
-        MediaDucker.recoverAfterCrash()
+        if recoveredAtLaunch { recoveredAtLaunch = false } else { recoverAtLaunch() }
         guard settings.enabled else { state.status = .off; return }
         if !Permissions.accessibilityTrusted {
             EnsembleLog.write("accessibility permission missing (if Ensemble is already listed in Settings, remove it and add it again)")
-            if !promptedAccessibility {
-                promptedAccessibility = true
-                _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-            }
+            // Never over the tour: its permissions step has the button, and closing the tour asks (exitTour).
+            if !tourOpen { promptAccessibilityOnce() }
         }
         health.begin()
         headphone.start()
@@ -131,6 +129,20 @@ final class Coordinator: AppCoordinating {
         refreshTimer = commonModeTimer(1.0) { [weak self] in self?.refreshSessions() }
         refreshSessions()
         health.update()
+    }
+
+    /// Crash recovery that must not wait for the camera: a record or mute left by an earlier run is put right at
+    /// launch even when the first-run tour holds `start()` back.
+    func recoverAtLaunch() {
+        recoveredAtLaunch = true
+        dictation.sweep()
+        MediaDucker.recoverAfterCrash()
+    }
+
+    private func promptAccessibilityOnce() {
+        guard !promptedAccessibility else { return }
+        promptedAccessibility = true
+        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
     }
 
     /// Common run-loop mode keeps the timers firing while a slider is dragged or a menu is open.
@@ -272,6 +284,7 @@ final class Coordinator: AppCoordinating {
 
     func exitTour() {
         tourOpen = false
+        if settings.enabled, !Permissions.accessibilityTrusted { promptAccessibilityOnce() }
         gestures.reset()
         scroll.cancel()
     }

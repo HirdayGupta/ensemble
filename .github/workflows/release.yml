@@ -23,7 +23,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # scripts/ship-release.sh pushes the tag first and creates the release a moment later. This job waits up to three
+  # minutes for that release; if it appears, the script is shipping and the workflow stands down instead of racing it.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          for _ in $(seq 1 18); do
+            if gh release view "$TAG" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+            sleep 10
+          done
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: guard
+    if: ${{ needs.guard.outputs.exists != 'true' }}
     runs-on: macos-26
     timeout-minutes: 90
     permissions:
@@ -113,7 +137,10 @@ jobs:
         run: |
           flags=(--generate-notes --verify-tag)
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$VERSION" build/Ensemble-*.dmg build/Ensemble-*.dmg.sha256 "${flags[@]}"
+          # Ensemble.dmg, the same file under a fixed name, is what the website's Download buttons fetch directly
+          # (releases/latest/download/Ensemble.dmg).
+          cp build/Ensemble-*.dmg build/Ensemble.dmg
+          gh release create "$VERSION" build/Ensemble-*.dmg build/Ensemble-*.dmg.sha256 build/Ensemble.dmg "${flags[@]}"
 
       # Pre-release tags (v0.2.0-beta.1) are published but never offered to existing users.
       - name: Check out the appcast branch
