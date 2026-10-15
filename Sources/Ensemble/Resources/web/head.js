@@ -15,7 +15,10 @@ async function create(which) {
   const lm = await FaceLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: BASE + '/face_landmarker.task', delegate: which },
     runningMode: 'VIDEO',
-    numFaces: 1,   // one face only: no second-person check (a raised hand was misread as a face)
+    // Only the nose direction is needed: one face (a raised hand was misread as a second face), no blendshapes, and
+    // the transformation matrix, which carries both the head angles and the head position.
+    numFaces: 1,
+    outputFaceBlendshapes: false,
     outputFacialTransformationMatrixes: true,
   });
   landmarker = lm;
@@ -36,16 +39,16 @@ async function init() {
   }
 }
 
-function decode(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+// The engine leaves raw RGBA pixels at /frame/<number> and asks for them; no image encoding on either side.
+async function fetchFrame(number, width, height) {
+  const response = await fetch(BASE + '/frame/' + number);
+  if (!response.ok) throw new Error('frame ' + number + ' unavailable');
+  return new ImageData(new Uint8ClampedArray(await response.arrayBuffer()), width, height);
 }
 
-function detect(bitmap, t) {
+function detect(image, t) {
   lastTs = Math.max(lastTs + 1, Math.round(t * 1000));
-  return landmarker.detectForVideo(bitmap, lastTs);
+  return landmarker.detectForVideo(image, lastTs);
 }
 
 // Column-major 4x4 head transform: yaw from the forward axis, pitch from the up axis' z component.
@@ -56,27 +59,22 @@ function angles(m) {
   return { yaw, pitch };
 }
 
-async function processFrame(b64, t) {
-  let bitmap = null;
+async function processFrame(number, width, height, t) {
   try {
     if (!landmarker) throw new Error('face tracker not ready');
-    bitmap = await decode(b64);
+    const image = await fetchFrame(number, width, height);
     let result;
     try {
-      result = detect(bitmap, t);
+      result = detect(image, t);
     } catch (e) {
       if (delegate !== 'GPU') throw e;
       post({ log: 'GPU detection failed, switching to CPU: ' + e });
       landmarker.close();
       lastTs = 0;
       await create('CPU');
-      result = detect(bitmap, t);
+      result = detect(image, t);
     }
-    // Count only faces at least half the width of the largest one: a face on a TV or poster behind the user is
-    // much smaller and must not count as a second person.
-    const widths = (result.faceLandmarks || []).map(lm => { let lo = 1, hi = 0; for (const p of lm) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); } return hi - lo; });
-    const biggest = widths.length ? Math.max(...widths) : 0;
-    const faces = widths.filter(w => w >= biggest * 0.5).length;
+    const faces = (result.faceLandmarks || []).length;
     const mats = result.facialTransformationMatrixes;
     if (faces > 0 && mats && mats.length > 0) {
       const m = mats[0].data;
@@ -88,12 +86,10 @@ async function processFrame(b64, t) {
     }
   } catch (e) {
     post({ t, frameError: String(e && e.message ? e.message : e) });
-  } finally {
-    if (bitmap) bitmap.close();
   }
 }
 
 // Returns nothing: evaluateJavaScript cannot carry a Promise back. The answer arrives via postMessage.
-window.ensembleFrame = (b64, t) => { processFrame(b64, t); };
+window.ensembleFrame = (number, width, height, t) => { processFrame(number, width, height, t); };
 
 init();
