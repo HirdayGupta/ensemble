@@ -4,6 +4,9 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- Turning Ensemble off while a dictation is starting no longer leaves Claude's microphone recording: the start is waited for and, if it turns the microphone on, stopped at once, and the safety record is kept until the microphone is confirmed off.
+- When macOS cannot say whether Claude is recording (the audio system restarting, say), Ensemble treats the microphone as possibly on: the safety record and any safety mute stay until a definite "off". On quit, a stop that finds no Claude session is no longer counted as confirmed.
+- A thumbs-up sends nothing while another app is in front, even right after dictating; the island says "Not sent". This is checked when the gesture arrives and again right before Send is pressed.
 - Next to every Check for Updates button (menu bar panel, Option-Command-K panel, Settings) Ensemble shows the version you have installed, and after a check it says "Ensemble 0.5.0 is available" or "Up to date". The latest version is learned only from a check you start or the automatic checks you turned on; nothing is fetched otherwise.
 - With one chat session open in Claude, the highlight, focus and edge warnings cover just that session, not the whole window with its top bar and left navigation. Two or more sessions side by side are unchanged.
 - Calibrate puts its full-screen window up at once, even when Ensemble was off or the camera is still starting; it says what it is waiting for ("Starting the camera...", "Looking for your face...") and shows the first dot only after a face reading arrives. The log records the time from click to window and from click to first face reading.

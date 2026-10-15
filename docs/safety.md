@@ -10,9 +10,11 @@ The rule: Claude's microphone is never left recording because of Ensemble. The s
 | Dead-man check | While listening, the app must keep confirming it is alive roughly every second, or dictation is stopped. |
 | Standing check | A timer verifies, even when nothing seems wrong, that Claude's microphone state matches what Ensemble believes. |
 | Fallback | If a stop cannot be confirmed, Ensemble sounds an alarm and mutes the input device Claude is using, recording the change so it can be undone later. |
-| Quitting | Quitting stops dictation before the process exits. |
+| Only a definite "off" counts | The record is deleted, and the safety mute undone, only when macOS says plainly that Claude is not recording. An unreadable reading (the audio system restarting, say) counts as possibly recording, and a stop that finds no Claude session to press is not counted as a stop. |
+| Switching off | Turning Ensemble off (or the automatic switch-off after a Claude update) stops any dictation and confirms the microphone is off before the record is cleared. A start press still in flight is waited for, up to 8 seconds; if it turns the microphone on, it is stopped at once. If it is still in flight after 8 seconds, the record stays, the dictation is stopped the moment the press lands, and the standing check clears the record once the microphone is off. |
+| Quitting | Quitting stops dictation before the process exits. A stop that cannot be confirmed with a definite "off" leaves the record and mutes the input, and the next launch puts it right. |
 | Refusals | Dictation stops and gestures are refused when you type or click, when more than one face is in view, when no face has been seen for 10 seconds, when the camera is covered, when another app starts using a microphone, when the input device changes, when the Mac sleeps, the screen locks or the screen saver starts, or when Claude quits. |
-| Narrow send | Send needs a non-empty draft, dictation that ended in the last 30 seconds, and no keyboard or mouse use since. A draft you walked away from can never go out later from a stray gesture. |
+| Narrow send | Send needs Claude to be the app in front, a non-empty draft, dictation that ended in the last 30 seconds, and no keyboard or mouse use since. Claude being in front is checked when the thumbs-up arrives and again right before Send is pressed; otherwise the island says "Not sent". A draft you walked away from can never go out later from a stray gesture. |
 
 Sending by gesture is not restricted by Claude's permission mode. Turn gesture send off in Settings to press Send yourself.
 

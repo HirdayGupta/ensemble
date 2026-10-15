@@ -102,12 +102,13 @@ final class DictationSafety: @unchecked Sendable {
     }
 
     /// Forget everything: delete the episode file, undo our mute, silence the alarm. Refuses (returns false)
-    /// while Claude is still capturing: the episode stays and the standing check keeps trying to stop it.
+    /// unless Claude is definitely not capturing: while it captures, or while CoreAudio cannot say, the episode
+    /// stays and the standing check keeps trying to stop it.
     @discardableResult
     func clearAndDisarm() -> Bool {
         queue.sync {
             holdActive = false
-            if bridge.claudeCaptureActive() == true {
+            if !DictationRules.confirmedOff(capture: bridge.claudeCaptureActive()) {
                 holdEndedAt = Date()
                 offSince = nil
                 return false
@@ -151,11 +152,13 @@ final class DictationSafety: @unchecked Sendable {
             let left = deadline.timeIntervalSinceNow
             let result = left > 0.1 ? bridge.stopDictationBlocking(session ?? remembered, timeout: left) : nil
             var capture = bridge.claudeCaptureActive()
-            while capture == true, Date() < deadline {
+            while !DictationRules.confirmedOff(capture: capture), Date() < deadline {
                 Thread.sleep(forTimeInterval: 0.075)
                 capture = bridge.claudeCaptureActive()
             }
-            if case .done? = result { off = capture != true } else { off = capture == false }
+            // A stop that reported done without a definite "not capturing" reading is not proof: mute and keep the record.
+            off = DictationRules.confirmedOff(capture: capture)
+            if !off { EnsembleLog.write("quit: stop \(result.map { "\($0)" } ?? "timed out"), capture \(capture.map(String.init) ?? "unreadable")") }
         }
         EnsembleLog.write("quit: microphone \(off ? "confirmed off" : "NOT confirmed off; muting the input")")
         queue.sync {

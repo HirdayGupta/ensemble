@@ -12,6 +12,12 @@ public enum SendRules {
         return typedRefusal(spokenAgo: ago, inputAge: inputAge)
     }
 
+    /// Acting only on Claude: with another app in front (a full-screen call swiped to, say) a thumbs-up sends nothing,
+    /// however recent the dictation.
+    public static func frontRefusal(claudeInFront: Bool) -> String? {
+        claudeInFront ? nil : "Claude is not the app in front"
+    }
+
     /// The draft may have been edited by hand after dictation: input more recent than the dictation's end.
     public static func typedRefusal(spokenAgo: TimeInterval, inputAge: TimeInterval) -> String? {
         inputAge < spokenAgo ? "Typed or clicked since dictation; not sending" : nil
