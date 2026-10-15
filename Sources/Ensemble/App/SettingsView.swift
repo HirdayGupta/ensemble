@@ -154,7 +154,7 @@ private struct ActionSettings: View {
                 Text(settings.mapping.usesTwoFingers
                      ? "Two fingers is set as another action's gesture above, so the peace sign and scissors do nothing until that changes."
                      : "Only with Claude in front and never while dictating or sending. Ensemble drags the dividers between sessions for you and puts the pointer back.")
-                + Text(" A session narrower than Claude's chat column widens to it once you have looked at it for a moment, and the others give up equal shares.")
+                + Text(" A session narrower than Claude's chat column widens to just past it once you have looked at it for a moment, the room coming from the widest session beside it.")
             }
             Section {
                 ActionRow(symbol: GestureSlot.scrollUp.actionSymbol, title: "Scroll up", detail: GestureSlot.scrollUp.detail) {

@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Claude's transcript text never grows past a fixed column (its `--max-content-width`, centred in the pane), so a
 /// pane wider than that column only adds empty margins and a pane narrower wraps the text early. When focus settles
-/// on a pane narrower than the column, the pane is widened to the column and the other panes in its row each give
-/// an equal share of the width it takes, none going below `PaneWidths.narrowWidth`.
+/// on a pane narrower than the column, the pane is widened to a little more than the column (`headroom`), the width
+/// taken through as few dividers as possible and from panes that stay at the column where the row allows, none going
+/// below `PaneWidths.narrowWidth`.
 public enum SessionFit {
     /// How long the nose must rest inside one session, with focus on it the whole time, before it is fitted, so a
     /// nose passing over a pane never resizes it. 0.6 s fitted panes the nose only crossed (owner, 0.2.18).
@@ -16,48 +17,83 @@ public enum SessionFit {
     /// transcript width; Claude's wider settings use 960 and 1280).
     public static let fallbackColumn: Double = 832
 
-    /// The width of every pane in the row so pane `focus` reaches `width`, the width it gains taken equally from
-    /// the others and none of them below `minimum`, or below its own entry in `floors` (a pane fitted a moment ago
-    /// keeps its fit). When the others cannot give it all, the pane gets what they can. nil when the pane is already
-    /// within `PaneWidths.tolerance` of `width`, or the others have nothing to give.
-    public static func widths(current: [Double], focus k: Int, width: Double,
+    /// How much wider than the chat column a fit makes a pane: a little room so the text is never wrapped early,
+    /// never more (owner, 0.2.20: "only expand 10% more than the default chat width").
+    public static let headroom = 1.10
+
+    /// The width a fit gives a pane whose transcript shows the whole column at `paneColumn` (the column plus the
+    /// pane's own padding, `ChatColumn.paneWidth`).
+    public static func fitWidth(paneColumn: Double) -> Double { paneColumn * headroom }
+
+    /// The width of every pane in the row so pane `focus` reaches `width`, never more, moving as few of Claude's
+    /// dividers as possible. A divider only shifts width between its two panes, so taking from the next pane costs
+    /// one divider and from the one after it two. The width comes from the fewest panes beside the focus that can
+    /// give it while each stays at or above `keep` (the chat column), the wider side first; only when no such panes
+    /// can do they give it down to `minimum` or their entry in `floors` (a pane fitted a moment ago keeps its fit),
+    /// again from the fewest. Inside the chosen panes the width above `keep` goes first, widest first, then the rest in
+    /// equal shares. When the whole row cannot give it all, the pane gets what it can. nil when the pane is already
+    /// within `PaneWidths.tolerance` of `width`, or nothing can give.
+    ///
+    /// The owner's row on 0.2.20, [565, 320, 1674] fitting the middle pane, took 240 pt from each side, left the first
+    /// pane at Claude's minimum while the last stayed twice the column, and moved both dividers: now the last pane
+    /// gives it all through one divider.
+    public static func widths(current: [Double], focus k: Int, width: Double, keep: Double? = nil,
                               minimum: Double = PaneWidths.narrowWidth, floors: [Double] = []) -> [Double]? {
-        guard current.count >= 2, current.indices.contains(k), width.isFinite, current.allSatisfy(\.isFinite) else { return nil }
+        let n = current.count
+        guard n >= 2, current.indices.contains(k), width.isFinite, current.allSatisfy(\.isFinite) else { return nil }
         let need = width - current[k]
         guard need > PaneWidths.tolerance else { return nil }
-        var room = current.indices.map { i in
-            max(0, current[i] - max(minimum, floors.indices.contains(i) && floors[i].isFinite ? floors[i] : 0))
+        let keep = min(keep ?? width, width)
+        let low = current.indices.map { i in max(minimum, floors.indices.contains(i) && floors[i].isFinite ? floors[i] : 0) }
+        let high = current.indices.map { max(keep, low[$0]) }
+        func room(_ i: Int, _ floor: [Double]) -> Double { i == k ? 0 : max(0, current[i] - floor[i]) }
+        // Every run of panes around the focus, fewest dividers first; ties go to the side that can give more.
+        var spans: [(lo: Int, hi: Int, cost: Int)] = []
+        for lo in 0...k { for hi in k..<n { spans.append((lo, hi, hi - lo)) } }
+        func best(_ floor: [Double]) -> (lo: Int, hi: Int)? {
+            spans.filter { s in (s.lo...s.hi).map { room($0, floor) }.reduce(0, +) >= need }
+                .min { a, b in
+                    a.cost != b.cost ? a.cost < b.cost
+                        : (a.lo...a.hi).map { room($0, floor) }.reduce(0, +) > (b.lo...b.hi).map { room($0, floor) }.reduce(0, +)
+                }
+                .map { ($0.lo, $0.hi) }
         }
-        room[k] = 0
-        let total = room.reduce(0, +)
-        guard total > PaneWidths.tolerance else { return nil }
-        var left = min(need, total)
+        let span = best(high) ?? best(low) ?? (0, n - 1)
+        let donors = (span.lo...span.hi).filter { $0 != k }
         var out = current
-        out[k] += left
-        // Equal shares; a pane that reaches its minimum gives what it has and the rest is shared by the others.
-        var giving = current.indices.filter { room[$0] > 0 }
+        var left = need
+        // Width above the column first, widest first: it is only empty margin beside the column.
+        for i in donors.sorted(by: { current[$0] > current[$1] }) where left > 0 {
+            let give = min(left, room(i, high))
+            out[i] -= give
+            left -= give
+        }
+        // Then equal shares; a pane that reaches its floor gives what it has and the rest is shared by the others.
+        var spare = current.indices.map { donors.contains($0) ? max(0, out[$0] - low[$0]) : 0 }
+        var giving = donors.filter { spare[$0] > 0 }
         while left > 0.001, !giving.isEmpty {
             let share = left / Double(giving.count)
-            let short = giving.filter { room[$0] < share }
+            let short = giving.filter { spare[$0] < share }
             if short.isEmpty {
                 for i in giving { out[i] -= share }
                 left = 0
             } else {
-                for i in short { out[i] -= room[i]; left -= room[i]; room[i] = 0 }
-                giving.removeAll { room[$0] == 0 }
+                for i in short { out[i] -= spare[i]; left -= spare[i]; spare[i] = 0 }
+                giving.removeAll { spare[$0] == 0 }
             }
         }
-        return out
+        out[k] = current[k] + need - max(0, left)
+        return out[k] - current[k] > PaneWidths.tolerance ? out : nil
     }
 
     /// The widths for fitting pane `focus`, the one the nose rests on: panes fitted within `Hold.window` keep their
     /// fit (`floors`) while the others can give the width, so fits do not undo each other; when they cannot, the pane
     /// you rest on wins and every other pane gives its equal share. nil when there is nothing to do.
-    public static func restingFit(current: [Double], focus k: Int, width: Double,
+    public static func restingFit(current: [Double], focus k: Int, width: Double, keep: Double? = nil,
                                   minimum: Double = PaneWidths.narrowWidth, floors: [Double]) -> [Double]? {
-        if let kept = widths(current: current, focus: k, width: width, minimum: minimum, floors: floors),
+        if let kept = widths(current: current, focus: k, width: width, keep: keep, minimum: minimum, floors: floors),
            kept[k] >= width - PaneWidths.tolerance { return kept }
-        return widths(current: current, focus: k, width: width, minimum: minimum)
+        return widths(current: current, focus: k, width: width, keep: keep, minimum: minimum)
     }
 
     /// What earlier fits leave in force. A pane fitted within `window` keeps its fitted width as a floor while
@@ -174,6 +210,11 @@ public enum ChatColumn {
     public struct Memory: Sendable {
         /// Claude's 768, 960 and 1280 pt text measures with their 32 pt gutters.
         public static let known: [Double] = [832, 1024, 1344]
+        /// The same three text measures without their gutters. On 0.2.20 the owner's panes read 773 pt, the 768 pt
+        /// text and not the column around it, and a fit to 773 wrapped the text narrower than Claude's own column.
+        static let text: [Double] = [768, 960, 1280]
+        static let gutters: Double = 64
+        static let textMatch: Double = 12
         static let match: Double = 4
         static let spread: Double = 64
         static let kept = 12
@@ -182,12 +223,19 @@ public enum ChatColumn {
         private var seen: [(column: Double, pane: Double)] = []
 
         public init() {}
-        public var width: Double { measured ?? SessionFit.fallbackColumn }
+        /// Never narrower than Claude's narrowest column, which is also the default.
+        public var width: Double { max(measured ?? SessionFit.fallbackColumn, SessionFit.fallbackColumn) }
+
+        /// A reading of a text measure alone is that measure with its gutters.
+        static func column(_ r: Double) -> Double {
+            text.first { abs($0 - r) <= textMatch }.map { $0 + gutters } ?? r
+        }
 
         /// One scan's readings, one per pane, with each pane's width.
         public mutating func note(_ readings: [Double?], panes: [Double]) {
-            for (r, pane) in zip(readings, panes) {
-                guard let r, r.isFinite, pane.isFinite else { continue }
+            for (raw, pane) in zip(readings, panes) {
+                guard let raw, raw.isFinite, pane.isFinite else { continue }
+                let r = Self.column(raw)
                 let known = Self.known.contains { abs($0 - r) <= Self.match }
                 let agreed = seen.contains { abs($0.column - r) <= Self.match && abs($0.pane - pane) >= Self.spread }
                 if known || agreed { measured = max(measured ?? 0, r) }
