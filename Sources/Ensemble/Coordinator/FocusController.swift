@@ -18,6 +18,9 @@ final class FocusController {
     private(set) var afterStop: ClaudeSession?
     /// Stops the running dictation but keeps its text (wired by the Coordinator).
     var stopDictation: (String) -> Void = { _ in }
+    /// `ctx.sessions`, ordered left to right on screen, with a group per screen/window boundary; recomputed
+    /// only when that list or a pane's frame changes, never per frame. Feeds the island's session-columns glyph.
+    private var sessionOrderCache: (sessions: [ClaudeSession], ordered: [ClaudeSession], groupOf: [String: Int])?
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
@@ -55,11 +58,39 @@ final class FocusController {
     /// While dictating: the session focus will move to, and how far its dwell has run.
     func switching() -> SessionSwitch? {
         guard let listening = ctx.listening else { return nil }
-        if let next = afterStop { return SessionSwitch(name: ctx.name(of: next), progress: 1) }
+        let (ordered, groupOf) = sessionOrder()
+        let fromIndex = ordered.firstIndex { $0.id == listening.id } ?? 0
+        func breaks() -> Set<Int> {
+            guard ordered.count > 1 else { return [] }
+            var breaks: Set<Int> = []
+            for i in 1..<ordered.count where groupOf[ordered[i].id] != groupOf[ordered[i - 1].id] { breaks.insert(i) }
+            return breaks
+        }
+        if let next = afterStop {
+            let toIndex = ordered.firstIndex { $0.id == next.id } ?? 0
+            return SessionSwitch(name: ctx.name(of: next), progress: 1, sessionCount: ordered.count,
+                                  groupBreaks: breaks(), fromIndex: fromIndex, toIndex: toIndex)
+        }
         if let c = candidate, let to = c.session, to.id != listening.id, let now = ctx.latestHead?.t {
-            return SessionSwitch(name: ctx.name(of: to), progress: min(max((now - c.since) / FocusTracker.listeningSwitchDwell, 0), 1))
+            let toIndex = ordered.firstIndex { $0.id == to.id } ?? 0
+            return SessionSwitch(name: ctx.name(of: to), progress: min(max((now - c.since) / FocusTracker.listeningSwitchDwell, 0), 1),
+                                  sessionCount: ordered.count, groupBreaks: breaks(), fromIndex: fromIndex, toIndex: toIndex)
         }
         return nil
+    }
+
+    /// `ctx.sessions`, ordered left to right on screen, recomputed only when that list or a frame changed
+    /// (a moved window reorders the columns even though the same sessions are open).
+    private func sessionOrder() -> (ordered: [ClaudeSession], groupOf: [String: Int]) {
+        let sessions = ctx.sessions
+        if let cached = sessionOrderCache, cached.sessions == sessions { return (cached.ordered, cached.groupOf) }
+        let screens = NSScreen.screens.map { ScreenGeometry.topLeftFrame(of: $0) }
+        let pairs = SessionOrdering.ordered(ctx.sessions, screens: screens)
+        let ordered = pairs.map(\.session)
+        var groupOf: [String: Int] = [:]
+        for pair in pairs { groupOf[pair.session.id] = pair.group }
+        sessionOrderCache = (sessions, ordered, groupOf)
+        return (ordered, groupOf)
     }
 
     var hasTargetOrCandidate: Bool { tracker.target != nil || tracker.candidate != nil }

@@ -1,4 +1,5 @@
 import SwiftUI
+import EnsembleCore
 
 /// Two white fingertips that tap together twice, then rest: "pinch, pinch".
 struct DoublePinchGlyph: View {
@@ -43,6 +44,37 @@ struct SwitchGlyph: View {
                         .opacity(t > 0.92 ? Double((1 - t) / 0.08) : 1)
                 }
             }
+        }
+    }
+}
+
+/// One outlined column per open session; the lit column slides from the one losing focus to the one gaining
+/// it, following the switch's own progress. `SwitchLayout` (EnsembleCore) does the column math.
+struct SessionColumnsGlyph: View {
+    let count: Int
+    let groupBreaks: Set<Int>
+    let from: Int
+    let to: Int
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { g in
+            let columns = SwitchLayout.columns(count: count, groupBreaks: groupBreaks, width: g.size.width)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(columns.enumerated()), id: \.offset) { _, c in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .stroke(.white.opacity(0.45), lineWidth: 1.2)
+                        .frame(width: c.width, height: g.size.height)
+                        .offset(x: c.x)
+                }
+                if let lit = SwitchLayout.litColumn(from: from, to: to, progress: progress, in: columns) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.ensembleBlue)
+                        .frame(width: lit.width, height: g.size.height)
+                        .offset(x: lit.x)
+                }
+            }
+            .animation(.smooth(duration: 0.4), value: progress)
         }
     }
 }
