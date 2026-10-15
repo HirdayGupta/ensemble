@@ -7,7 +7,7 @@ struct TourCalibrateStep: View {
     @ObservedObject var model: TourModel
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
-    @StateObject private var scene = TourSceneController(scene: .calibrate, wantsFrames: false)
+    @StateObject private var scene = TourSceneController(scene: .calibrate)
 
     private static let blurb = "A dot visits five spots on each screen while you follow it with your head."
 

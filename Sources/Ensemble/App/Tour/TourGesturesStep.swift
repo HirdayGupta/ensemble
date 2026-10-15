@@ -49,9 +49,9 @@ struct TourGesturesStep: View {
     }
 }
 
-/// One 3D scene that follows the active tab, the session mock it drives, and the live skeleton of the owner's own
-/// hand as Vision reads it. The scene is created once for the step, so switching tabs changes its animation
-/// without reloading the page.
+/// One 3D scene that follows the active tab, filling the illustration area at the 16:10 shape the scenes are
+/// composed for, with the live skeleton of the owner's own hand as Vision reads it in a corner. The scene is
+/// created once for the step, so switching tabs changes its animation without reloading the page.
 private struct TabIllustration: View {
     @ObservedObject var model: TourModel
     @StateObject private var scene: TourSceneController
@@ -59,18 +59,18 @@ private struct TabIllustration: View {
     init(model: TourModel) {
         self.model = model
         // Starts on the tab that is open, which is not always the first one when the step is revisited.
-        _scene = StateObject(wrappedValue: TourSceneController(scene: TourScene(model.activeTab), wantsFrames: true))
+        _scene = StateObject(wrappedValue: TourSceneController(scene: TourScene(model.activeTab)))
     }
 
     var body: some View {
         let tab = model.activeTab
-        HStack(alignment: .center, spacing: 16) {
-            TourSceneStage(controller: scene, symbol: tab.symbolName, caption: tab.explanation)
-                .frame(width: 340, height: 236)
-            TourSessionMock(tab: tab, frame: scene.frame)
+        TourSceneStage(controller: scene, symbol: tab.symbolName, caption: tab.explanation) {
             TourHandInset(model: model.handInset, done: model.practiceDone.contains(tab))
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
-        .frame(height: 240)
+        .aspectRatio(16.0 / 10.0, contentMode: .fit)
+        .frame(maxWidth: 560)
         .onChange(of: tab) { _, new in scene.setScene(TourScene(new)) }
     }
 }
