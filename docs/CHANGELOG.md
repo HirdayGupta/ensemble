@@ -4,7 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
-- A five-step tour opens on first launch (look, calibrate, four gestures practised on a 3D hand, permissions), can be skipped at any step, and replays from the menu bar panel, the Option-Command-K panel or Settings. While its gesture step is open, gestures only drive the tour and nothing reaches Claude.
+- A five-step tour opens on first launch (look, calibrate, four gestures shown in 3D scenes, permissions), can be skipped at any step, and replays from the menu bar panel, the Option-Command-K panel or Settings. While its gesture step is open, gestures only drive the tour and nothing reaches Claude, and a small inset draws your hand's 21 joints as the camera reads them, with the gesture it recognises and a check mark when the open tab's gesture is done. The inset holds coordinates only: no frame is stored or sent.
 
 ## 0.1.1
 

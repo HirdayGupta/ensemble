@@ -33,6 +33,7 @@ Sources/Ensemble/App/UpdateController.swift	^https://[^/]+/.*appcast\.xml$
 Info.plist	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Ensemble.entitlements	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Sources/Ensemble/Engine/FaceTracker.swift	AssetSchemeHandler\.scheme
+Sources/Ensemble/App/Tour/TourSceneView.swift	AssetSchemeHandler\.scheme
 Sources/Ensemble/Engine/NetworkBlock.swift	url-filter
 Sources/Ensemble/Engine/NetworkBlock.swift	^(https?|wss?|ftp)://
 web/wasm/vision_wasm_internal.wasm	^http://go/lsc_proto3_utf8$
