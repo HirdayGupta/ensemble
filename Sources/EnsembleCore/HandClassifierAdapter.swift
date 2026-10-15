@@ -1,7 +1,7 @@
 import Foundation
 
 public enum HandClassifierAdapter {
-    /// Maps one Sleight hand reading to a `HandObservation`. Swipes are not used by Ensemble.
+    /// Maps one Sleight hand reading to a `HandObservation`.
     public static func observation(from hand: Hand?, at t: TimeInterval, classifier: GestureClassifier) -> HandObservation {
         guard let hand else { return HandObservation(t: t, present: false, pose: nil, palmCenter: nil) }
         var pinch: Double?
@@ -22,7 +22,7 @@ public enum HandClassifierAdapter {
         case .gather: return .gather
         case .pointUp: return .pointUp
         case .pointDown: return .pointDown
-        case .swipeLeft, .swipeRight, .none: return nil
+        case .none: return nil
         }
     }
 }

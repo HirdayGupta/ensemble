@@ -19,4 +19,4 @@ Run both from inside `Tools/PerfBench`.
 
 ## Size
 
-CI fails if the built app passes 7.4 MB, through `scripts/check-size.sh`.
+CI fails if the built app passes the byte budget set in `scripts/check-size.sh`.

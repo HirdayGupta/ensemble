@@ -1,5 +1,5 @@
 # Checks on the repository itself rather than the app: workflow security (zizmor), action pins (pinact), and a
-# secrets scan over the whole history. The same zizmor and gitleaks versions run locally through .pre-commit-config.yaml.
+# secrets scan over the whole history, plus the website logic tests. The same zizmor and gitleaks versions run locally through .pre-commit-config.yaml.
 name: hygiene
 
 on:
@@ -49,3 +49,20 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  website-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Website logic tests
+        run: node --test docs/live/test/logic.test.mjs
