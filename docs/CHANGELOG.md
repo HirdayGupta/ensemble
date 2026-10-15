@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- The onboarding tour is in light mode, like the website's live demo: a white window with the app's blue on the selected tab and buttons, the gestures step's Claude window in Claude's light theme, the hand and the welcome and calibration scenes on a white background, and the camera panel and success badge on white.
 - The "Claude's microphone may still be on" alarm now always shows as a banner on the island and stays until the safety check confirms the microphone is off and the mute is undone, even when notifications are refused or a Focus mode hides them; the system notification is sent as well when allowed.
 - On first launch the tour's Welcome step is no longer covered by the Accessibility prompt and the Camera request: the camera starts when the tour moves on to calibration, and the Accessibility prompt waits for the tour's permissions step or for the tour to close.
 - The tour's Camera card now has three states: Allow (not asked yet), Open Settings with a plain explanation (denied), and Granted. The Accessibility Grant button also opens the Accessibility list in System Settings, because macOS shows its own prompt only once.

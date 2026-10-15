@@ -58,7 +58,7 @@
       transparent: true, depthWrite: false,
       uniforms: {
         uCam: { value: new THREE.Vector3() },
-        uCol: { value: new THREE.Color(0xaab6cb) },
+        uCol: { value: new THREE.Color(0xb4c0d4) },
         uMajor: { value: new THREE.Color(0x6f84a6) }
       },
       extensions: { derivatives: true },
@@ -68,10 +68,10 @@
         'float grid(vec2 p, float s){ vec2 q = p / s; vec2 g = abs(fract(q - 0.5) - 0.5) / max(fwidth(q), vec2(1e-4)); return 1.0 - min(min(g.x, g.y), 1.0); }',
         'void main(){',
         '  float d = length(vW.xz - uCam.xz);',
-        '  float fade = 1.0 - smoothstep(8.0, 85.0, d);',
+        '  float fade = 1.0 - smoothstep(6.0, 40.0, d);',
         '  float minor = grid(vW.xz, 1.0);',
         '  float major = grid(vW.xz, 5.0);',
-        '  float a = (minor * 0.34 + major * 0.55) * fade;',
+        '  float a = (minor * 0.2 + major * 0.42) * fade;',
         '  vec3 c = mix(uCol, uMajor, major);',
         '  gl_FragColor = vec4(c, a);',
         '}'
@@ -800,7 +800,7 @@
     }]);
 
     // materials: translucent wood with a clean rim, plus joint rings
-    var fillMat = rimMaterial(WOOD_FILL, WOOD_RIM, 0.46, true, 0.84);
+    var fillMat = rimMaterial(WOOD_FILL, WOOD_RIM, 0.85, true, 0.84);
     fillMat.uniforms.uGrain.value = 1.0;
     fillMat.stencilWrite = true; fillMat.stencilRef = 1; fillMat.stencilFunc = THREE.AlwaysStencilFunc; fillMat.stencilZPass = THREE.ReplaceStencilOp;
     skinned.material = fillMat;
@@ -860,7 +860,7 @@
     var fdir = mc.clone().normalize().negate();
     var armGeo = new THREE.CylinderGeometry(0.046, 0.031, 0.42, 24, 1, true);
     armGeo.translate(0, 0.21, 0);
-    var armMat = rimMaterial(WOOD_FILL, WOOD_RIM, 0.3, false, 0.8);
+    var armMat = rimMaterial(WOOD_FILL, WOOD_RIM, 0.6, false, 0.8);
     armMat.uniforms.uGrain.value = 1.0; armMat.uniforms.uFadeLen.value = 0.42;
     var arm = new THREE.Mesh(armGeo, armMat);
     arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fdir);
