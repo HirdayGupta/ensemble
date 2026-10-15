@@ -6,25 +6,32 @@ import EnsembleCore
 final class SendController {
     private let ctx: CoordinatorContext
     private(set) var lastSpoken: (session: ClaudeSession, stoppedAt: Date)?
-    /// Thumbs-up made straight from the fist: send once the stop is confirmed.
-    var afterStop = false
+    /// Thumbs-up made straight from the fist, or Return pressed twice while dictating: send once the stop is confirmed.
+    var afterStop = false { didSet { if !afterStop { afterStopByReturn = false } } }
+    /// The pending send was asked for with Return, so the Return presses are not "typing since dictation".
+    var afterStopByReturn = false
+    /// For a send asked for with Return: seconds since a click or any key other than those Returns.
+    var returnInputAge: () -> Double = { ClaudeBridge.secondsSinceTypingOrClick() }
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
     func spoke(in session: ClaudeSession) { lastSpoken = (session, Date()) }
     func forget() { lastSpoken = nil }
 
-    func request() {
-        guard ctx.settings.mapping.send != nil else { return }
+    /// `byReturn`: asked for with Return pressed twice, not a gesture, so the gesture send setting does not apply and
+    /// the Returns themselves do not count as typing. Every other rule is the same.
+    func request(byReturn: Bool = false) {
+        guard byReturn || ctx.settings.mapping.send != nil else { return }
+        let inputAge = { byReturn ? self.returnInputAge() : ClaudeBridge.secondsSinceTypingOrClick() }
         // Acting only on Claude: a thumbs-up made while another app is in front sends nothing.
         guard claudeInFront() else { return }
         guard ctx.listening == nil, !ctx.busy else {
             ctx.refuse("Send ignored: busy (\(ctx.listening != nil ? "still listening" : "a step in flight"))")
             return
         }
-        if let why = ctx.commonRefusal() { ctx.refuse(why); return }
+        if let why = ctx.commonRefusal(inputAge: inputAge()) { ctx.refuse(why); return }
         let spokenAgo = lastSpoken.map { Date().timeIntervalSince($0.stoppedAt) }
-        if let why = SendRules.refusal(spokenAgo: spokenAgo, inputAge: ClaudeBridge.secondsSinceTypingOrClick()) { ctx.refuse(why); return }
+        if let why = SendRules.refusal(spokenAgo: spokenAgo, inputAge: inputAge()) { ctx.refuse(why); return }
         guard let spoken = lastSpoken else { return }
         let session = spoken.session
         if let other = ctx.bridge.otherProcessCapturingInput() { ctx.refuse("\(other) is using a microphone"); return }
@@ -35,7 +42,7 @@ final class SendController {
             // The draft read takes a moment; a new dictation or keystroke may have started meanwhile.
             guard self.ctx.listening == nil, !self.ctx.busy else { self.ctx.refuse("Send dropped: something else started"); return }
             guard self.claudeInFront() else { return }
-            if let why = SendRules.typedRefusal(spokenAgo: Date().timeIntervalSince(spoken.stoppedAt), inputAge: ClaudeBridge.secondsSinceTypingOrClick()) {
+            if let why = SendRules.typedRefusal(spokenAgo: Date().timeIntervalSince(spoken.stoppedAt), inputAge: inputAge()) {
                 self.ctx.refuse(why); return
             }
             EnsembleLog.write("sending (\(text.count) characters)")

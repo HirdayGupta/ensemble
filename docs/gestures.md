@@ -12,6 +12,10 @@ What each gesture does and what Settings can change. The overview is in the [REA
 | Press the headphone stem once (Bluetooth output) | Same as the double pinch, in the session you are looking at: starts dictation, or stops it. Refused with the usual message when no session is targeted, Claude is not in front or the calibration is missing. |
 | Press the headphone stem twice | Same as the thumbs-up: sends the dictated draft under the same rules. |
 | Pinch and drag up or down | Scrolls the session, at your system's scroll direction and speed. A fast release carries on with momentum, a slow release stops dead. |
+| Press Return while dictating | Stops the dictation, with the usual short tail so the last word is caught, and keeps the text unsent. Claude never sees that Return. Press Return again once it has stopped and Claude sends as it always does. Only while a dictation Ensemble started is running and Claude is in front; Shift-Return and other modified Returns are left alone. |
+| Press Return twice quickly while dictating | Stops, waits for the transcript to settle, then sends the draft under the thumbs-up's rules (Claude in front, a draft, nothing else typed or clicked since). A second Return while the stop is still in progress, or within 0.5 seconds of the first, counts. If the stop cannot be confirmed, nothing is sent and the island says "Not sent". |
+
+When Ensemble starts a dictation, it also puts the keyboard in that session's message box, so a key you type while dictating lands there. It does this only while Claude is the app in front, and leaves focus alone otherwise.
 
 Ensemble does no speech recognition of its own. The status capsule at the top of the screen, a floating one on screens without a notch, names the state and the session. Option-Command-K opens the control panel from anywhere.
 

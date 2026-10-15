@@ -16,6 +16,9 @@ final class Coordinator: AppCoordinating {
     private let send: SendController
     private let dictation: DictationController
     private let headphone: HeadphoneRemote
+    /// Return while dictating: the first press stops, a second sends. See `handleKey`.
+    private let keyTap = ReturnKeyTap()
+    private var returnKeys = ReturnKeys()
     private var state: AppState { ctx.state }
     private var settings: SettingsStore { ctx.settings }
     private var gestures: GestureMachine { ctx.gestures }
@@ -54,6 +57,16 @@ final class Coordinator: AppCoordinating {
         ctx.changed = { [weak self] in self?.pushOverlay() }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
+        dictation.stopResolved = { [weak self] confirmed in self?.stopResolved(confirmed: confirmed) }
+        keyTap.onKey = { [weak self] isReturn, modified, isRepeat in
+            self?.handleKey(isReturn: isReturn, modified: modified, isRepeat: isRepeat) ?? false
+        }
+        keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
+        send.returnInputAge = { [weak self] in
+            let clicks = ClaudeBridge.secondsSinceClick()
+            guard let self else { return clicks }
+            return ReturnKeys.inputAge(clickAge: clicks, lastOtherKeyAt: self.returnKeys.lastOtherKeyAt, now: CACurrentMediaTime())
+        }
 
         ctx.pointer.correctsForPosition = settings.correctForPosition
         ctx.pointer.screenSizeProvider = { ScreenGeometry.physicalSizeCm(ofScreenID: $0) }
@@ -141,6 +154,7 @@ final class Coordinator: AppCoordinating {
         scroll.cancel()
         focus.clearDeferred(); send.afterStop = false; send.forget()
         focus.forgetTarget()
+        returnKeys.reset(); keyTap.setActive(false)
         state.status = .off
         pushOverlay()
     }
@@ -345,6 +359,8 @@ final class Coordinator: AppCoordinating {
             if ctx.listening != nil ? !ctx.busy : scroll.isRunning, ScreenFacts.sessionAway() { interrupt("screen locked") }
         }
         dictation.supervise(now: now)
+        if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
+        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.awaitingStop || returnKeys.inDoubleWindow(now: now)))
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
@@ -444,11 +460,53 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// A key press while the key watch is on (an Ensemble dictation, or just after one). Only Return without
+    /// modifiers, with Claude in front, is ever kept from Claude; the rules are in `ReturnKeys`.
+    private func handleKey(isReturn: Bool, modified: Bool, isRepeat: Bool) -> Bool {
+        let now = CACurrentMediaTime()
+        let decision = returnKeys.press(isReturn: isReturn, modified: modified, isRepeat: isRepeat,
+                                        claudeInFront: ctx.bridge.claudeIsFrontmost(), dictating: ctx.listening != nil, now: now)
+        switch decision {
+        case .pass:
+            return false
+        case .swallow:
+            return true
+        case .swallowAndStop:
+            EnsembleLog.write("Return: stopping dictation")
+            ctx.overlay.clearBanner()
+            // A start or stop press may be in flight; the stop then waits for it, the same as calibrating does.
+            if ctx.busy { dictation.endWhenIdle(reason: "Return") } else { dictation.end(reason: "Return") }
+            return true
+        case .swallowAndSendAfterStop:
+            EnsembleLog.write("Return twice: send after stop")
+            send.afterStop = true
+            send.afterStopByReturn = true
+            return true
+        case .swallowAndSend:
+            EnsembleLog.write("Return twice: sending")
+            // The stop was confirmed a moment ago; Claude finalises the transcript shortly after the mic stops.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                self.send.request(byReturn: true)
+            }
+            return true
+        }
+    }
+
+    private func stopResolved(confirmed: Bool) {
+        if confirmed {
+            returnKeys.stopConfirmed(now: CACurrentMediaTime())
+        } else if returnKeys.stopFailed() {
+            ctx.refuse("Not sent: the stop was not confirmed")
+        }
+    }
+
     /// The Mac is going to sleep, the screen locked, or the safety check ended the hold: stop dictation now (no
     /// tail wait), and forget anything that was about to act. The text stays; nothing is sent.
     private func interrupt(_ reason: String) {
         EnsembleLog.write("interrupt: \(reason)")
         send.afterStop = false; focus.clearDeferred()
+        returnKeys.reset()
         send.forget()
         scroll.cancel()
         gestures.reset()
