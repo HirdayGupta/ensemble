@@ -41,7 +41,8 @@ extension ClaudeBridge {
 
     /// Gives `divider` keyboard focus, so the keys Ensemble posts next move it, and confirms that it holds it. Only
     /// with Claude in front; never raises Claude or moves it in front. With several Claude windows the session's own
-    /// is made main first if the focus does not land.
+    /// is made main if the focus does not land. False when it has not landed yet: right after a burst of keys on
+    /// another divider it took up to 1.6 s (measured 2026-10-15), so the caller keeps checking `dividerHoldsKeyboard`.
     func focusDivider(_ divider: AXUIElement, in s: ClaudeSession) async -> Bool {
         await run {
             guard self.claudeIsFrontmost(), let pid = self.claudePID else { return false }
@@ -67,7 +68,8 @@ extension ClaudeBridge {
         AX.element(AX.application(pid: pid), kAXFocusedUIElementAttribute).map { CFEqual($0, el) } ?? false
     }
 
-    /// Focus lands a moment after it is set (about 20 ms measured); polls for up to 0.2 s.
+    /// Focus lands a moment after it is set (about 20 ms from the message box); polls for up to 0.2 s. Longer waits
+    /// are the caller's, between short reads, so the bridge queue is never held.
     private func waitForKeyboard(_ el: AXUIElement, pid: pid_t) -> Bool {
         let deadline = Date().addingTimeInterval(0.2)
         while true {

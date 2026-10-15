@@ -6,8 +6,10 @@ import Foundation
 /// it holds keyboard focus: an arrow moves it 8 pt, Shift and an arrow 32 pt, Home and End to the pair's limit (the
 /// pane on that side down to Claude's minimum width). Setting its value through Accessibility is accepted and
 /// ignored. A press changes only the two panes beside that divider, so width reaches a pane two places away by
-/// moving every divider in between, the outer one first. Measured on the owner's Claude on 2026-10-15: presses 10 ms
-/// apart all landed with one focus, and the frames read back about 170 ms after a press.
+/// moving every divider in between, the outer one first. Measured on the owner's Claude on 2026-10-15: keys 10 ms
+/// apart all land, Claude's frames read back about 170 ms after a key, and after a burst of keys moving the keyboard
+/// to the next divider took 0.7 to 1.6 s (12 to 140 ms after a single key). So a layout glides in steps only when a
+/// few keys do it; otherwise each divider takes one Home or End and a few steps.
 ///
 /// Widths here are the panes' own widths without the gaps between them; a press keeps the pair's sum.
 public enum PaneKeys {
@@ -34,12 +36,10 @@ public enum PaneKeys {
 
     public static let arrow: Double = 8
     public static let shiftArrow: Double = 32
-    /// One press per display frame while a divider glides, so each step shows.
-    public static let interval: Double = 1.0 / 60
-    /// The fastest pace: presses 10 ms apart all landed (16 in a row, measured 2026-10-15).
-    public static let fastestInterval: Double = 0.01
-    /// A layout glides for at most this long; a longer one goes faster, down to `fastestInterval`, and past that
-    /// jumps with Home and End for the bulk and steps only the rest.
+    /// Seconds between keys: two display frames. Keys 10 ms apart all landed, and 16 of them had all been drawn
+    /// within 0.6 s, so Claude keeps up at this pace and each step shows.
+    public static let interval: Double = 1.0 / 30
+    /// A layout glides in steps when its keys fit in this long; otherwise it jumps with Home and End for the bulk.
     public static let animateBudget: Double = 0.4
     /// Claude's minimum pane width when its dividers report no limits (the limits read 24 percent of a 1320 pt pair).
     public static let fallbackMinimum: Double = 316
@@ -69,23 +69,17 @@ public enum PaneKeys {
         return Array(repeating: widths.reduce(0, +) / Double(widths.count), count: widths.count)
     }
 
-    /// The presses that take the row from `widths` to `target`. Steps (a glide) when they fit `animateBudget` at the
-    /// fastest pace, otherwise Home and End for the bulk of each move where that saves presses, and steps for the rest. Empty when nothing needs to move or
-    /// the input does not describe one row (counts differ, totals differ, non-finite).
+    /// The presses that take the row from `widths` to `target`: steps (a glide) when they fit `animateBudget`,
+    /// otherwise Home and End for the bulk of each move where that saves keys, and steps for the rest. Empty when
+    /// nothing needs to move or the input does not describe one row (counts differ, totals differ, non-finite).
     public static func plan(from widths: [Double], to target: [Double], minimum: Double) -> [Press] {
         let glide = plan(from: widths, to: target, minimum: minimum, jumps: false)
         if duration(glide) <= animateBudget { return glide }
         return plan(from: widths, to: target, minimum: minimum, jumps: true)
     }
 
-    /// Seconds between presses: one a frame, faster when that would run past `animateBudget`.
-    public static func pace(_ count: Int) -> Double {
-        guard count > 0 else { return interval }
-        return max(fastestInterval, min(interval, animateBudget / Double(count)))
-    }
-
-    /// How long the presses take at their `pace`.
-    public static func duration(_ presses: [Press]) -> Double { Double(presses.count) * pace(presses.count) }
+    /// How long the keys take at `interval`, not counting the moves of the keyboard from one divider to the next.
+    public static func duration(_ presses: [Press]) -> Double { Double(presses.count) * interval }
 
     /// What the presses do to a row whose panes cannot go below `minimum`, as Claude does it.
     public static func simulate(_ widths: [Double], minimum: Double, presses: [Press]) -> [Double] {

@@ -23,22 +23,16 @@ import Testing
             for (i, x) in w.enumerated() {
                 if i == k { #expect(abs(x - (2520 - Double(n - 1) * claudeMin)) < 0.001) } else { #expect(abs(x - claudeMin) < 0.001) }
             }
-            // Each divider moves once, ending on Home or End so it lands exactly on Claude's limit.
-            let order = presses.map(\.divider)
-            #expect(Set(order).count == n - 1)
-            #expect(order.indices.allSatisfy { $0 == 0 || order[$0 - 1] == order[$0] || !order[..<$0].contains(order[$0]) })
-            #expect(presses.filter { $0.key == .home || $0.key == .end }.count == n - 1)
-            #expect(PaneKeys.duration(presses) <= PaneKeys.animateBudget + 0.001)
+            // One jump per divider, each landing exactly on Claude's limit.
+            #expect(presses.count == n - 1)
+            #expect(presses.allSatisfy { $0.key == .home || $0.key == .end })
         }
     }
 
     @Test func widthReachesTheSessionThroughThePanesBetweenOuterFirst() throws {
         let even = [630.0, 630, 630, 630]
         let target = try #require(PaneKeys.maximizeWidths(even, focus: 2, minimum: claudeMin))
-        // A glide (Shift steps) on each divider in turn, each ending on its jump: outer dividers first.
-        let glide = run(even, to: target).presses
-        #expect(glide.filter { $0.key == .home || $0.key == .end } == [.init(0, .home), .init(1, .home), .init(2, .end)])
-        #expect(glide.map(\.divider) == glide.map(\.divider).sorted())
+        #expect(run(even, to: target).presses == [.init(0, .home), .init(1, .home), .init(2, .end)])
         // The far end of the row holds the width: it is passed along three panes to the other end.
         let skewed = [1572.0, 316, 316, 316]
         let far = try #require(PaneKeys.maximizeWidths(skewed, focus: 3, minimum: claudeMin))
@@ -64,8 +58,9 @@ import Testing
         let maxed = run(even, to: target).widths
         let (w, presses) = run(maxed, to: try #require(PaneKeys.evenWidths(maxed)))
         for x in w { #expect(abs(x - 630) <= PaneKeys.arrow) }
-        // Mid-row moves cannot jump (no limit is near): 45 keys at the fastest pace in the worst case, 0.45 s.
-        #expect(PaneKeys.duration(presses) <= 0.5)
+        // Mid-row moves gain little from a jump (no limit is near); the jumps that do save keys are taken.
+        #expect(presses.count <= 45)
+        #expect(presses.contains { $0.key == .home || $0.key == .end })
     }
 
     @Test func maximizingAnotherSessionMovesTheWidthAcross() throws {
@@ -77,23 +72,21 @@ import Testing
     }
 
     @Test func aSmallMoveGlidesInSteps() {
-        // A 104 pt fit: three Shift steps and one arrow, one a frame, well inside the budget.
+        // A 104 pt fit: three Shift steps and one arrow, inside the budget.
         let presses = PaneKeys.plan(from: [728, 896], to: [832, 792], minimum: claudeMin)
         #expect(presses.map(\.key) == [.shiftRight, .shiftRight, .shiftRight, .right])
-        #expect(PaneKeys.pace(presses.count) == PaneKeys.interval)
+        #expect(PaneKeys.duration(presses) <= PaneKeys.animateBudget)
         #expect(abs(PaneKeys.simulate([728, 896], minimum: claudeMin, presses: presses)[0] - 832) <= PaneKeys.arrow / 2)
     }
 
-    @Test func aLongGlideSpeedsUpThenJumps() {
-        // Never faster than presses 10 ms apart; past 40 presses the budget is spent and the plan jumps.
-        #expect(PaneKeys.pace(10) == PaneKeys.interval)
-        #expect(abs(PaneKeys.pace(30) - 0.4 / 30) < 1e-9)
-        #expect(PaneKeys.pace(400) == PaneKeys.fastestInterval)
-        // 2000 pt to give in a two-pane row: a glide would need 63 presses; End then a few steps back is three.
+    @Test func aLongMoveJumpsThenSteps() {
+        // 2020 pt in a two-pane row: a glide would need 64 keys; End then two Shift steps back is three.
         let presses = PaneKeys.plan(from: [400, 2400], to: [2420, 380], minimum: claudeMin)
-        #expect(presses.first?.key == .end && presses.count <= 4)
+        #expect(presses.map(\.key) == [.end, .shiftLeft, .shiftLeft])
         let w = PaneKeys.simulate([400, 2400], minimum: claudeMin, presses: presses)
         #expect(abs(w[0] - 2420) <= PaneKeys.arrow / 2)
+        // A move that ends on a limit is one key, however far.
+        #expect(PaneKeys.plan(from: [1260, 1260], to: [316, 2204], minimum: claudeMin) == [.init(0, .home)])
     }
 
     @Test func aFitPlanReachesTheChatColumn() throws {
@@ -102,7 +95,7 @@ import Testing
         let (w, presses) = run(row, to: fit)
         #expect(abs(w[1] - 832) <= PaneKeys.arrow)
         #expect(abs(w.reduce(0, +) - 2520) < 0.001)
-        #expect(PaneKeys.duration(presses) <= PaneKeys.animateBudget + 0.001)
+        #expect(presses.count <= 12)
     }
 
     @Test func nothingToDoIsNoPresses() {

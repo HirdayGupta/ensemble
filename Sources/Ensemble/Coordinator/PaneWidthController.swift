@@ -32,6 +32,8 @@ final class PaneWidthController {
     private static let passes = 2
     /// Claude's frames show a key about 170 ms after it (measured 2026-10-15); the read-back waits this long.
     private static let settle: UInt64 = 220_000_000
+    /// How long a divider may take to hold the keyboard: up to 1.6 s was measured after a burst of keys.
+    private static let focusWait: TimeInterval = 2
     /// Frames are read again after this many keys while a glide runs.
     private static let refreshEvery = 6
 
@@ -148,7 +150,7 @@ final class PaneWidthController {
             guard let want = goal(widths, k, minimum, row.map(\.frame)) else { return .done(presses: total) }
             let presses = PaneKeys.plan(from: widths, to: want, minimum: minimum)
             guard !presses.isEmpty else { return .done(presses: total) }
-            EnsembleLog.write("pane widths: pass \(pass + 1), \(presses.count) keys \(Int(PaneKeys.pace(presses.count) * 1000)) ms apart, "
+            EnsembleLog.write("pane widths: pass \(pass + 1), \(presses.count) keys, "
                               + "minimum \(Int(minimum)) pt, \(widths.map { Int($0) }) to \(want.map { Int($0) })")
             if let why = await press(presses, on: dividers.map(\.element), in: target) { return .stopped(why) }
             total += presses.count
@@ -157,9 +159,9 @@ final class PaneWidthController {
         return .done(presses: total)
     }
 
-    /// The planned keys, one every `PaneKeys.pace`. nil when they all went, else why it stopped.
+    /// The planned keys, one every `PaneKeys.interval`. nil when they all went, else why it stopped.
     private func press(_ presses: [PaneKeys.Press], on dividers: [AXUIElement], in target: ClaudeSession) async -> String? {
-        let pace = UInt64(PaneKeys.pace(presses.count) * 1_000_000_000)
+        let pace = UInt64(PaneKeys.interval * 1_000_000_000)
         let since = startedAt
         func safe() -> String? {
             if let why = blocker() { return why }
@@ -170,12 +172,27 @@ final class PaneWidthController {
         ClaudeBridge.ownKeys(began: true)
         defer { ClaudeBridge.ownKeys(began: false) }
         var focused: Int?
+        let began = CACurrentMediaTime()
+        defer {
+            EnsembleLog.write("pane widths: \(presses.count) keys over \(Set(presses.map(\.divider)).count) dividers in "
+                              + "\(Int((CACurrentMediaTime() - began) * 1000)) ms")
+        }
         for (i, p) in presses.enumerated() {
             if let why = safe() { return why }
             let divider = dividers[p.divider]
             if focused != p.divider {
                 if focused != nil { refreshFrames() }
-                guard await ctx.bridge.focusDivider(divider, in: target) else { return "the divider did not take the keyboard" }
+                if !(await ctx.bridge.focusDivider(divider, in: target)) {
+                    // Claude can take a second or more to move the keyboard after a burst of keys on another divider.
+                    let until = CACurrentMediaTime() + Self.focusWait
+                    var holds = false
+                    while !holds, CACurrentMediaTime() < until {
+                        try? await Task.sleep(nanoseconds: 30_000_000)
+                        if let why = safe() { return why }
+                        holds = await ctx.bridge.dividerHoldsKeyboard(divider)
+                    }
+                    if !holds { return "the divider did not take the keyboard" }
+                }
                 focused = p.divider
             } else if !(await ctx.bridge.dividerHoldsKeyboard(divider)) {
                 return "the divider lost the keyboard"
