@@ -97,6 +97,13 @@ import Testing
         #expect(profile.neighbour(of: Self.leftFrame, inSpot: profile.spots[0].id, validScreenIDs: [Self.left], excluding: [Self.left]) == nil)
     }
 
+    @Test func theNearestOfSeveralCalibratedScreensIsChosen() {
+        let profile = Self.profile(left: Self.leftFollowed)
+        let nearest = profile.neighbour(of: Self.leftFrame, inSpot: profile.spots[0].id, validScreenIDs: [Self.main, Self.left],
+                                        excluding: [])
+        #expect(nearest?.frame == Self.leftFrame)
+    }
+
     @Test func theFirstDotOfAOneScreenRunNeedsATurnAwayFromTheMainScreen() {
         let profile = Self.profile(left: Self.leftFollowed)
         let rule = AimRule()
