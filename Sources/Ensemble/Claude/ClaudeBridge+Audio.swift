@@ -121,39 +121,45 @@ extension ClaudeBridge {
     }
 
     static func secondsSinceTypingOrClick() -> Double {
-        min(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown), secondsSinceClick())
+        min(secondsSinceOwnerKey(), secondsSinceClick())
     }
 
-    /// Clicks only, for a send asked for with Return: the keys are watched separately. A press Ensemble posted itself
-    /// (a pane divider drag) is not the owner's click (`OwnPointerEvents`).
+    /// Clicks only, for a send asked for with Return: the keys are watched separately.
     static func secondsSinceClick() -> Double {
-        let now = CACurrentMediaTime()
-        func age(_ state: CGEventSourceStateID) -> Double {
-            [CGEventType.leftMouseDown, .rightMouseDown].map { CGEventSource.secondsSinceLastEventType(state, eventType: $0) }.min() ?? .infinity
-        }
-        let combined = age(.combinedSessionState)
-        ownPointerLock.lock(); defer { ownPointerLock.unlock() }
-        return ownPointerEvents.ownerClickAge(combined: combined, hardware: age(.hidSystemState), now: now)
+        [CGEventType.leftMouseDown, .rightMouseDown].map {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+        }.min() ?? .infinity
     }
 
-    private static let ownPointerLock = NSLock()
-    nonisolated(unsafe) private static var ownPointerEvents = OwnPointerEvents()
-
-    /// Ensemble's own press windows so far, for `HandsBusy`.
-    static func ownPointerEventsNow() -> OwnPointerEvents {
-        ownPointerLock.lock(); defer { ownPointerLock.unlock() }
-        return ownPointerEvents
+    /// Seconds since the owner last pressed a key. A key Ensemble posted itself (a pane divider key) is not the
+    /// owner typing (`OwnInputWindows`).
+    static func secondsSinceOwnerKey() -> Double {
+        let now = CACurrentMediaTime()
+        let combined = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        let hardware = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown)
+        ownKeyLock.lock(); defer { ownKeyLock.unlock() }
+        return ownKeys.ownerAge(combined: combined, hardware: hardware, now: now)
     }
 
-    /// Ensemble starts or ends posting its own mouse presses; see `OwnPointerEvents`.
-    static func ownPointerEvents(began: Bool) {
+    private static let ownKeyLock = NSLock()
+    nonisolated(unsafe) private static var ownKeys = OwnInputWindows()
+
+    /// Ensemble's own key windows so far, for `HandsBusy`.
+    static func ownKeysNow() -> OwnInputWindows {
+        ownKeyLock.lock(); defer { ownKeyLock.unlock() }
+        return ownKeys
+    }
+
+    /// Ensemble starts or ends posting its own keys; see `OwnInputWindows`.
+    static func ownKeys(began: Bool) {
         let now = CACurrentMediaTime()
-        ownPointerLock.lock(); defer { ownPointerLock.unlock() }
-        if began { ownPointerEvents.begin(at: now) } else { ownPointerEvents.end(at: now) }
+        ownKeyLock.lock(); defer { ownKeyLock.unlock() }
+        if began { ownKeys.begin(at: now) } else { ownKeys.end(at: now) }
     }
 
     static func secondsSinceUserInput() -> Double {
-        let types: [CGEventType] = [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel]
-        return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+        let types: [CGEventType] = [.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel]
+        let other = types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+        return min(other, secondsSinceOwnerKey())
     }
 }

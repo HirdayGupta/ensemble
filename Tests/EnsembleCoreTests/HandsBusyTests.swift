@@ -130,23 +130,22 @@ import Testing
         #expect(!p22)
     }
 
-    @Test func ensemblesOwnDividerDragIsNotUse() {
-        var own = OwnPointerEvents()
+    @Test func ensemblesOwnDividerKeysAreNotTyping() {
+        var own = OwnInputWindows()
         own.begin(at: 10)
-        // Mid-drag the pointer Ensemble is moving is not yours, even when it lands as movement.
-        let during = HandsBusy.ownPointerAt(drags: own, ownScrollAt: never, now: 10.2)
-        #expect(during == 10.2)
+        own.end(at: 10.5)
+        // A key read inside the window is Ensemble's own, even if a reading ever mixed it into the hardware state.
+        let ownKey = HandsBusy.ownKeyAt(keys: own, keyAt: 10.3, other: never)
+        #expect(ownKey == 10.3)
         var s = HandsBusy()
         _ = read(&s, 10)
-        let p23 = read(&s, 10.2, move: 10.19, at: CGPoint(x: 800, y: 400), ownPointer: during)
+        let p23 = read(&s, 10.4, key: 10.3, ownKey: ownKey)
         #expect(!p23)
-        // A real click during the drag still counts.
+        // A key after the window is yours; the other own key still counts as before.
+        #expect(HandsBusy.ownKeyAt(keys: own, keyAt: 11, other: 9) == 9)
         var t = HandsBusy()
-        let p24 = read(&t, 10.25, click: 10.24, ownPointer: HandsBusy.ownPointerAt(drags: own, ownScrollAt: never, now: 10.25))
+        let p24 = read(&t, 11.1, key: 11, ownKey: HandsBusy.ownKeyAt(keys: own, keyAt: 11, other: never))
         #expect(p24)
-        own.end(at: 10.5)
-        // After the drag, the last own scroll is what counts again.
-        #expect(HandsBusy.ownPointerAt(drags: own, ownScrollAt: 9, now: 11) == 9)
     }
 
     @Test func oneStrayReadingRightAfterAResumeDoesNotPauseAgain() {

@@ -83,6 +83,34 @@ import Testing
         do { let r = f.noteCovered("R", at: 11.2); #expect(!r) } // another session restarts the clock
     }
 
+    @Test func theTargetFollowsAResizedPane() {
+        var f = FocusTracker()
+        _ = f.observe(under: left, at: 10, held: false, listening: false)
+        _ = f.observe(under: left, at: 10.1, held: false, listening: false)
+        var wider = left
+        wider.frame = CGRect(x: 0, y: 0, width: 900, height: 500)
+        // A fresh session list moves the highlight at once, without a new reading.
+        f.refresh(from: [wider, right])
+        #expect(f.target?.frame.width == 900)
+        // A reading of the same session with a new frame keeps the new frame, and is not a move.
+        var narrower = left
+        narrower.frame = CGRect(x: 0, y: 0, width: 320, height: 500)
+        #expect(f.observe(under: narrower, at: 10.2, held: false, listening: false) == nil)
+        #expect(f.target?.frame.width == 320)
+        // A list without the target leaves it as it was.
+        f.refresh(from: [right])
+        #expect(f.target?.frame.width == 320)
+    }
+
+    @Test func aRefreshKeepsTheCandidateAndItsClock() {
+        var f = FocusTracker()
+        _ = f.observe(under: right, at: 10, held: false, listening: false)
+        var moved = right
+        moved.frame = CGRect(x: 400, y: 0, width: 600, height: 500)
+        f.refresh(from: [left, moved])
+        #expect(f.candidate?.session?.frame.minX == 400 && f.candidate?.since == 10)
+    }
+
     @Test func forgettingKeepsWhatItShouldKeep() {
         var f = FocusTracker()
         _ = f.observe(under: left, at: 10, held: false, listening: false)

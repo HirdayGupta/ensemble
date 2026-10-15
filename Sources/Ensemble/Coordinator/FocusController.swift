@@ -61,6 +61,8 @@ final class FocusController {
     private var owedFocus = false
     /// When Ensemble last raised Claude or moved its keyboard focus itself, for `HandsBusy`.
     private(set) var lastOwnFocusAt: TimeInterval = -.infinity
+    /// The session list was just read again (a resize): the highlight takes the fresh frames at once.
+    func refreshFrames() { tracker.refresh(from: ctx.sessions) }
 
     /// One nose reading. Moves the target after its dwell and raises a covered session the nose rests on.
     /// `paused` (hands on the keyboard or mouse): the target still follows the nose, so a gesture acts on the session

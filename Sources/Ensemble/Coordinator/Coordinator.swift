@@ -22,6 +22,8 @@ final class Coordinator: AppCoordinating {
     private var returnKeys = ReturnKeys()
     /// Fits the focused session to Claude's chat column once focus has settled on it; see `fitFocusedSession`.
     private var fitTrigger = SessionFit.Trigger()
+    /// The last tick a calibration was running: no fit for a few seconds after it (`SessionFit.Hold`).
+    private var lastCalibratingAt: TimeInterval = -.infinity
     /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
     private var handsBusy = HandsBusy()
     private var pausedSince: TimeInterval = 0
@@ -76,6 +78,13 @@ final class Coordinator: AppCoordinating {
         headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
         panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
+        panes.keyWatchOn = { [weak self] in self?.keyTap.isActive ?? true }
+        panes.framesChanged = { [weak self] in
+            guard let self else { return }
+            self.focus.refreshFrames()
+            self.dot.place(target: self.focus.target)
+            self.pushOverlay()
+        }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
         dictation.stopResolved = { [weak self] confirmed in self?.stopResolved(confirmed: confirmed) }
@@ -480,6 +489,7 @@ final class Coordinator: AppCoordinating {
     /// focus change. Never while away, paused for the keyboard or mouse, in the tour, dictating, sending, mid-gesture
     /// or mid-resize; the controller adds the checks every action on Claude makes (Claude in front, no recent input).
     private func fitFocusedSession(now: TimeInterval) {
+        if state.calibrating { lastCalibratingAt = now }
         // While paused the target can move with the nose; the trigger sees that move only after the pause, so a session
         // looked at meanwhile is fitted once you resume, and one you stayed on is not fitted again.
         guard !ctx.handsBusy else { return }
@@ -487,7 +497,7 @@ final class Coordinator: AppCoordinating {
         guard settings.fitFocusedSession, health.running, !awayState.isAway, !tourOpen, practiceSink == nil,
               ctx.listening == nil, !ctx.busy, !send.inFlight, !send.afterStop, !send.earlyArmed,
               gestures.progress == nil, !panes.isRunning, !focus.userLeftClaude else { return }
-        panes.autoFit(target)
+        panes.autoFit(target, calibratedAt: lastCalibratingAt)
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized
@@ -516,12 +526,11 @@ final class Coordinator: AppCoordinating {
     private func updateHandsBusy(now: TimeInterval) {
         handsBusy.quiet = settings.pauseAfterInputSeconds
         let input = ClaudeBridge.lastHardwareInput(now: now)
-        let ownPointerAt = HandsBusy.ownPointerAt(drags: ClaudeBridge.ownPointerEventsNow(),
-                                                  ownScrollAt: ClaudeBridge.ownPointerMove.withLock { $0 }, now: now)
+        let ownKeyAt = HandsBusy.ownKeyAt(keys: ClaudeBridge.ownKeysNow(), keyAt: input.key,
+                                          other: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt))
         let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
-                                    pointer: NSEvent.mouseLocation,
-                                    ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
-                                    ownPointerAt: ownPointerAt, ownFocusAt: focus.lastOwnFocusAt)
+                                    pointer: NSEvent.mouseLocation, ownKeyAt: ownKeyAt,
+                                    ownPointerAt: ClaudeBridge.ownPointerMove.withLock { $0 }, ownFocusAt: focus.lastOwnFocusAt)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
         if busy { pausedSince = now }

@@ -82,10 +82,10 @@ public struct HandsBusy: Equatable {
 
     public func isPaused(at now: TimeInterval) -> Bool { now - lastInputAt < quiet }
 
-    /// The `ownPointerAt` to feed `update`: while one of Ensemble's divider drags runs (`OwnPointerEvents`) the
-    /// pointer is Ensemble's, else when its own scroll last moved it. Its posted presses never reach the hardware
-    /// state the clicks are read from, so a real click during a drag still counts.
-    public static func ownPointerAt(drags: OwnPointerEvents, ownScrollAt: TimeInterval, now: TimeInterval) -> TimeInterval {
-        drags.isOwn(now) ? now : ownScrollAt
+    /// The `ownKeyAt` to feed `update`: a key read at `keyAt` inside one of the windows in which Ensemble posted keys
+    /// of its own (the divider keys) is that key; otherwise `other`, the last key Ensemble held back or posted
+    /// elsewhere. The hardware state never holds a posted key, so this only guards a reading that mixes the two.
+    public static func ownKeyAt(keys: OwnInputWindows, keyAt: TimeInterval, other: TimeInterval) -> TimeInterval {
+        keys.isOwn(keyAt) ? keyAt : other
     }
 }
