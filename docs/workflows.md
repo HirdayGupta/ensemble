@@ -5,7 +5,7 @@ The three GitHub workflows and what each one guards. Back to the [contributing g
 | Workflow | Runs on | What it does |
 |---|---|---|
 | ci | Every pull request and push to main | Builds in release mode, runs the unit tests, then the network check and the size check. Keeps the logs as an artifact. |
-| hygiene | Every pull request and push to main | Audits workflows with zizmor, verifies every action is pinned to the commit its version comment names with pinact, and scans the whole history for secrets with gitleaks. |
+| hygiene | Every pull request and push to main | Audits workflows with zizmor, verifies every action is pinned to the commit its version comment names with pinact, scans the whole history for secrets with gitleaks, and runs the website logic tests (`docs/live/test/logic.test.mjs`). |
 | Release | A pushed tag named v followed by a version | Builds, tests, signs, notarizes, publishes the disk image and updates the update feed. Stays disabled on the repository until Developer ID signing exists. The steps are in [RELEASING.md](RELEASING.md). |
 
 ## Rules every workflow follows
@@ -21,4 +21,4 @@ The three GitHub workflows and what each one guards. Back to the [contributing g
 | Script | Fails when |
 |---|---|
 | `scripts/check-network.sh` | A network call or web address appears outside a short allowlist of source, web files and the built app. |
-| `scripts/check-size.sh` | The built app passes 7,400,000 bytes. |
+| `scripts/check-size.sh` | The built app passes the byte budget set at the top of the script. |

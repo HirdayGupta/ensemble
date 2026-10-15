@@ -5,9 +5,6 @@ public enum Gesture: String, CaseIterable {
     case openPalm, fist, twoFingers, thumbsUp
     case gather                  // Ensemble: all fingertips together
     case pointUp, pointDown      // Ensemble change: index finger out, pointing up or down
-    case swipeLeft, swipeRight   // dynamic, produced by SwipeDetector
-
-    public var isSwipe: Bool { self == .swipeLeft || self == .swipeRight }
 }
 
 /// Everything the classifier derived from one hand, for the debug view.
@@ -168,30 +165,5 @@ public struct GestureClassifier {
 
     private func dist(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
-    }
-}
-
-/// Emits a gesture only after it has been seen for `holdFrames` consecutive frames.
-struct GestureStabilizer {
-    let holdFrames: Int
-    private(set) var candidate: Gesture?
-    private(set) var count = 0
-    private(set) var current: Gesture?
-
-    init(holdFrames: Int = 6) { self.holdFrames = holdFrames }
-
-    /// Treat `g` as already fired: it will not fire again until the pose changes away from it.
-    mutating func prime(_ g: Gesture?) {
-        candidate = g; current = g; count = holdFrames
-    }
-
-    /// Returns the newly stabilized gesture on the frame it becomes stable, else nil.
-    mutating func push(_ g: Gesture?) -> Gesture? {
-        if g == candidate { count += 1 } else { candidate = g; count = 1 }
-        if count >= holdFrames && candidate != current {
-            current = candidate
-            return current
-        }
-        return nil
     }
 }

@@ -13,10 +13,6 @@ enum ScreenGeometry {
         CGRect(x: frame.minX, y: primaryHeight - frame.maxY, width: frame.width, height: frame.height)
     }
 
-    static func appKitRect(fromGlobal rect: CGRect, primaryHeight: CGFloat) -> CGRect {
-        CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
-    }
-
     /// The screen under a global top-left point, falling back to the primary screen.
     static func screen(containing point: CGPoint) -> NSScreen? {
         NSScreen.screens.first { topLeftFrame(of: $0).contains(point) } ?? NSScreen.screens.first

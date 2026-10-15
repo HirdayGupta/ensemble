@@ -38,6 +38,16 @@ EOF
   rm -rf "$TMP"
 fi
 
+# Without this, every rebuild makes codesign ask to use the key until someone clicks Always Allow (macOS keeps a
+# per-key list of programs allowed to use it). Adding Apple's signing tools to that list needs the login password
+# once, typed into Terminal here and never stored. Safe to run again. If it fails or is cancelled, the prompts stay.
+say "macOS will ask for your login password once, so builds can use the signing key without a prompt every time"
+if security set-key-partition-list -S apple-tool:,apple:,codesign: -s -l "$IDENTITY" "$HOME/Library/Keychains/login.keychain-db" >/dev/null; then
+  say "signing key set up for builds"
+else
+  say "skipped; builds will ask to use the key until you choose Always Allow"
+fi
+
 # macOS refuses background agents access to Desktop, Documents and Downloads (the agent exits 126 and never builds),
 # so a clone kept there gets a separate build-only clone for the agent. The updater resets that clone to main, so
 # nobody develops in it.
@@ -62,23 +72,24 @@ if tail -n 1 "$LOG" | grep -q "build skipped"; then
 elif tail -n 1 "$LOG" | grep -q "build failed"; then
   echo "--- this Mac's compiler: $(swift --version 2>&1 | head -1)"
   echo "--- build errors (paste everything from here to the end into your Claude session):"
-  sed -n "/swift build -c release/,\$p" /tmp/ensemble-bundle.log | grep -E -A3 "error:" | head -60
+  sed -n "/swift build -c release/,\$p" "$ROOT/build/bundle.log" | grep -E -A3 "error:" | head -60
 fi
 
 mkdir -p "$(dirname "$AGENT")"
-cat > "$AGENT" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>$LABEL</string>
-    <key>ProgramArguments</key><array><string>/bin/bash</string><string>$ROOT/scripts/dev-update.sh</string></array>
-    <key>StartInterval</key><integer>120</integer>
-    <key>RunAtLoad</key><true/>
-    <key>ProcessType</key><string>Background</string>
-</dict>
-</plist>
-EOF
+# Written with PlistBuddy, which escapes for us: a clone path holding & or < would break a hand-written XML file.
+write_agent() {
+  local out="$1" root="$2" pb=/usr/libexec/PlistBuddy
+  rm -f "$out"
+  "$pb" -c "Add :Label string $LABEL" "$out" >/dev/null
+  "$pb" -c "Add :ProgramArguments array" "$out"
+  "$pb" -c "Add :ProgramArguments:0 string /bin/bash" "$out"
+  "$pb" -c "Add :ProgramArguments:1 string $root/scripts/dev-update.sh" "$out"
+  "$pb" -c "Add :StartInterval integer 120" "$out"
+  "$pb" -c "Add :RunAtLoad bool true" "$out"
+  "$pb" -c "Add :ProcessType string Background" "$out"
+  plutil -lint "$out" >/dev/null
+}
+write_agent "$AGENT" "$ROOT"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT"
 say "done. Ensemble updates itself from main every 2 minutes, built from $ROOT."

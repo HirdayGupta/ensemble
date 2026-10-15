@@ -110,11 +110,6 @@ final class ClaudeBridge: @unchecked Sendable {
             .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }
 
-    func cachedSessions() -> [ClaudeSession] {
-        lock.lock(); defer { lock.unlock() }
-        return cache.values.map(\.session).sorted { $0.id < $1.id }
-    }
-
     /// Full discovery; replaces the cache. Runs on a bridge queue.
     func discover() -> [CachedSession] {
         guard let pid = claudePID else {
