@@ -4,6 +4,8 @@ struct PanelActions {
     var calibrate: () -> Void
     var openSettings: () -> Void
     var checkForUpdates: () -> Void
+    var startTour: () -> Void
+    var dismissTourBanner: () -> Void
     var quit: () -> Void
 }
 
@@ -18,6 +20,7 @@ struct MenuPanelView: View {
         GlassGroup(spacing: 10) {
             VStack(spacing: 10) {
                 header
+                if !settings.tourCompleted && !settings.tourSkipped { tourBanner }
                 statusCard
                 togglesCard
                 buttons
@@ -50,6 +53,22 @@ struct MenuPanelView: View {
         }
         .padding(12)
         .glassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var tourBanner: some View {
+        HStack(spacing: 8) {
+            Button { actions.startTour() } label: {
+                Label("Take the 5-step tour", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            Button { actions.dismissTourBanner() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var statusCard: some View {
@@ -109,6 +128,8 @@ struct MenuPanelView: View {
                 Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { actions.checkForUpdates() }
                     .buttonStyle(.plain).font(.callout).foregroundStyle(updates.availableVersion == nil ? .secondary : .primary)
                 Spacer()
+                Button("Replay tour") { actions.startTour() }
+                    .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 4)
             .padding(.top, 2)

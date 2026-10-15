@@ -19,6 +19,8 @@ final class CoordinatorContext {
     lazy var setup = SetupController(ctx: self)
 
     var latestHead: HeadObservation?
+    /// Whether the person is speaking, from the level meter; never active while the meter is not running.
+    var speech = SpeechLock()
     var sessions: [ClaudeSession] = []
     /// The session being dictated into, from the press until the stop is confirmed.
     var listening: ClaudeSession?
@@ -27,6 +29,9 @@ final class CoordinatorContext {
     /// The last time exactly one face was seen.
     var lastOneFaceT: TimeInterval = -.infinity
     var gestureShowing = false
+    /// A headphone press acted until this time, so refusals it causes are shown on the island and labelled.
+    var headphoneUntil: TimeInterval = -.infinity
+    var headphoneActive: Bool { CACurrentMediaTime() < headphoneUntil }
     /// Redraws the overlay from the current facts.
     var changed: () -> Void = {}
 
@@ -68,10 +73,16 @@ final class CoordinatorContext {
 
     func refuse(_ why: String, title: String? = nil) {
         state.lastRefusal = why
-        if gestureShowing || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
+        if gestureShowing || headphoneActive || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
             let sendRelated = why.hasPrefix("Send") || why.hasPrefix("Not sent")
             let body = why.hasPrefix("Not sent: ") ? String(why.dropFirst("Not sent: ".count)) : why
-            overlay.showBanner(title: title ?? (sendRelated ? "Not sent" : "Nothing done"), body: body.prefix(1).uppercased() + body.dropFirst(), style: .refused, seconds: 2.5)
+            if headphoneActive, !sendRelated {
+                // Labelled as the headphone press, with the usual title folded into the line.
+                let line = (title.map { $0 + ": " } ?? "") + body
+                overlay.showBanner(title: "Headphone press", body: line.prefix(1).uppercased() + line.dropFirst(), style: .refused, seconds: 2.5)
+            } else {
+                overlay.showBanner(title: title ?? (sendRelated ? "Not sent" : "Nothing done"), body: body.prefix(1).uppercased() + body.dropFirst(), style: .refused, seconds: 2.5)
+            }
         }
         EnsembleLog.write("refused: \(why)")
     }

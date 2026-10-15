@@ -15,6 +15,7 @@ final class Coordinator: AppCoordinating {
     private let scroll: ScrollController
     private let send: SendController
     private let dictation: DictationController
+    private let headphone: HeadphoneRemote
     private var state: AppState { ctx.state }
     private var settings: SettingsStore { ctx.settings }
     private var gestures: GestureMachine { ctx.gestures }
@@ -28,6 +29,8 @@ final class Coordinator: AppCoordinating {
     private var promptedAccessibility = false
     private var lastAwayCheck: TimeInterval = 0
     private var lastSessionScan: TimeInterval = 0
+    /// Set only while the tour's gesture-practice step is open; see `enterGesturePractice`.
+    private var practiceSink: TourPracticeSink?
     private static let staleHeadSeconds = 2.0
     private static let sessionScanFaceWindow = 5.0
     private static let sessionScanIdleInterval = 5.0
@@ -43,6 +46,9 @@ final class Coordinator: AppCoordinating {
         scroll = ScrollController(ctx: ctx)
         send = SendController(ctx: ctx)
         dictation = DictationController(ctx: ctx, focus: focus, send: send)
+        headphone = HeadphoneRemote(settingOn: { [weak settings] in (settings?.headphonePresses ?? false) && (settings?.enabled ?? false) },
+                                    claudeRunning: { [weak ctx] in ctx?.bridge.claudeIsRunning() ?? false })
+        headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
@@ -61,6 +67,9 @@ final class Coordinator: AppCoordinating {
             guard let self else { return }
             // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
             DispatchQueue.main.async { on ? self.start() : self.stop(disarm: true) }
+        }.store(in: &cancellables)
+        settings.$headphonePresses.removeDuplicates().dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.headphone.refresh() }
         }.store(in: &cancellables)
         settings.$cameraName.removeDuplicates().dropFirst().sink { [weak self] _ in
             guard let self, self.health.running else { return }
@@ -94,6 +103,7 @@ final class Coordinator: AppCoordinating {
             }
         }
         health.begin()
+        headphone.start()
         ctx.latestHead = nil
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
@@ -119,6 +129,7 @@ final class Coordinator: AppCoordinating {
         ctx.latestHead = nil
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
+        headphone.stop()
         if disarm { dictation.clearAndDisarm() } else if ctx.listening != nil { dictation.end(reason: "turned off") }
         engine.stop()
         gestures.reset()
@@ -135,6 +146,7 @@ final class Coordinator: AppCoordinating {
         health.running = false
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
+        headphone.stop()
         ctx.bridge.beginShutdown()
         engine.stop()
         scroll.cancel()
@@ -197,10 +209,28 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// While the tour practices gestures, real intents and head readings go to `sink` instead of acting on
+    /// Claude: nothing is pressed, dictated or sent. Ends any dictation already in progress first, the same
+    /// as `calibrate()` does, so a hold left over from real use cannot fire once the tour reads it.
+    func enterGesturePractice(_ sink: TourPracticeSink) {
+        send.afterStop = false
+        gestures.reset()
+        scroll.cancel()
+        if ctx.listening != nil { dictation.endWhenIdle(reason: "tour practice") }
+        practiceSink = sink
+    }
+
+    func exitGesturePractice() {
+        practiceSink = nil
+        gestures.reset()
+        scroll.cancel()
+    }
+
     // MARK: - Inputs
 
     private func handle(head: HeadObservation) {
         ctx.latestHead = head
+        if let sink = practiceSink { sink.tourPractice(head: head); return }
         if head.faceCount == 1 {
             let returned = head.t - ctx.lastOneFaceT >= Self.sessionScanFaceWindow
             ctx.lastOneFaceT = head.t
@@ -235,6 +265,10 @@ final class Coordinator: AppCoordinating {
         dictation.heartbeat()
         guard !state.calibrating else { return }
         let intents = gestures.push(hand)
+        if let sink = practiceSink {
+            for intent in intents { sink.tourPractice(intent: intent) }
+            return
+        }
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
@@ -260,7 +294,9 @@ final class Coordinator: AppCoordinating {
     private func tick() {
         dropStaleReadings()
         focus.tick()
-        for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
+        for intent in gestures.tick(now: CACurrentMediaTime()) {
+            if let sink = practiceSink { sink.tourPractice(intent: intent) } else { apply(intent) }
+        }
         engine.setForceFullRate(needsFullRate)
         ctx.overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         scroll.tick()
@@ -275,13 +311,13 @@ final class Coordinator: AppCoordinating {
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
     private var needsFullRate: Bool {
         ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating || calibrationPending
-            || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil
+            || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil || practiceSink != nil
     }
 
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
     private func dropStaleReadings() {
         guard let head = ctx.latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
-        guard focus.hasTargetOrCandidate || dot.hasDot || state.nosePoint != nil else { return }
+        guard focus.hasTargetOrCandidate || dot.hasDot || dot.hasEdgeWarning || state.nosePoint != nil else { return }
         EnsembleLog.write("head readings stopped; clearing the highlight")
         focus.forgetTargetAndCandidate(); dot.clear()
         dot.place(target: nil)
@@ -334,6 +370,41 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// A stem press. Both go through the same guards as the gestures: a press is the double pinch (dictation
+    /// begins only on the session the nose is on, with calibration and every common refusal), a double press is the
+    /// thumbs-up (the narrow send rules in SendController, unchanged).
+    private func apply(headphone action: HeadphoneAction) {
+        // Tour practice promises nothing reaches Claude; a stem press is no exception.
+        guard practiceSink == nil else { return }
+        ctx.headphoneUntil = CACurrentMediaTime() + 5
+        ctx.overlay.clearBanner()
+        switch action {
+        case .press:
+            guard !ctx.busy else { ctx.refuse("A step is still in flight"); return }
+            if ctx.listening != nil {
+                ctx.overlay.showBanner(title: "Headphone press", body: "Stopping dictation", style: .info, seconds: 1.5)
+                dictation.end(reason: "headphone press")
+            } else {
+                ctx.overlay.showBanner(title: "Headphone press", body: "Starting dictation", style: .info, seconds: 1.5)
+                // The machine takes the state a double pinch leaves: a later double pinch stops this dictation, and
+                // a refusal inside begin() flips it back.
+                gestures.beginTalkExternally()
+                dictation.begin()
+            }
+        case .doublePress:
+            guard settings.mapping.send != nil else { ctx.refuse("Send is off in Settings"); return }
+            guard !ctx.busy else { ctx.refuse("Send ignored: a step is still in flight"); return }
+            ctx.overlay.showBanner(title: "Headphone double press", body: "Sending the draft", style: .info, seconds: 1.5)
+            if ctx.listening != nil {
+                // Same as the thumbs-up held from the talk pose: stop, then send once the stop is confirmed.
+                send.afterStop = true
+                dictation.end(reason: "headphone double press")
+            } else {
+                send.request()
+            }
+        }
+    }
+
     /// The Mac is going to sleep, the screen locked, or the safety check ended the hold: stop dictation now (no
     /// tail wait), and forget anything that was about to act. The text stays; nothing is sent.
     private func interrupt(_ reason: String) {
@@ -365,6 +436,7 @@ final class Coordinator: AppCoordinating {
         dictation.restoreAudioIfIdle()
         let acting = ctx.listening ?? (gestures.progress?.action == .send ? send.lastSpoken?.session : nil) ?? focus.target
         ctx.overlay.setSession(name: acting.map(ctx.name(of:)), switching: focus.switching())
+        ctx.overlay.setEdge(dot.overlayEdge(focus: focus))
         ctx.overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()

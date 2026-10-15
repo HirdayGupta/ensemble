@@ -45,6 +45,8 @@ final class OverlayModel: ObservableObject {
     /// The name of the session a gesture would act on (the dictating one while dictating).
     @Published var sessionName: String?
     @Published var sessionSwitch: SessionSwitch?
+    /// While dictating: what the nose is approaching beyond the dictating session's edge.
+    @Published var edge: OverlayEdge?
 
     var hasContent: Bool {
         (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil
@@ -107,6 +109,8 @@ final class OverlayController {
         setIfChanged(&model.sessionName, name)
         setIfChanged(&model.sessionSwitch, switching)
     }
+
+    func setEdge(_ edge: OverlayEdge?) { setIfChanged(&model.edge, edge) }
 
     func setLiveSoundBars(_ on: Bool) { setIfChanged(&model.liveSoundBars, on) }
 

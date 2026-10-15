@@ -19,8 +19,19 @@ final class AppEnvironment {
         calibrate: { [weak self] in self?.dismissMenuPanel(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
         checkForUpdates: { [weak self] in self?.dismissMenuPanel(); self?.updates.checkForUpdates() },
+        startTour: { [weak self] in self?.dismissMenuPanel(); self?.tourWindow.show() },
+        dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
         quit: { NSApp.terminate(nil) }
     )
+    private(set) lazy var tourWindow = TourWindowController(state: state, settings: settings) { [unowned self] step, singleStep, close in
+        TourModel(
+            settings: settings, startAt: step, singleStep: singleStep,
+            calibrate: { [weak self] in self?.coordinator.calibrate() },
+            requestAccessibility: { Permissions.requestAccessibility() },
+            enterPractice: { [weak self] sink in self?.coordinator.enterGesturePractice(sink) },
+            exitPractice: { [weak self] in self?.coordinator.exitGesturePractice() },
+            close: close)
+    }
     private(set) lazy var floatingPanel = FloatingPanelController { [unowned self] in
         AnyView(
             MenuPanelView(state: state, settings: settings, updates: updates, actions: floatingActions)
@@ -29,7 +40,11 @@ final class AppEnvironment {
         )
     }
     private(set) lazy var settingsWindow = SettingsWindowController { [unowned self] in
-        AnyView(SettingsView(state: state, settings: settings, updates: updates, calibrate: { [weak self] in self?.coordinator.calibrate() }))
+        AnyView(SettingsView(state: state, settings: settings, updates: updates,
+                              calibrate: { [weak self] in self?.coordinator.calibrate() },
+                              replayTour: { [weak self] step in
+                                  if let step { self?.tourWindow.show(startAt: step, singleStep: true) } else { self?.tourWindow.show() }
+                              }))
     }
 
     private var hotKey: GlobalHotKey?
@@ -41,6 +56,8 @@ final class AppEnvironment {
             calibrate: { [weak self] in self?.floatingPanel.hide(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
             checkForUpdates: { [weak self] in self?.floatingPanel.hide(); self?.updates.checkForUpdates() },
+            startTour: { [weak self] in self?.floatingPanel.hide(); self?.tourWindow.show() },
+            dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
             quit: { NSApp.terminate(nil) }
         )
     }
@@ -61,6 +78,8 @@ final class AppEnvironment {
         }
 
         coordinator.start()
+
+        if !settings.tourCompleted && !settings.tourSkipped { tourWindow.show() }
     }
 
     func stop() {

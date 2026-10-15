@@ -80,16 +80,16 @@ final class MediaDucker {
 
     // MARK: CoreAudio
 
-    private static func address(_ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+    nonisolated private static func address(_ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: sel, mScope: scope, mElement: kAudioObjectPropertyElementMain)
     }
 
-    private static func read<T>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, _ initial: T) -> T? {
+    nonisolated private static func read<T>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, _ initial: T) -> T? {
         var a = address(sel, scope), v = initial, size = UInt32(MemoryLayout<T>.size)
         return AudioObjectGetPropertyData(obj, &a, 0, nil, &size, &v) == noErr ? v : nil
     }
 
-    static func defaultOutput() -> AudioObjectID? {
+    nonisolated static func defaultOutput() -> AudioObjectID? {
         guard let d: AudioObjectID = read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, 0), d != 0 else { return nil }
         return d
     }
@@ -97,7 +97,7 @@ final class MediaDucker {
     /// Some app other than Claude, Ensemble or the system sound player is sending audio out. Per process, because the
     /// output device itself stays "running" for a while after any short sound (measured 2026-10-14: Claude's own
     /// dictation chime read as music playing, and the media key went to the wrong app).
-    static func mediaPlaying(_ dev: AudioObjectID) -> Bool {
+    nonisolated static func mediaPlaying(_ dev: AudioObjectID) -> Bool {
         guard let procs = CoreAudioInput.processes() else { return isPlaying(dev) }
         let me = ProcessInfo.processInfo.processIdentifier
         return procs.contains { p in
@@ -108,7 +108,7 @@ final class MediaDucker {
         }
     }
 
-    static func isPlaying(_ dev: AudioObjectID) -> Bool {
+    nonisolated static func isPlaying(_ dev: AudioObjectID) -> Bool {
         (read(dev, kAudioDevicePropertyDeviceIsRunningSomewhere, kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0) != 0
     }
 
@@ -170,6 +170,8 @@ final class MediaDucker {
 
     /// The keyboard's play/pause key (NX_KEYTYPE_PLAY), down then up.
     static func pressPlayPause() {
+        // The system can hand this key back to us as a headphone remote command; HeadphoneRemote drops those.
+        HeadphoneRemote.lastSyntheticKeyAt = CACurrentMediaTime()
         for down in [true, false] {
             let state = down ? 0xA : 0xB
             NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)),
