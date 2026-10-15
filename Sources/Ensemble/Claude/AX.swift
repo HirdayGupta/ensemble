@@ -105,9 +105,11 @@ enum AX {
     static func parent(_ el: AXUIElement) -> AXUIElement? { element(el, kAXParentAttribute) }
 
     /// Global top-left frame from AXPosition + AXSize.
+    /// Position and size in one round trip: each read is a message Claude's main thread answers.
     static func frame(_ el: AXUIElement) -> CGRect? {
-        guard let p = copy(el, kAXPositionAttribute), CFGetTypeID(p) == AXValueGetTypeID(),
-              let s = copy(el, kAXSizeAttribute), CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
+        let v = multi(el, [kAXPositionAttribute, kAXSizeAttribute])
+        guard let p = v[0], CFGetTypeID(p) == AXValueGetTypeID(),
+              let s = v[1], CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
         var point = CGPoint.zero
         var size = CGSize.zero
         guard AXValueGetValue(p as! AXValue, .cgPoint, &point),
