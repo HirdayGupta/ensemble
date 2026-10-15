@@ -21,6 +21,7 @@ final class SettingsStore: ObservableObject {
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
         static let lastClaudeVersion = "lastClaudeVersion"
+        static let setupProfiles = "setupProfiles"
     }
 
     static let countdownRange: ClosedRange<Double> = 0.5...3
@@ -58,6 +59,10 @@ final class SettingsStore: ObservableObject {
     @Published var calibrationDisplays: String? { didSet { defaults.set(calibrationDisplays, forKey: Key.calibrationDisplays) } }
     /// The Claude version the last confirmed dictation ran on.
     @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
+    /// Opaque blob written by the coordinator: an `EnsembleCore.SetupProfiles`, one calibration per camera,
+    /// tagged per screen. `calibration`/`calibrationDisplays` above are the single setup this replaces;
+    /// they stay for the one-time migration into this on first launch after the upgrade.
+    @Published var setupProfiles: Data? { didSet { defaults.set(setupProfiles, forKey: Key.setupProfiles) } }
 
     init(defaults: UserDefaults? = nil) {
         // In the packaged app the bundle identifier is "dev.ensemble.app", so the standard domain already is that
@@ -79,6 +84,7 @@ final class SettingsStore: ObservableObject {
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
         calibrationDisplays = store.string(forKey: Key.calibrationDisplays)
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
+        setupProfiles = store.data(forKey: Key.setupProfiles)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         reverseScroll = store.bool(forKey: Key.reverseScroll)

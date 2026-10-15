@@ -48,7 +48,8 @@ final class Coordinator: AppCoordinating {
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
 
         if let data = settings.calibration { ctx.pointer.calibration = data }
-        if ctx.pointer.isCalibrated, settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
+        ctx.setup.startFullCalibration = { [weak self] in self?.calibrate() }
+        ctx.setup.startSubsetCalibration = { [weak self] screens in self?.runCalibration(screens: screens, replacingAll: false) }
         gestures.mapping = settings.mapping
         ctx.pointer.setSmoothing(settings.pointerSmoothing)
         gestures.sendHold = settings.sendCountdownSeconds
@@ -165,6 +166,13 @@ final class Coordinator: AppCoordinating {
             }
             return
         }
+        runCalibration(screens: NSScreen.screens, replacingAll: true)
+    }
+
+    /// `replacingAll`: a manual Calibrate from the menu, covering (and replacing) every current screen for
+    /// the current camera. Otherwise just the given screens are calibrated and merged into whatever this
+    /// camera already has (a desk-setup prompt asking about one new screen, say).
+    private func runCalibration(screens: [NSScreen], replacingAll: Bool) {
         // Calibration owns the hands and the head: end any dictation first, because
         // gesture events are ignored while it runs and a held talk pose would never be seen released.
         send.afterStop = false
@@ -174,23 +182,17 @@ final class Coordinator: AppCoordinating {
         let fingerprint = ScreenFacts.displayFingerprint()
         let camera = state.cameraName
         state.calibrating = true
-        CalibrationController.shared.run(headSource: { [weak self] in self?.ctx.latestHead }) { [weak self] samples in
+        CalibrationController.shared.run(screens: screens, headSource: { [weak self] in self?.ctx.latestHead }) { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
-            EnsembleLog.write("calibration samples: \(samples.count)")
-            guard !samples.isEmpty else { return }
+            EnsembleLog.write("calibration samples: \(results.map(\.samples.count))")
+            guard !results.isEmpty else { return }
             guard ScreenFacts.displayFingerprint() == fingerprint, self.state.cameraName == camera else {
                 self.ctx.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
                 return
             }
-            if self.ctx.pointer.fit(samples), let data = self.ctx.pointer.calibration {
-                self.settings.calibration = data
-                self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = fingerprint; self.ctx.invalidateCalibrationCache()
-                self.ctx.pointer.resetFilter()
-            } else {
-                self.ctx.refuse("Calibration did not fit; try again sitting where you normally work")
-            }
+            let ok = replacingAll ? self.ctx.setup.storeFullCalibration(results) : self.ctx.setup.storeSubsetCalibration(results)
+            if !ok { self.ctx.refuse("Calibration did not fit; try again sitting where you normally work") }
             self.health.update()
         }
     }
