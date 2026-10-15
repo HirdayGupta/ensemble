@@ -144,6 +144,7 @@ final class PaneWidthController {
     private func blocker() -> String? {
         if !ctx.settings.enabled { return "Ensemble is off" }
         if !ctx.bridge.claudeIsFrontmost() { return "Claude is not in front" }
+        if ctx.handsBusy { return "Paused while you type or use the mouse" }
         if ctx.listening != nil || ctx.busy { return "Dictation is starting or stopping" }
         if sendBusy() { return "A send is in progress" }
         if cancelled { return "interrupted" }

@@ -18,6 +18,7 @@ final class SettingsStore: ObservableObject {
         static let liveSoundBars = "liveSoundBars"
         static let warnWhenLeavingClaude = "warnWhenLeavingClaude"
         static let playSounds = "playSounds"
+        static let pauseAfterInputSeconds = "pauseAfterInputSeconds"
         static let pauseMediaWhileDictating = "pauseMediaWhileDictating"
         static let headphonePresses = "headphonePresses"
         static let maximizeByPeace = "maximizeByPeace"
@@ -61,6 +62,14 @@ final class SettingsStore: ObservableObject {
             let clamped = min(max(sendCountdownSeconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
             if clamped != sendCountdownSeconds { sendCountdownSeconds = clamped; return }
             defaults.set(sendCountdownSeconds, forKey: Key.sendCountdownSeconds)
+        }
+    }
+    /// How long Ensemble stays paused after the last key, click, scroll or pointer movement (`HandsBusy`).
+    @Published var pauseAfterInputSeconds: Double {
+        didSet {
+            let clamped = min(max(pauseAfterInputSeconds, HandsBusy.quietRange.lowerBound), HandsBusy.quietRange.upperBound)
+            if clamped != pauseAfterInputSeconds { pauseAfterInputSeconds = clamped; return }
+            defaults.set(pauseAfterInputSeconds, forKey: Key.pauseAfterInputSeconds)
         }
     }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: Key.playSounds) } }
@@ -134,6 +143,8 @@ final class SettingsStore: ObservableObject {
         warnWhenLeavingClaude = bool(Key.warnWhenLeavingClaude, true)
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 0.75
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
+        let pause = store.object(forKey: Key.pauseAfterInputSeconds) as? Double ?? HandsBusy.defaultQuiet
+        pauseAfterInputSeconds = min(max(pause, HandsBusy.quietRange.lowerBound), HandsBusy.quietRange.upperBound)
 
         if let data = store.data(forKey: Key.mapping), var decoded = try? JSONDecoder().decode(GestureMapping.self, from: data) {
             // Version 2 made "gather" the talk gesture (start; gather then open to stop). Move hold-a-fist setups over once.
