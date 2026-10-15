@@ -10,7 +10,7 @@ How a release is built, signed, notarized, published, and delivered to installed
 | `scripts/release.sh` | Runs `bundle.sh`, optionally notarizes and staples the app, builds `build/Ensemble-<version>.dmg` with `hdiutil` (app plus an Applications shortcut), signs/notarizes/staples the DMG, writes the `.sha256`, prints a summary. `--dry-run` prints the Apple-service commands instead of running them. |
 | `scripts/appcast.sh` | Adds a DMG to the Sparkle appcast with Sparkle's `generate_appcast`; refuses to write an appcast whose items lack an EdDSA signature. |
 | `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release with `gh release create`, update the appcast on the `gh-pages` branch. Hardened like the other workflows (no default permissions, actions pinned to commit SHAs, no stored checkout credentials). Stays disabled on the repository until Developer ID signing exists. |
-| `.github/workflows/ci.yml`, `hygiene.yml` | On every pull request and push to `main`: `ci` builds in release mode, runs the tests and the repository's network and size checks; `hygiene` runs zizmor, pinact and a secrets scan over the whole history. Neither signs or publishes. |
+| `.github/workflows/ci.yml` | On every pull request and push to `main`: `ci` builds in release mode, runs the tests and the repository's network and size checks; `hygiene` runs zizmor, pinact and a secrets scan over the whole history; `coverage`, `periphery` and `website-tests` check EnsembleCore coverage, unused code and the website logic; `gate` passes only when all of them did. It never signs or publishes. |
 | `Sources/Ensemble/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
 
 Log of the last `release.sh` run: `build/release.log`.
@@ -86,7 +86,7 @@ If the workflow fails after the GitHub Release is created (for example the appca
 
 `ci.yml` builds the app bundle with `ENSEMBLE_SIGN_IDENTITY=-`, an ad-hoc signature used only so the network, privacy and size checks read the real app. That bundle is never uploaded or installed: every ad-hoc build is a new identity, which would drop a Mac's Camera and Accessibility grants. Releases are cut on a Mac with the stable signing identity.
 
-Every action in the workflows is pinned to a commit SHA with the version in a trailing comment, and Dependabot proposes the bumps weekly. A bump pull request must pass `ci` and `hygiene`, which includes `pinact` checking that each SHA is the commit its comment names. To pin by hand: `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
+Every action in the workflows is pinned to a commit SHA with the version in a trailing comment, and Dependabot proposes the bumps weekly. A bump pull request must pass `gate`, whose `hygiene` job includes `pinact` checking that each SHA is the commit its comment names. To pin by hand: `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`.
 
 The secrets listed under "One-time setup" are the only ones any workflow reads beyond the built-in token. They are recorded as owner opt-ins in `.ossemble/state.json`, with the reason for each.
 
