@@ -509,10 +509,10 @@ final class Coordinator: AppCoordinating {
         let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
                                     pointer: NSEvent.mouseLocation,
                                     ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
-                                    ownPointerAt: ownPointerAt)
+                                    ownPointerAt: ownPointerAt, ownFocusAt: focus.lastOwnFocusAt)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
-        EnsembleLog.write(busy ? "paused: keyboard or mouse in use" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
+        EnsembleLog.write(busy ? "paused: keyboard or mouse in use (\(handsBusy.lastInputKind?.rawValue ?? "input"))" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
         // Gestures are deliberate and keep working through a pause (a hand raised from the keyboard to pinch would
         // otherwise land inside the quiet time and do nothing): the pause only holds focus, the highlight and resizes.
         if busy {
