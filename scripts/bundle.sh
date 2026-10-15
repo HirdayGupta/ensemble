@@ -76,6 +76,11 @@ rm -rf "$SPARKLE_B/Headers" "$SPARKLE_B/PrivateHeaders" "$SPARKLE_B/Modules" \
 if [ -n "${ENSEMBLE_VERSION:-}" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ENSEMBLE_VERSION" "$APP/Contents/Info.plist"
 fi
+# A development build (scripts/dev-update.sh) follows main, not releases: without the update key its Sparkle stays off,
+# so a published release never installs over it with a different signature and drops the Accessibility grant.
+if [ -n "${ENSEMBLE_DEV_BUILD:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Delete :SUPublicEDKey" "$APP/Contents/Info.plist"
+fi
 if [ -n "${ENSEMBLE_BUILD:-}" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $ENSEMBLE_BUILD" "$APP/Contents/Info.plist"
 fi
