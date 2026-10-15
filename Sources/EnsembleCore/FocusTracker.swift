@@ -44,7 +44,9 @@ public struct FocusTracker {
         if held {
             candidate = nil
         } else if under?.id == target?.id {
+            // Same session, read again: keep its fresh frame so the highlight follows a pane that was resized.
             candidate = nil
+            if under != nil { target = under }
         } else if let c = candidate, c.session?.id == under?.id {
             let dwell = listening && under != nil ? Self.listeningSwitchDwell : Self.switchDwell
             if listening, speaking, under != nil, let last = lastObserved {
@@ -56,6 +58,13 @@ public struct FocusTracker {
             candidate = (under, t)
         }
         return nil
+    }
+
+    /// The session list was read again: the target and the candidate take their fresh frames, so the highlight
+    /// follows a pane Claude resized or moved without waiting for the next reading. One no longer listed is kept as is.
+    public mutating func refresh(from sessions: [ClaudeSession]) {
+        if let t = target, let fresh = sessions.first(where: { $0.id == t.id }) { target = fresh }
+        if let c = candidate, let s = c.session, let fresh = sessions.first(where: { $0.id == s.id }) { candidate = (fresh, c.since) }
     }
 
     /// The nose rests on a session hidden behind another window. True once it has rested for `raiseDwell`.

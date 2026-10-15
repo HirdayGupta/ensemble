@@ -16,14 +16,17 @@ public enum SessionFit {
     public static let fallbackColumn: Double = 832
 
     /// The width of every pane in the row so pane `focus` reaches `width`, the width it gains taken equally from
-    /// the others and none of them below `minimum`. When the others cannot give it all, the pane gets what they can.
-    /// nil when the pane is already within `PaneWidths.tolerance` of `width`, or the others have nothing to give.
+    /// the others and none of them below `minimum`, or below its own entry in `floors` (a pane fitted a moment ago
+    /// keeps its fit). When the others cannot give it all, the pane gets what they can. nil when the pane is already
+    /// within `PaneWidths.tolerance` of `width`, or the others have nothing to give.
     public static func widths(current: [Double], focus k: Int, width: Double,
-                              minimum: Double = PaneWidths.narrowWidth) -> [Double]? {
+                              minimum: Double = PaneWidths.narrowWidth, floors: [Double] = []) -> [Double]? {
         guard current.count >= 2, current.indices.contains(k), width.isFinite, current.allSatisfy(\.isFinite) else { return nil }
         let need = width - current[k]
         guard need > PaneWidths.tolerance else { return nil }
-        var room = current.map { max(0, $0 - minimum) }
+        var room = current.indices.map { i in
+            max(0, current[i] - max(minimum, floors.indices.contains(i) && floors[i].isFinite ? floors[i] : 0))
+        }
         room[k] = 0
         let total = room.reduce(0, +)
         guard total > PaneWidths.tolerance else { return nil }
@@ -44,6 +47,53 @@ public enum SessionFit {
             }
         }
         return out
+    }
+
+    /// Keeps fits from undoing each other. Four panes side by side cannot all reach the column, so without this every
+    /// glance refitted the row and narrowed the pane fitted a moment before (four fits in 78 s, 2026-10-15). A pane a
+    /// fit narrowed is not refitted for `window`; a pane fitted within `window` keeps its fitted width as a floor
+    /// (`floors`), and a fit those floors keep from reaching the column is skipped (`allows`). Nothing is fitted in
+    /// the first `afterCalibration` seconds after a calibration, while the nose is still settling.
+    public struct Hold: Sendable {
+        public static let window: TimeInterval = 180
+        public static let afterCalibration: TimeInterval = 5
+
+        private var fitted: [String: (width: Double, at: TimeInterval)] = [:]
+        private var narrowed: [String: TimeInterval] = [:]
+
+        public init() {}
+
+        /// Why `id` must not be fitted now, or nil. `calibratedAt`: when a calibration last ran (-infinity if never).
+        public func refusal(_ id: String, now: TimeInterval, calibratedAt: TimeInterval) -> String? {
+            if now - calibratedAt < Self.afterCalibration { return "calibration just ended" }
+            if let t = narrowed[id], now - t < Self.window { return "a fit narrowed it \(Int(now - t)) s ago" }
+            return nil
+        }
+
+        /// The width each pane of the row keeps: its fitted width when it was fitted within `window`, else 0. The
+        /// pane `focus` is about to be fitted itself and keeps nothing.
+        public func floors(_ ids: [String], focus k: Int, now: TimeInterval) -> [Double] {
+            ids.indices.map { i in
+                guard i != k, let f = fitted[ids[i]], now - f.at < Self.window else { return 0 }
+                return f.width
+            }
+        }
+
+        /// Whether a planned fit is worth making: it reaches `width`, or no recently fitted pane held it back.
+        public static func allows(planned: [Double], focus k: Int, width: Double, floors: [Double]) -> Bool {
+            guard planned.indices.contains(k) else { return false }
+            return planned[k] >= width - PaneWidths.tolerance || !floors.contains { $0 > 0 }
+        }
+
+        /// A fit of `id` to `width` ran; `narrowed` are the panes it took width from.
+        public mutating func noteFit(_ id: String, width: Double, narrowed ids: [String], at now: TimeInterval) {
+            fitted[id] = (width, now)
+            narrowed[id] = nil
+            for n in ids { narrowed[n] = now; fitted[n] = nil }
+        }
+
+        /// The owner asked for a layout (maximize, even out): earlier fits no longer hold anything.
+        public mutating func reset() { fitted = [:]; narrowed = [:] }
     }
 
     /// Once per focus change, after focus has rested on one session for `settle`.
@@ -103,15 +153,33 @@ public enum ChatColumn {
         return column + (beside >= 0 && beside <= 200 ? beside : 0)
     }
 
-    /// The column measured last, while Claude keeps it; a later reading replaces it, so a changed transcript width
-    /// setting is picked up the next time a wide pane is on screen.
+    /// The widest column read reliably, kept: a reading counts only when it is one of Claude's own columns (its
+    /// three transcript widths with their gutters, `known`) or when panes at least `spread` apart in width read the
+    /// same column. A reading that follows the pane's width is padding, not the column: on 2026-10-15 a pane of
+    /// 742 to 960 pt read as its own width less 128, and taking each latest reading shrank the column 832, 736, 646.
     public struct Memory: Sendable {
+        /// Claude's 768, 960 and 1280 pt text measures with their 32 pt gutters.
+        public static let known: [Double] = [832, 1024, 1344]
+        static let match: Double = 4
+        static let spread: Double = 64
+        static let kept = 12
+
         public private(set) var measured: Double?
+        private var seen: [(column: Double, pane: Double)] = []
+
         public init() {}
         public var width: Double { measured ?? SessionFit.fallbackColumn }
-        /// Takes the widest of this scan's readings, one per pane, when any pane showed the column.
-        public mutating func note(_ readings: [Double?]) {
-            if let w = readings.compactMap({ $0 }).max() { measured = w }
+
+        /// One scan's readings, one per pane, with each pane's width.
+        public mutating func note(_ readings: [Double?], panes: [Double]) {
+            for (r, pane) in zip(readings, panes) {
+                guard let r, r.isFinite, pane.isFinite else { continue }
+                let known = Self.known.contains { abs($0 - r) <= Self.match }
+                let agreed = seen.contains { abs($0.column - r) <= Self.match && abs($0.pane - pane) >= Self.spread }
+                if known || agreed { measured = max(measured ?? 0, r) }
+                seen.append((r, pane))
+                if seen.count > Self.kept { seen.removeFirst(seen.count - Self.kept) }
+            }
         }
     }
 }
