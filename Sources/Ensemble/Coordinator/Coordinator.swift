@@ -463,13 +463,14 @@ final class Coordinator: AppCoordinating {
         wake()
         guard !state.calibrating else { return }
         let intents = gestures.push(hand)
+        for line in gestures.takeDiagnostics() { EnsembleLog.write("hand: \(line)") }
         practiceSink?.tourPractice(hand: hand)
         if let sink = practiceSink {
             for intent in intents { sink.tourPractice(intent: intent) }
             return
         }
         if tourOpen { return }
-        EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
+        EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-")\(hand.gate.map { "(\($0.rawValue))" } ?? "") two=\(hand.twoUp ? 1 : 0) spread=\(hand.fingerSpread.map { String(format: "%.3f", $0) } ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
         let progress = ctx.cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress

@@ -7,13 +7,20 @@ import Foundation
 /// same length, so one raised peace sign is exactly one of them: closed in time it is a scissors, held on it is
 /// a maximize, and a peace that already maximized never also counts as a scissors when it closes.
 ///
-/// Spread is the index-to-middle fingertip distance in palm lengths (wrist to middle knuckle). Fingers held
-/// side by side read 0.02-0.31 in the recorded fixtures (the two-fingers hold and desk life), so a peace needs
-/// `openSpread`, well above that, and a scissors needs the fingers back under `closedSpread`. Between the two
-/// the last state holds (hysteresis), and every edge needs `edgeFrames` frames in a row, as the pinch does.
+/// Spread is the index-to-middle fingertip distance in palm lengths (wrist to middle knuckle). Measured on the recorded
+/// two-fingers hold (fingers side by side, 179 frames): 0.22-0.30 for the middle 80 percent, at most 0.31, the fingers
+/// about 9 degrees apart. Opening them into a V adds roughly two finger lengths times the sine of half the extra angle,
+/// so 0.36 is reached about 14 degrees apart and a usual V (25 to 40 degrees) reads 0.5-0.75. An open threshold at
+/// 0.30 maximized twice on that side-by-side hold; 0.42 (the first, unmeasured value) needed a wide V.
+/// Closing (the scissors) counts relative to how wide this V opened: the spread falls to half its open peak, or to
+/// `closedSpread`, the median of fingers held side by side, whichever is higher, so a narrow V that closes to side
+/// by side counts as surely as a wide one. Between open and closed the last state holds, and every edge needs
+/// `edgeFrames` frames in a row, as the pinch does.
 public struct WidthGestures {
-    public static let openSpread = 0.42
-    public static let closedSpread = 0.24
+    public static let openSpread = 0.36
+    public static let closedSpread = 0.28
+    /// Closed once the spread has fallen to this fraction of the V's open peak.
+    public static let closeRatio = 0.5
     static let edgeFrames = 2
     public static let maximizeHold = 0.6
     public static let scissorsWindow = 0.6
@@ -25,6 +32,9 @@ public struct WidthGestures {
     private var openCount = 0
     private var firstOpenT: TimeInterval?
     private var openSince: TimeInterval?
+    /// The widest the V has held for `edgeFrames` frames in a row, so one misread frame never raises it.
+    private var peak = 0.0
+    private var lastSpread = 0.0
     private var closedCount = 0
     private var fired = false
     private var lastSeen: TimeInterval?
@@ -61,18 +71,23 @@ public struct WidthGestures {
         lastSeen = t
         guard t - lastActAt >= Self.cooldown else { return nil }
 
+        defer { lastSpread = spread }
         guard let since = openSince else {
             if spread >= Self.openSpread {
                 if openCount == 0 { firstOpenT = t }
                 openCount += 1
-                if openCount >= Self.edgeFrames { openSince = firstOpenT }
+                if openCount >= Self.edgeFrames {
+                    openSince = firstOpenT
+                    peak = min(spread, lastSpread)
+                }
             } else {
                 openCount = 0
                 firstOpenT = nil
             }
             return nil
         }
-        closedCount = spread <= Self.closedSpread ? closedCount + 1 : 0
+        peak = max(peak, min(spread, lastSpread))
+        closedCount = spread <= max(Self.closedSpread, peak * Self.closeRatio) ? closedCount + 1 : 0
         if closedCount >= Self.edgeFrames {
             let inTime = !fired && t - since <= Self.scissorsWindow
             endRun()
@@ -93,6 +108,8 @@ public struct WidthGestures {
         openCount = 0
         firstOpenT = nil
         openSince = nil
+        peak = 0
+        lastSpread = 0
         closedCount = 0
         fired = false
         lastSeen = nil

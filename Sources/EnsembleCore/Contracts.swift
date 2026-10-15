@@ -12,6 +12,11 @@ public enum Pose: String, Codable, CaseIterable, Sendable {
     case pointUp, pointDown                 // index finger out, the other three curled, pointing up or down
 }
 
+/// Why the classifier refused a pose it recognised: the hand is too far away, or turned away from the camera.
+public enum PoseGate: String, Sendable {
+    case tooFar, angled
+}
+
 /// One camera frame's hand reading. `present == false` means no hand was found.
 public struct HandObservation: Sendable {
     public var t: TimeInterval            // seconds, monotonic (CACurrentMediaTime)
@@ -25,10 +30,14 @@ public struct HandObservation: Sendable {
     /// Index tip to middle tip distance in palm lengths: how far apart a two-fingers pose holds its fingers
     /// (peace sign apart, scissors closed). nil when either tip is unseen.
     public var fingerSpread: Double?
+    /// The hand has the two-fingers shape (index and middle out, ring and little folded) whether or not `pose` says so:
+    /// `gate` then names what refused it. For the two-fingers diagnostics only.
+    public var twoUp: Bool
+    public var gate: PoseGate?
     public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil, skeleton: HandSkeletonFrame? = nil,
-                fingerSpread: Double? = nil) {
+                fingerSpread: Double? = nil, twoUp: Bool = false, gate: PoseGate? = nil) {
         self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter; self.pinch = pinch; self.skeleton = skeleton
-        self.fingerSpread = fingerSpread
+        self.fingerSpread = fingerSpread; self.twoUp = twoUp; self.gate = gate
     }
 }
 
