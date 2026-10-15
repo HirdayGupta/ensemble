@@ -52,11 +52,12 @@ enum InstallMover {
         return destination
     }
 
-    /// Opens the new copy a moment after this process exits (the one-copy check would otherwise stop it).
+    /// Opens the new copy once this process has exited (up to 10 s): the one-copy check would stop it otherwise.
     private static func relaunch(_ app: URL) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", app.path]
+        let script = "i=0; while kill -0 \"$1\" 2>/dev/null && [ \"$i\" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; /usr/bin/open \"$2\""
+        task.arguments = ["-c", script, "sh", String(getpid()), app.path]
         try? task.run()
         NSApp.terminate(nil)
     }

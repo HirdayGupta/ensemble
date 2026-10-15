@@ -31,6 +31,21 @@ extension ClaudeBridge {
         return AX.bool(composer, kAXFocusedAttribute) == true ? .done : .unknown("raised Claude; composer focus not confirmed")
     }
 
+    /// Puts the keyboard in the session's message box once dictation is on, so a key typed meanwhile lands there.
+    /// Never raises Claude or moves it in front: with another app in front nothing is touched. Returns a log note.
+    func focusComposerIfNeeded(_ s: ClaudeSession) async -> String {
+        await run {
+            guard let composer = self.liveEntry(s)?.elements.composer else { return "message box not found" }
+            guard ReturnKeys.focusComposerAfterStart(claudeInFront: self.claudeIsFrontmost(),
+                                                     composerFocused: AX.bool(composer, kAXFocusedAttribute)) else {
+                return "message box left as is"
+            }
+            let err = AX.set(composer, kAXFocusedAttribute, kCFBooleanTrue)
+            if err != .success { return "focusing the message box failed (\(err.rawValue))" }
+            return AX.bool(composer, kAXFocusedAttribute) == true ? "message box focused" : "message box focus not confirmed"
+        }
+    }
+
     /// Starts Claude's dictation: exactly one press, and only when the mic is verifiably off.
     func startDictation(_ s: ClaudeSession) async -> BridgeResult {
         await run(onStartQueue: true) { self.startNow(s) }
