@@ -15,7 +15,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-LOG="/tmp/ensemble-release.log"
+mkdir -p build
+LOG="build/release.log"
 if [ -z "${ENSEMBLE_RELEASE_LOGGING:-}" ]; then
   export ENSEMBLE_RELEASE_LOGGING=1
   exec > >(tee "$LOG") 2>&1
@@ -76,7 +77,8 @@ fi
 
 notarize() {
   local file="$1" result
-  result="/tmp/ensemble-notary-$(basename "$file").json"
+  # A fresh private file per submission: the status read back below decides whether the release goes out.
+  result="$(mktemp "build/notary-result.XXXXXX")"
   log "notarizing $file (Apple's service usually takes 2 to 15 minutes)"
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY-RUN: xcrun notarytool submit $file ${NOTARY_ARGS[*]} --wait --output-format json"
@@ -90,6 +92,7 @@ notarize() {
     xcrun notarytool log "$id" "${NOTARY_ARGS[@]}" >&2 || true
     die "notarization of $file ended with status \"$status\" (submission $id)"
   fi
+  rm -f "$result"
   log "notarization accepted (submission $id)"
 }
 

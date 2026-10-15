@@ -6,7 +6,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 APP="build/Ensemble.app"
-LOG="/tmp/ensemble-bundle.log"
+# The log sits under build/ (ignored by git, owned by this checkout), never under a fixed, guessable system temp name that another
+# user could pre-create or link elsewhere. scripts/dev-install.sh reads it for its error excerpt.
+mkdir -p build
+LOG="build/bundle.log"
 
 # The macOS 27 SDK makes SwiftUI's @State a macro whose compiler plugin ships with Xcode only, so with just the
 # Command Line Tools every view fails ("plugin for module 'SwiftUIMacros' not found"). Build against the macOS 26 SDK

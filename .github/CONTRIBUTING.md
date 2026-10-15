@@ -44,6 +44,11 @@ Signing), or point `ENSEMBLE_SIGN_IDENTITY` at another identity. Keep using the 
 Camera and Accessibility again, and a permission that shows on but does not work is cleared with
 `tccutil reset Accessibility dev.ensemble.app`.
 
+`scripts/dev-install.sh` creates that certificate for you and then runs `security set-key-partition-list` on it, which
+asks for your login password once in Terminal. That lets the build tools use the key without a "codesign wants to use
+the key" prompt on every rebuild. The prompt exists only for people who build from source; the downloaded app never
+touches this key. If you cancel, everything still works and the prompt stays until you choose Always Allow.
+
 ### Running your build
 
 Quit any installed Ensemble first. Open `build/Ensemble.app`, grant Camera and Accessibility, and choose Calibrate in the

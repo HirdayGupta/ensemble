@@ -147,8 +147,8 @@ jobs:
           name: release-logs
           path: |
             /tmp/ensemble-ci-*.log
-            /tmp/ensemble-release.log
-            /tmp/ensemble-bundle.log
+            build/release.log
+            build/bundle.log
           if-no-files-found: ignore
 
       - name: Remove the temporary keychain and key
