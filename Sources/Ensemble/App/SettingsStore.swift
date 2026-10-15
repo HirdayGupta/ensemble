@@ -106,7 +106,7 @@ final class SettingsStore: ObservableObject {
         tourSkipped = bool(Key.tourSkipped, false)
         setupProfiles = store.data(forKey: Key.setupProfiles)
 
-        pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
+        pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? PointerSmoothing.defaultLevel
         correctForPosition = bool(Key.correctForPosition, true)
         reverseScroll = store.bool(forKey: Key.reverseScroll)
         liveSoundBars = store.bool(forKey: Key.liveSoundBars)

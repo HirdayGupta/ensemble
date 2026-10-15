@@ -12,7 +12,8 @@ final class FrameAnalyzer: @unchecked Sendable {
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    static let jpegScale: CGFloat = 0.5       // 640x480 -> 320x240
+    /// The face tracker gets a frame 320 points wide (320x240 from the usual 640x480), whatever the camera format.
+    static let jpegWidth: CGFloat = 320
     static let jpegQuality = 0.6
 
 
@@ -45,7 +46,8 @@ final class FrameAnalyzer: @unchecked Sendable {
     }
 
     func jpeg(from pixels: CVPixelBuffer) -> Data? {
-        let image = CIImage(cvPixelBuffer: pixels).transformed(by: CGAffineTransform(scaleX: Self.jpegScale, y: Self.jpegScale))
+        let scale = Self.jpegWidth / CGFloat(max(CVPixelBufferGetWidth(pixels), 1))
+        let image = CIImage(cvPixelBuffer: pixels).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
         return ciContext.jpegRepresentation(of: image, colorSpace: colorSpace, options: [quality: Self.jpegQuality])
     }

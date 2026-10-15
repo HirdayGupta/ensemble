@@ -71,16 +71,49 @@ public struct FocusTracker {
     public mutating func forgetAll() { target = nil; candidate = nil; covered = nil }
 }
 
-/// The drawn dot follows the filtered nose on a leash, so small head wobble never moves it.
-public enum NoseDot {
-    public static let leash: CGFloat = 24
+/// Where the drawn dot rests. A head held still still wobbles a few points after filtering, so a resting dot stays put
+/// until the nose leaves `wakeRadius`; once it moves, the dot follows the filtered nose exactly, and it comes to rest
+/// again where the nose stopped (the nose stays within `settleRadius` for `settleTime`). A plain leash would leave the
+/// dot resting a leash short of where the nose stopped, which reads as drift.
+public struct NoseDot {
+    public var wakeRadius: CGFloat = 32
+    public var settleRadius: CGFloat = 6
+    public var settleTime: TimeInterval = 0.15
+    /// Readings in a row the nose must spend beyond `wakeRadius`: one noisy reading never wakes the dot.
+    public var wakeReadings = 3
 
-    public static func follow(_ dot: CGPoint?, nose p: CGPoint) -> CGPoint {
-        guard let d = dot else { return p }
-        let dist = hypot(p.x - d.x, p.y - d.y)
-        guard dist > leash else { return d }
-        let k = (dist - leash) / dist
-        return CGPoint(x: d.x + (p.x - d.x) * k, y: d.y + (p.y - d.y) * k)
+    public private(set) var dot: CGPoint?
+    public private(set) var moving = false
+    private var anchor = CGPoint.zero
+    private var anchorT = 0.0
+    private var outside = 0
+
+    public init() {}
+
+    public mutating func reset() { dot = nil; moving = false; outside = 0 }
+
+    /// The dot's position for this filtered nose reading at time `t`.
+    @discardableResult
+    public mutating func follow(nose p: CGPoint, at t: TimeInterval) -> CGPoint {
+        guard let d = dot else {
+            dot = p; moving = false
+            return p
+        }
+        if !moving {
+            guard hypot(p.x - d.x, p.y - d.y) > wakeRadius else { outside = 0; return d }
+            outside += 1
+            guard outside >= wakeReadings else { return d }
+            outside = 0
+            moving = true
+            anchor = p; anchorT = t
+        }
+        if hypot(p.x - anchor.x, p.y - anchor.y) > settleRadius || t < anchorT {
+            anchor = p; anchorT = t
+        } else if t - anchorT >= settleTime {
+            moving = false
+        }
+        dot = p
+        return p
     }
 }
 

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import EnsembleCore
 
-/// The tour's own window: a fixed-size glass panel centred on the main screen, independent of the menu-bar
+/// The tour's own window: a fixed-size white panel in the light appearance centred on the main screen, independent of the menu-bar
 /// panel and the Settings window. Closing it any way other than Skip or Done (the red button, Esc, Cmd-W)
 /// counts as Skip.
 @MainActor
@@ -50,15 +50,15 @@ final class TourWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .aqua)
         window.isReleasedWhenClosed = false
-        window.backgroundColor = .clear
-        window.isOpaque = false
+        window.backgroundColor = .white
+        window.isOpaque = true
 
-        let glass = NSVisualEffectView()
-        glass.material = .hudWindow
-        glass.blendingMode = .behindWindow
-        glass.state = .active
+        // Light like the website's demo: a plain white backing, no glass.
+        let glass = NSView()
+        glass.wantsLayer = true
+        glass.layer?.backgroundColor = NSColor.white.cgColor
         glass.frame = NSRect(origin: .zero, size: size)
         let host = NSHostingView(rootView: TourView(model: model, state: state, settings: settings))
         host.frame = glass.bounds

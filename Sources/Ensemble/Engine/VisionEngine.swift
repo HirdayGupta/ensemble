@@ -114,9 +114,11 @@ final class VisionEngine {
 
     static func cameraNames() -> [String] { CameraSession.names() }
 
-    /// Starts the camera and the face tracker. Calling it while running restarts with the new camera.
+    /// Starts the camera and the face tracker. Calling it while running restarts with the new camera. A camera
+    /// restart (wake, a replugged or switched camera, the watchdog) keeps the face tracker page: reloading it
+    /// unpacks the model again and leaves a second or two with no head readings.
     func start(cameraName: String?) {
-        if isRunning { halt() }
+        if isRunning { halt(keepTracker: true) }
         isRunning = true
         cameraStarted = false
         requestedCamera = cameraName
@@ -126,7 +128,11 @@ final class VisionEngine {
         fpsFrames = 0
         let mine = generation
         onStatus?(.starting)
-        face.start()
+        if face.isReady {
+            onStatus?(.faceTrackerReady)
+        } else if !face.isStarted {
+            face.start()
+        }
         Task { @MainActor in
             do {
                 let identity = try await camera.start(named: cameraName, token: mine)
@@ -182,14 +188,14 @@ final class VisionEngine {
         start(cameraName: requestedCamera)
     }
 
-    private func halt() {
+    private func halt(keepTracker: Bool = false) {
         isRunning = false
         cameraStarted = false
         watchdog?.invalidate()
         watchdog = nil
         generation += 1
         camera.stop()
-        face.stop()
+        if !keepTracker { face.stop() }
     }
 
     // MARK: Camera queue
@@ -203,6 +209,21 @@ final class VisionEngine {
         let hint = hints.withLock { $0 }
         let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt)
 
+        // The face frame goes out before hand pose runs: the nose dot waits on the face tracker, and hand pose
+        // (the longest step here) would otherwise delay every head reading by its own duration.
+        if plan.runFace, face.gate.tryEnter(now: t) {
+            if let jpeg = analyzer.jpeg(from: pixels) {
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, self.isRunning, self.generation == mine else { self?.face.gate.leave(); return }
+                        self.face.submit(jpeg: jpeg, t: t)
+                    }
+                }
+            } else {
+                face.gate.leave()
+            }
+        }
+
         var hand: HandObservation?
         if plan.runHand {
             let h = analyzer.hand(from: buffer, at: t)
@@ -210,12 +231,6 @@ final class VisionEngine {
             hand = h
         }
         let light = plan.runLight ? analyzer.light(from: pixels, at: t) : nil
-
-        var jpeg: Data?
-        if plan.runFace, face.gate.tryEnter(now: t) {
-            jpeg = analyzer.jpeg(from: pixels)
-            if jpeg == nil { face.gate.leave() }
-        }
 
         if fpsWindowStart == 0 { fpsWindowStart = t }
         fpsFrames += 1
@@ -227,18 +242,14 @@ final class VisionEngine {
         }
         let label = cameraLabel
         let id = cameraID
-        if hand == nil, light == nil, jpeg == nil, fps == nil { return }
+        if hand == nil, light == nil, fps == nil { return }
 
         // Captured by value: older Swift compilers (6.0, 6.1) reject a captured `var` in this concurrently-executing closure.
-        DispatchQueue.main.async { [weak self, hand, light, jpeg, fps] in
+        DispatchQueue.main.async { [weak self, hand, light, fps] in
             MainActor.assumeIsolated {
-                guard let self, self.isRunning, self.generation == mine else {
-                    if jpeg != nil { self?.face.gate.leave() }
-                    return
-                }
+                guard let self, self.isRunning, self.generation == mine else { return }
                 if let hand { self.onHand?(hand) }
                 if let light { self.onLight?(light) }
-                if let jpeg { self.face.submit(jpeg: jpeg, t: t) }
                 if let fps { self.onStatus?(.running(fps: fps, camera: label, cameraID: id)) }
             }
         }

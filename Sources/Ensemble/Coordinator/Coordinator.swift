@@ -347,8 +347,8 @@ final class Coordinator: AppCoordinating {
         // A reading already in flight when the camera went off for the lock: nothing acts on it.
         if awayState.isAway { return }
         ctx.latestHead = head
-        if let sink = practiceSink { sink.tourPractice(head: head); return }
-        if tourOpen { return }
+        // Head readings are not practised in the tour, but they must not act on Claude while it is open.
+        if practiceSink != nil || tourOpen { return }
         if head.faceCount == 1 {
             let returned = head.t - ctx.lastOneFaceT >= Self.sessionScanFaceWindow
             ctx.lastOneFaceT = head.t
@@ -360,7 +360,7 @@ final class Coordinator: AppCoordinating {
             // A pinch or scroll in progress holds everything still: the hand is in front of the face.
             state.set(\.spotInUse, ctx.setup.spotInUseID)
             let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
-            dot.follow(nose: p, onSession: under != nil)
+            dot.follow(nose: p, at: head.t, onSession: under != nil)
             EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")
         } else if head.faceCount != 1 && head.t - ctx.lastOneFaceT <= 1.5 {
             // A hand in front of the face hides it or reads as a second face for a moment: keep the last target and dot.

@@ -3,9 +3,10 @@ import Foundation
 
 let args = Array(CommandLine.arguments.dropFirst())
 setvbuf(stdout, nil, _IOLBF, 0)
-guard let mode = args.first else { print("usage: perfbench native | web [transfer=b64|jpegpull|rgbapull|lumapull] [w=480] [h=360] [q=0.6] [hz=30] [sec=15] [delegate=GPU|CPU] [running=VIDEO|IMAGE] [face=1|0]"); exit(2) }
+guard let mode = args.first else { print("usage: perfbench native | pointer [noise=0.004] [sweep] | web [transfer=b64|jpegpull|rgbapull|lumapull] [w=480] [h=360] [q=0.6] [hz=30] [sec=15] [delegate=GPU|CPU] [running=VIDEO|IMAGE] [face=1|0]"); exit(2) }
 switch mode {
 case "native": runNative()
+case "pointer": runPointer(Array(args.dropFirst()))
 case "web":
     var cfg = WebConfig()
     for a in args.dropFirst() {

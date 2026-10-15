@@ -30,37 +30,3 @@ public final class TourPracticeDetector {
         }
     }
 }
-
-/// Marks the Look tab done once the head has turned away from forward and come back, from head yaw readings
-/// alone (a camera's own small jitter around centre never finishes it, and the sign of yaw carries no fixed
-/// meaning, so only its magnitude is used).
-public final class TourLookDetector {
-    /// Beyond this many radians counts as "turned away".
-    public static let awayThreshold = 0.22
-    /// Back within this many radians counts as "facing forward again".
-    public static let homeThreshold = 0.08
-
-    private var turnedAway = false
-    public private(set) var done = false
-
-    public init() {}
-
-    public func reset() {
-        turnedAway = false
-        done = false
-    }
-
-    /// Returns true the moment this reading completes the gesture (once, not on every later reading).
-    @discardableResult
-    public func observe(yaw: Double) -> Bool {
-        guard !done else { return false }
-        let a = abs(yaw)
-        if !turnedAway, a >= Self.awayThreshold {
-            turnedAway = true
-        } else if turnedAway, a <= Self.homeThreshold {
-            done = true
-            return true
-        }
-        return false
-    }
-}

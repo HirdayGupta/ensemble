@@ -32,7 +32,7 @@ struct FrameRatePlannerTests {
         var p = FrameRatePlanner()
         let c = simulate(&p, seconds: 10, face: true)
         #expect((70...95).contains(c.hand))        // ~8 Hz, quantized to camera frames
-        #expect((145...155).contains(c.face))      // ~15 Hz: every second frame
+        #expect((295...300).contains(c.face))      // 30 Hz: every frame
         #expect((95...105).contains(c.light))      // ~10 Hz
     }
 
@@ -69,7 +69,7 @@ struct FrameRatePlannerTests {
         _ = simulate(&p, seconds: 8, face: false)
         let c = simulate(&p, from: 8, seconds: 3, face: false, force: true)
         #expect(c.hand == 90)
-        #expect((43...47).contains(c.face))
+        #expect((88...90).contains(c.face))
     }
 
     @Test func aFaceReturningRestoresFullRateWithinOneFrame() {
@@ -79,7 +79,7 @@ struct FrameRatePlannerTests {
         #expect(plan.runFace)
         #expect(plan.runHand)
         let next = p.plan(now: 10.2 + 1.0 / 30, forceFull: false, lastFaceSeenAt: 10.2)
-        #expect(!next.runFace)
+        #expect(next.runFace)                      // full rate: every frame
     }
 
     @Test func theVeryFirstFrameRunsEverything() {

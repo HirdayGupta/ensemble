@@ -15,6 +15,8 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     private var webView: WKWebView?
     private var window: NSWindow?
     private(set) var isReady = false
+    /// Loading or ready: `start()` was called and neither `stop()` nor a failure followed.
+    var isStarted: Bool { startAttempt != nil }
     private var consecutiveFrameErrors = 0
     private var readyTimeout: Task<Void, Never>?
     private var startAttempt: UUID?
@@ -70,6 +72,8 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
 
     private func fail(_ message: String) {
+        startAttempt = nil
+        readyTimeout?.cancel()
         gate.setOpen(false)
         isReady = false
         onFailure?(message)
