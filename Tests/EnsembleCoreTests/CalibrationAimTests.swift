@@ -202,7 +202,7 @@ import Testing
     @Test func fitOfNothingIsEmpty() {
         #expect(ScreenLayout.fit([], width: 300, maxHeight: 100).rects.isEmpty)
         #expect(ScreenLayout.fit([CGRect(x: 0, y: 0, width: 0, height: 0)], width: 300, maxHeight: 100).size == .zero)
-        #expect(ScreenLayout.fit([CGRect(x: .nan, y: 0, width: 10, height: 10)], width: 300, maxHeight: 100).rects.isEmpty)
+        #expect(ScreenLayout.fit([CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10)], width: 300, maxHeight: 100).rects.isEmpty)
     }
 
     @Test func calibrationStates() {
