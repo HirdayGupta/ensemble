@@ -9,7 +9,7 @@ extension ClaudeBridge {
     }
 
     private func draftNow(_ s: ClaudeSession) -> String? {
-        guard let composer = liveEntry(s, rescanPane: true)?.elements.composer else { return nil }
+        guard let composer = dictatedEntry(s)?.elements.composer else { return nil }
         return AX.string(composer, kAXValueAttribute)
     }
 
@@ -41,7 +41,7 @@ extension ClaudeBridge {
     }
 
     private func sendNow(_ s: ClaudeSession, shown: String) -> BridgeResult {
-        guard let entry = liveEntry(s, rescanPane: true) else { return .refused(self.sessionNotFound) }
+        guard let entry = dictatedEntry(s) else { return .refused("the dictated session is no longer where it was") }
         let e = entry.elements
 
         // Any permission mode: the deliberate thumbs-up hold is the confirmation (owner decision, 2026-10-14).

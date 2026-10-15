@@ -93,6 +93,12 @@ public final class GestureMachine {
     /// The last frame of a send pose that fired (or was blocked), for `sendRearm`.
     private var firedSendLastT: TimeInterval = -.infinity
 
+    /// A send pose is held and can still send (not fired, not too soon after a send): an early send stays armed.
+    public var holdingSend: Bool {
+        guard let r = run, r.pose == mapping.send else { return false }
+        return !r.fired && !r.blocked
+    }
+
     /// The send pose that just stopped a dictation is still held toward its send: the coordinator stops dictation
     /// and settles the transcript during the hold, so Send can be pressed the moment it completes.
     public var holdingSendAfterStop: Bool {

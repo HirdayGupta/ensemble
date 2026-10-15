@@ -31,6 +31,17 @@ final class CoordinatorContext {
     var listening: ClaudeSession?
     /// A start, stop or send is in flight.
     var busy = false
+    /// Dictations Claude runs without Ensemble, as the session refresh sees them.
+    var claudeDictations = ForeignDictations()
+    /// Moves on whenever Ensemble starts, takes over or stops a dictation, so a refresh that read the checkboxes
+    /// before that never reports Ensemble's own dictation as one Claude ran.
+    var dictationEpoch = 0
+
+    /// Ensemble now owns (or just ended) the dictation in this session: what the refresh saw there is accounted for.
+    func ownDictation(in session: ClaudeSession) {
+        claudeDictations.forget(session.id)
+        dictationEpoch += 1
+    }
     /// The last time exactly one face was seen.
     var lastOneFaceT: TimeInterval = -.infinity
     var gestureShowing = false

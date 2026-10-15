@@ -99,6 +99,7 @@ import Testing
         s.hold(.thumbsUp, for: 3)
         #expect(s.count(.sendRequested) == 1)
         #expect(s.machine.progress?.willAct == false)   // no bar filling again
+        #expect(!s.machine.holdingSend)
         s.hold(.openPalm, for: 0.5)
         s.hold(.thumbsUp, for: 2)
         #expect(s.count(.sendRequested) == 2)       // a real new thumbs-up still sends
@@ -110,6 +111,7 @@ import Testing
         s.hold(.thumbsUp, for: 0.5)
         #expect(!s.machine.talking)
         #expect(s.machine.holdingSendAfterStop)
+        #expect(s.machine.holdingSend)
         s.hold(.thumbsUp, for: 1.5)
         #expect(s.count(.sendRequested) == 1)
         #expect(!s.machine.holdingSendAfterStop)    // fired
