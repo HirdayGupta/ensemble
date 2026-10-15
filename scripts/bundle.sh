@@ -8,6 +8,14 @@ cd "$ROOT"
 APP="build/Ensemble.app"
 LOG="/tmp/ensemble-bundle.log"
 
+# The macOS 27 SDK makes SwiftUI's @State a macro whose compiler plugin ships with Xcode only, so with just the
+# Command Line Tools every view fails ("plugin for module 'SwiftUIMacros' not found"). Build against the macOS 26 SDK
+# there; the app still runs on macOS 27. An explicit SDKROOT is never overridden.
+CLT_SDKS="/Library/Developer/CommandLineTools/SDKs"
+if [ -z "${SDKROOT:-}" ] && [ "$(xcode-select -p 2>/dev/null)" = "/Library/Developer/CommandLineTools" ] && [ -d "$CLT_SDKS/MacOSX26.sdk" ]; then
+  export SDKROOT="$CLT_SDKS/MacOSX26.sdk"
+fi
+
 # -Osize: the app's own code is not the CPU-heavy part (WebKit, Vision and the GPU are), so size wins over speed.
 echo "[$(date -u +%FT%TZ)] swift build -c release -Xswiftc -Osize" | tee "$LOG"
 swift build -c release -Xswiftc -Osize 2>&1 | tee -a "$LOG"
