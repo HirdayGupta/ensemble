@@ -38,7 +38,7 @@ final class OverlayModel: ObservableObject {
     @Published var gesture: GestureProgress?
     @Published var showHighlight = true
     @Published var banner: OverlayBanner?
-    /// The keyboard, mouse or trackpad is in use: the highlight fades away until they rest.
+    /// The keyboard, mouse or trackpad is in use and no gesture is acting: the highlight fades away until they rest.
     @Published var handsOnInput = false
     /// Live voice level 0...1 while listening (0 when unavailable).
     @Published var audioLevel = 0.0

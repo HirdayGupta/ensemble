@@ -5,6 +5,7 @@ import Testing
 struct FrameRatePlannerTests {
     /// Runs a 30 fps camera for `seconds` and counts what ran. `face` says whether a face is seen on every frame.
     private func simulate(_ p: inout FrameRatePlanner, from t0: TimeInterval = 0, seconds: Double, face: Bool, force: Bool = false,
+                          slowFace: Bool = false,
                           hand: (TimeInterval) -> Bool = { _ in false }) -> (hand: Int, face: Int, light: Int) {
         var counts = (hand: 0, face: 0, light: 0)
         var lastFace: TimeInterval? = face ? t0 : nil
@@ -12,7 +13,7 @@ struct FrameRatePlannerTests {
         for i in 0..<frames {
             let t = t0 + Double(i) / 30
             if face { lastFace = t }
-            let plan = p.plan(now: t, forceFull: force, lastFaceSeenAt: lastFace)
+            let plan = p.plan(now: t, forceFull: force, lastFaceSeenAt: lastFace, slowFace: slowFace)
             if plan.runHand { counts.hand += 1; p.noteHand(present: hand(t), at: t) }
             if plan.runFace { counts.face += 1 }
             if plan.runLight { counts.light += 1 }
@@ -85,5 +86,54 @@ struct FrameRatePlannerTests {
     @Test func theVeryFirstFrameRunsEverything() {
         var p = FrameRatePlanner()
         #expect(p.plan(now: 100, forceFull: false, lastFaceSeenAt: nil) == .init(runHand: true, runFace: true, runLight: true))
+    }
+
+    @Test func slowFaceRunsTheFaceAtTenHzAndLeavesTheHandAlone() {
+        var p = FrameRatePlanner()
+        let c = simulate(&p, seconds: 10, face: true, slowFace: true)
+        #expect((95...101).contains(c.face))       // 10 Hz: every third frame
+        #expect((70...95).contains(c.hand))        // the hand probe is unchanged
+        #expect((95...105).contains(c.light))
+        var q = FrameRatePlanner()
+        let hand = simulate(&q, seconds: 2, face: true, slowFace: true, hand: { _ in true })
+        #expect(hand.hand >= 2 * 30 - 4)           // a hand in view still gets every frame
+    }
+
+    @Test func fullFaceRateReturnsOnTheNextFrame() {
+        var p = FrameRatePlanner()
+        _ = simulate(&p, seconds: 5, face: true, slowFace: true)
+        let first = p.plan(now: 5, forceFull: false, lastFaceSeenAt: 5, slowFace: false)
+        #expect(first.runFace)
+        let next = p.plan(now: 5 + 1.0 / 30, forceFull: false, lastFaceSeenAt: 5, slowFace: false)
+        #expect(next.runFace)
+    }
+
+    @Test func forcedFullOverridesSlowFace() {
+        var p = FrameRatePlanner()
+        let c = simulate(&p, seconds: 5, face: true, force: true, slowFace: true)
+        #expect(c.hand == 150)
+        #expect((148...150).contains(c.face))
+    }
+
+    @Test func noFaceStillDropsToTheIdleRateWhileSlow() {
+        var p = FrameRatePlanner()
+        _ = simulate(&p, seconds: 4, face: false, slowFace: true)
+        let idle = simulate(&p, from: 4, seconds: 10, face: false, slowFace: true)
+        #expect((18...25).contains(idle.face))
+    }
+
+    @Test func whenTheFaceMayRunSlowly() {
+        func slow(full: Bool = false, tour: Bool = false, other: Bool = false, sessions: Bool = true,
+                  paused: TimeInterval? = nil) -> Bool {
+            FrameRatePlanner.wantsSlowFace(needsFull: full, tourOpen: tour, otherAppInFront: other, sessionsOnScreen: sessions,
+                                           pausedFor: paused)
+        }
+        #expect(!slow())                           // Claude in front with a session: full rate
+        #expect(slow(other: true))                 // another app in front
+        #expect(slow(sessions: false))             // no Claude session on screen
+        #expect(!slow(paused: 2.9))                // a short pause keeps full rate for a quick resume
+        #expect(slow(paused: 3))                   // a long one slows
+        #expect(!slow(full: true, other: true, sessions: false, paused: 10))   // dictating, sending or a gesture held
+        #expect(!slow(tour: true, other: true))    // the tour keeps full rate
     }
 }
