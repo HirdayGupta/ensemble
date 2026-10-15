@@ -1,16 +1,35 @@
 import AppKit
 import AVFoundation
+import EnsembleCore
 
 /// Live permission facts and the Settings panes that fix them. Nothing here is cached: grants change while Ensemble runs.
 enum Permissions {
     static var accessibilityTrusted: Bool { AXIsProcessTrusted() }
 
-    /// False when the user has denied the camera or it is restricted; "not yet asked" counts as allowed.
-    static var cameraAllowed: Bool {
+    /// The three camera states the tour shows. Only "not asked" can still be answered with a prompt.
+    static var cameraAccess: CameraAccess {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .denied, .restricted: return false
-        default: return true
+        case .authorized: return .granted
+        case .notDetermined: return .notAsked
+        default: return .denied
         }
+    }
+
+    /// False only when the owner has denied the camera or it is restricted. Health uses this: "not yet asked" must
+    /// not read as a failure, because starting the camera is what asks.
+    static var cameraAllowed: Bool { cameraAccess != .denied }
+
+    /// Shows macOS's Camera prompt; a no-op once the owner has answered.
+    static func requestCamera() {
+        guard cameraAccess == .notAsked else { return }
+        AVCaptureDevice.requestAccess(for: .video) { _ in }
+    }
+
+    /// The prompt is shown only once per install, so a button that only re-asks does nothing the second time:
+    /// it also opens the Accessibility list for the owner to switch Ensemble on.
+    static func grantAccessibility() {
+        requestAccessibility()
+        openSettings(for: "Accessibility")
     }
 
     /// Shows the system's "would like to control this computer" prompt if Accessibility is not already granted.

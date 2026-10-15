@@ -51,9 +51,12 @@ final class DictationController {
         }.store(in: &cancellables)
         safety.onAlarm = { [weak self] msg in
             self?.ctx.refuse("Alarm: \(msg)")
-            Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
+            Notifier.shared.alarm(title: "Claude's microphone may still be on", body: msg)
         }
-        safety.onMuted = { [weak self] muted in self?.ctx.state.muted = muted }
+        safety.onMuted = { [weak self] muted in
+            self?.ctx.state.muted = muted
+            if !muted { Notifier.shared.resolveAlarm() }   // the mute is undone only after a definite "off"
+        }
         safety.onHoldEnded = { [weak self] why in
             MainActor.assumeIsolated {
                 guard let self, self.ctx.listening != nil else { return }

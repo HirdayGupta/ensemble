@@ -4,6 +4,8 @@ import EnsembleCore
 @MainActor
 protocol AppCoordinating: AnyObject {
     func start()
+    /// Puts right anything an earlier run left (a dictation record, an input mute, lowered volume); needs no camera.
+    func recoverAtLaunch()
     func stop(disarm: Bool)
     func calibrate()
     /// One screen only, or a new position beside the saved ones; `calibrate()` is `.recalibrate`.
