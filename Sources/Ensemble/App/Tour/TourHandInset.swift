@@ -29,35 +29,33 @@ final class TourHandInsetModel: ObservableObject {
     }
 }
 
-/// A small inset of the owner's hand as Vision sees it: 21 joints as dots and bones as lines, in the app's blue.
-/// Under it, the gesture the system reads, and a check mark once the open tab's gesture is done.
+/// A small overlay of the owner's hand as Vision sees it: 21 joints as dots and bones as lines, in the app's blue,
+/// on a translucent dark backing. Under the skeleton, the gesture the system reads, and a check mark once the
+/// open tab's gesture is done.
 struct TourHandInset: View {
     @ObservedObject var model: TourHandInsetModel
     let done: Bool
 
-    static let size = CGSize(width: 200, height: 150)
+    static let size = CGSize(width: 160, height: 120)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             TimelineView(.animation) { _ in
                 let points = model.points(at: CACurrentMediaTime())
                 ZStack {
                     Canvas { context, size in draw(points, in: &context, size: size) }
                     if points.allSatisfy({ $0 == nil }) {
                         Text("Raise a hand to the camera")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.5))
                     }
                 }
             }
-            .frame(width: Self.size.width, height: Self.size.height)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.4)))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(width: Self.size.width, height: Self.size.height - 22)
 
             HStack(spacing: 6) {
                 Text(model.readout)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -66,9 +64,14 @@ struct TourHandInset: View {
                         .transition(.opacity)
                 }
             }
-            .frame(width: Self.size.width)
+            .padding(.horizontal, 8)
+            .frame(width: Self.size.width, height: 18)
             .animation(.smooth(duration: 0.3), value: done)
         }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.55)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Your hand as the camera sees it: \(model.readout)\(done ? ", done" : "")")
     }
