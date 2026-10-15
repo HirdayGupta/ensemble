@@ -70,6 +70,13 @@ if [ "$SV_MAJOR" -lt 6 ] || { [ "$SV_MAJOR" -eq 6 ] && [ "$SV_MINOR" -lt 2 ]; };
   exit 0
 fi
 
+# Stamp the version so About and Settings say what is running: the last release plus this commit
+# (for example 0.2.9-dev.14521f0), and a build number that grows with every commit on main.
+git fetch --quiet --tags origin 2>>"$LOG" || true
+DEV_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+export ENSEMBLE_VERSION="${DEV_VERSION:-0.0.0}-dev.$(git rev-parse --short HEAD)"
+ENSEMBLE_BUILD="$(git rev-list --count HEAD)"
+export ENSEMBLE_BUILD
 if ! ENSEMBLE_DEV_BUILD=1 scripts/bundle.sh >> "$LOG" 2>&1; then log "build failed at $(git rev-parse --short HEAD); the installed app is unchanged"; exit 0; fi
 
 # Dictation may have started during the build, which takes minutes. A record now defers the install; the pending
