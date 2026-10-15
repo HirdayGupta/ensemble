@@ -174,8 +174,8 @@ import Testing
         #expect(ScreenLayout.calibratedLine(valid: 0, connected: 2) == nil)
     }
 
-    /// The owner's desk on 2026-10-15: a 2560 by 1440 main screen and the same model turned portrait to its left,
-    /// 734 points higher. The drawing keeps both relative sizes and the offset, at one scale.
+    /// A 2560 by 1440 main screen and the same model turned portrait to its left, its top 734 points above the
+    /// main screen's. The drawing keeps both relative sizes and the offset, at one scale.
     @Test func fitKeepsTheArrangementAtOneScale() {
         let main = CGRect(x: 0, y: 0, width: 2560, height: 1440)
         let left = CGRect(x: -1440, y: -734, width: 1440, height: 2560)
