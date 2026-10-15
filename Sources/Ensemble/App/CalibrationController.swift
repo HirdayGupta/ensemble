@@ -62,11 +62,9 @@ struct CalibrationFeed {
 final class CalibrationController {
     static let shared = CalibrationController()
 
-    private let attemptsPerTarget = 3
     private let inset = 0.08
     private let introSeconds = 2.5
     private let cameraWaitSeconds = 30.0
-    private let pointsPerScreen = 5
 
     private let model = CalibrationModel()
     private var windows: [CalibrationWindow] = []

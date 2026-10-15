@@ -27,8 +27,6 @@ enum ClaudeLabels {
     /// The pane header's title button reads "<session name>, rename session".
     static let renameSuffix = ", rename session"
     static let allModes: Set<String> = ["Manual", "Accept edits", "Plan", "Auto", "Bypass permissions", "Don't ask"]
-    /// Sending by gesture is only allowed in these modes: the user sees every tool request before it runs.
-    static let sendAllowedModes: Set<String> = ["Manual", "Plan"]
 }
 
 /// The live elements of one session pane. Elements go stale when Claude re-renders, so a pane is
