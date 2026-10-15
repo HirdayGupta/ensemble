@@ -6,6 +6,7 @@
 
 <p align="center">
 <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/license-MIT-2f6f4e?logo=opensourceinitiative&logoColor=white"></a>
+<a href="https://github.com/oficiallyAkshay/ensemble"><img alt="clones of this repository, last seven days and all time" src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/oficiallyAkshay/ensemble/badges/clones.json&query=$.badge&label=clones&logo=github&logoColor=white"></a>
 </p>
 
 <p align="center">Works with<br>
@@ -26,7 +27,7 @@ Ensemble is a macOS menu bar app that lets you run Claude desktop's Code session
 
 <p align="center"><b>Always say what it sees</b><br>A capsule at the top of the screen names the state and the session, so nothing happens by surprise.</p>
 
-<p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers fades out and pauses while you dictate, then comes back.</p>
+<p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers pauses while you dictate, then comes back.</p>
 
 <p align="center"><b>A five-step tour on first launch</b><br>It shows each gesture on a flat Claude window with one focused session and a 3D hand beside it, lets you practise them without anything reaching Claude while a panel under the 3D hand draws your own hand's 21 joints as the camera reads them (the joint points stay in the app; no image is kept or sent), and replays from the menu bar panel, the panel under Option-Command-K, or Settings.</p>
 
@@ -64,7 +65,7 @@ No credential. Everything runs on your Mac, and Claude's own dictation does the 
 - Never stores or sends a camera frame.
 - Never records what you dictate or what is on your screen: it presses Claude's buttons and logs events and numbers only.
 - Never reaches the internet from the face tracker page: every web address is blocked.
-- Never updates itself unless you turn on Update automatically (Settings > General: checks soon after launch and then every hour, shows a new version on the update button, installs only while you are not dictating) or press Check for Updates; updates are signed, and the app installs only an update signed with its own key.
+- Never updates itself unless you turn on Update automatically (Settings > General: checks soon after launch and then every hour, installs a new version by itself after 30 seconds without dictating, sending, calibrating or the tour, and reopens) or press Check for Updates (one question, "Ensemble x.y.z is available. Install now?", then it downloads, installs and reopens with no more windows; "Update to x.y.z" on the button installs in one press). Nothing installs while you dictate. Updates are signed, and the app installs only an update signed with its own key.
 - Never sends telemetry, analytics or crash reports.
 - Never acts on another app: with anything else in front, gestures do nothing. The one exception is the audio pause, which presses the system play/pause key while you dictate, and can be turned off.
 
