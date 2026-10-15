@@ -26,6 +26,31 @@ enum Permissions {
 
     /// What to do next, shown under the status. A grant that is listed but does not work is stale after a rebuild.
     static func guidance(for what: String) -> String {
-        "Turn Ensemble on in the \(what) list. If it is already on but this stays, remove Ensemble with the minus button and add it again."
+        "Turn Ensemble on in the \(what) list, then press Restart Ensemble. Already on and still stuck? Press Reset, then turn it on again."
+    }
+
+    /// Quits and opens Ensemble again so macOS applies a grant made while it ran. Quitting stops any dictation first
+    /// (the normal terminate path); a detached shell reopens the same bundle a moment after this process exits.
+    static func relaunch() {
+        let path = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
+    /// A grant that shows on but does not work belongs to an earlier signature of the app (gotcha 1). Clearing
+    /// Ensemble's own entry and asking again puts the current app in the list; then a restart applies it.
+    static func resetAndAsk(for what: String) {
+        guard let id = Bundle.main.bundleIdentifier else { return }
+        let service = what == "Camera" ? "Camera" : "Accessibility"
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        task.arguments = ["reset", service, id]
+        try? task.run()
+        task.waitUntilExit()
+        if service == "Accessibility" { requestAccessibility() } else { AVCaptureDevice.requestAccess(for: .video) { _ in } }
+        openSettings(for: what)
     }
 }

@@ -80,6 +80,15 @@ struct MenuPanelView: View {
                     Label("Open \(what) settings", systemImage: "gearshape").frame(maxWidth: .infinity)
                 }
                 .ensembleButtonStyle()
+                HStack(spacing: 8) {
+                    Button { Permissions.relaunch() } label: {
+                        Label("Restart Ensemble", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
+                    }
+                    Button { Permissions.resetAndAsk(for: what) } label: {
+                        Label("Reset", systemImage: "arrow.uturn.backward").frame(maxWidth: .infinity)
+                    }
+                }
+                .ensembleButtonStyle()
             }
             if state.muted {
                 row(symbol: "speaker.slash", text: "Sounds muted", tint: .secondary)
