@@ -9,7 +9,7 @@ struct TourCalibrateStep: View {
     @ObservedObject var settings: SettingsStore
     @StateObject private var scene = TourSceneController(scene: .calibrate)
 
-    private static let blurb = "A dot visits five spots on each screen while you follow it with your head."
+    private static let blurb = "A dot visits five spots on each screen while you follow it with your head, so Ensemble knows which session you are looking at."
 
     var body: some View {
         VStack(spacing: 22) {

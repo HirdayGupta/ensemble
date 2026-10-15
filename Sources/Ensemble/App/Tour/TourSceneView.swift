@@ -5,11 +5,10 @@ import EnsembleCore
 
 /// The scenes scene3d.js draws, by the names the page takes.
 enum TourScene: String {
-    case welcome, calibrate, look, dictate, send, scroll
+    case welcome, calibrate, dictate, send, scroll
 
     init(_ tab: TourGestureTab) {
         switch tab {
-        case .look: self = .look
         case .dictate: self = .dictate
         case .send: self = .send
         case .scroll: self = .scroll
