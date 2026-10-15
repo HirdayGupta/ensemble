@@ -7,10 +7,11 @@ struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var updates: UpdateController
     let calibrate: () -> Void
+    let replayTour: (TourStep?) -> Void
 
     var body: some View {
         TabView {
-            GeneralSettings(state: state, settings: settings)
+            GeneralSettings(state: state, settings: settings, replayTour: replayTour)
                 .tabItem { Label("General", systemImage: "gearshape") }
             GestureSettings(settings: settings)
                 .tabItem { Label("Gestures", systemImage: "hand.raised") }
@@ -28,6 +29,8 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
+    let replayTour: (TourStep?) -> Void
+    @State private var tourStep: TourStep = .welcome
 
     var body: some View {
         Form {
@@ -48,6 +51,13 @@ private struct GeneralSettings: View {
             }
             Section {
                 LabeledContent("Show the panel from anywhere", value: "⌥⌘K")
+            }
+            Section("Tour") {
+                Button("Replay tour") { replayTour(nil) }
+                Picker("One step", selection: $tourStep) {
+                    ForEach(TourStep.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Button("Replay this step") { replayTour(tourStep) }
             }
         }
         .formStyle(.grouped)
@@ -81,6 +91,16 @@ private struct GestureSettings: View {
                 }
             } footer: {
                 Text("Each gesture can only do one thing. Picking one that is in use swaps it with the other action.")
+            }
+            Section {
+                Toggle("Warn when my look leaves Claude", isOn: $settings.warnWhenLeavingClaude)
+            } footer: {
+                Text("While dictating, the edge you are looking toward glows amber if what lies beyond it is not a Claude session. Looking toward another Claude session is always shown.")
+            }
+            Section {
+                Toggle("Headphone presses", isOn: $settings.headphonePresses)
+            } footer: {
+                Text("One press starts or stops dictation in the session you look at. Two presses send.")
             }
             Section {
                 GestureRow(slot: .cancel, pose: settings.mapping.cancel) {

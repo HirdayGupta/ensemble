@@ -15,12 +15,16 @@ final class SettingsStore: ObservableObject {
         static let pointerSmoothing = "pointerSmoothing"
         static let reverseScroll = "reverseScroll"
         static let liveSoundBars = "liveSoundBars"
+        static let warnWhenLeavingClaude = "warnWhenLeavingClaude"
         static let playSounds = "playSounds"
         static let pauseMediaWhileDictating = "pauseMediaWhileDictating"
+        static let headphonePresses = "headphonePresses"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
         static let lastClaudeVersion = "lastClaudeVersion"
+        static let tourCompleted = "tourCompleted"
+        static let tourSkipped = "tourSkipped"
         static let setupProfiles = "setupProfiles"
     }
 
@@ -40,6 +44,9 @@ final class SettingsStore: ObservableObject {
     /// Off by default: the listening sign is a blinking microphone dot and Ensemble never asks for the microphone.
     /// On: sound bars follow the voice level, which needs microphone permission.
     @Published var liveSoundBars: Bool { didSet { defaults.set(liveSoundBars, forKey: Key.liveSoundBars) } }
+    /// While dictating, an amber glow on the edge of the session you face when your look is heading somewhere
+    /// that is not Claude. On by default; the warning about another Claude session is always on.
+    @Published var warnWhenLeavingClaude: Bool { didSet { defaults.set(warnWhenLeavingClaude, forKey: Key.warnWhenLeavingClaude) } }
     @Published var sendCountdownSeconds: Double {
         didSet {
             let clamped = min(max(sendCountdownSeconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
@@ -49,6 +56,8 @@ final class SettingsStore: ObservableObject {
     }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: Key.playSounds) } }
     @Published var pauseMediaWhileDictating: Bool { didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMediaWhileDictating) } }
+    /// Stem presses on Bluetooth headphones drive dictation and send. On by default.
+    @Published var headphonePresses: Bool { didSet { defaults.set(headphonePresses, forKey: Key.headphonePresses) } }
     /// Set only through `setLaunchAtLogin`, which talks to the system first.
     @Published private(set) var launchAtLogin: Bool
     @Published var launchAtLoginError: String?
@@ -59,6 +68,10 @@ final class SettingsStore: ObservableObject {
     @Published var calibrationDisplays: String? { didSet { defaults.set(calibrationDisplays, forKey: Key.calibrationDisplays) } }
     /// The Claude version the last confirmed dictation ran on.
     @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
+    /// The first-run tour has played to the end once.
+    @Published var tourCompleted: Bool { didSet { defaults.set(tourCompleted, forKey: Key.tourCompleted) } }
+    /// The owner skipped the first-run tour; the menu bar panel offers it until this or `tourCompleted` is true.
+    @Published var tourSkipped: Bool { didSet { defaults.set(tourSkipped, forKey: Key.tourSkipped) } }
     /// Opaque blob written by the coordinator: an `EnsembleCore.SetupProfiles`, one calibration per camera,
     /// tagged per screen. `calibration`/`calibrationDisplays` above are the single setup this replaces;
     /// they stay for the one-time migration into this on first launch after the upgrade.
@@ -78,17 +91,21 @@ final class SettingsStore: ObservableObject {
         cameraName = store.string(forKey: Key.cameraName)
         playSounds = bool(Key.playSounds, true)
         pauseMediaWhileDictating = bool(Key.pauseMediaWhileDictating, true)
+        headphonePresses = bool(Key.headphonePresses, true)
         LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
         calibrationDisplays = store.string(forKey: Key.calibrationDisplays)
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
+        tourCompleted = bool(Key.tourCompleted, false)
+        tourSkipped = bool(Key.tourSkipped, false)
         setupProfiles = store.data(forKey: Key.setupProfiles)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         reverseScroll = store.bool(forKey: Key.reverseScroll)
         liveSoundBars = store.bool(forKey: Key.liveSoundBars)
+        warnWhenLeavingClaude = bool(Key.warnWhenLeavingClaude, true)
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 0.75
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 

@@ -26,6 +26,8 @@ Ensemble is a macOS menu bar app that lets you run Claude desktop's Code session
 
 <p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers fades out and pauses while you dictate, then comes back.</p>
 
+<p align="center"><b>A five-step tour on first launch</b><br>It shows each gesture on a 3D hand, lets you practise them without anything reaching Claude, and replays from the menu bar panel, the panel under Option-Command-K, or Settings.</p>
+
 <p align="center"><b>Private stays private</b><br>Camera frames are analysed in memory and never stored or sent anywhere.</p>
 
 ## Fit
@@ -42,7 +44,7 @@ Look elsewhere when:
 - You use an Intel Mac or a macOS older than 14.2.
 - You use Claude in a browser, since Ensemble drives the desktop app only.
 
-It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, grant Camera and Accessibility, and choose Calibrate from the menu bar icon. Ensemble remembers a calibration for each camera and screen, so changing your desk asks only for what is new: a restored setup shows a short notice, a new screen asks to calibrate just that screen (about 11 seconds) while your other screens keep working, and a new camera asks for a full calibration before looking and dictation resume. Answer with the button or a held thumbs-up, or choose Later to keep working without it.
+It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, then follow the five-step tour that opens on first launch: it asks for Camera, calibrates each screen and asks for Accessibility (skip it any time, and replay it from the menu bar panel's Replay tour). Ensemble remembers a calibration for each camera and screen, so changing your desk asks only for what is new: a restored setup shows a short notice, a new screen asks to calibrate just that screen (about 11 seconds) while your other screens keep working, and a new camera asks for a full calibration before looking and dictation resume. Answer with the button or a held thumbs-up, or choose Later to keep working without it.
 
 ## How it compares
 
@@ -55,7 +57,7 @@ It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your 
 
 ## Security and limits
 
-No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility, and for the microphone only if you turn on the optional live sound bars.
+No credential. Everything runs on your Mac, and Claude's own dictation does the listening, so Ensemble asks for Camera and Accessibility, and for the microphone only if you turn on the optional live sound bars, which also let Ensemble hold a session switch back while you are speaking.
 
 - Never stores or sends a camera frame.
 - Never records what you dictate or what is on your screen: it presses Claude's buttons and logs events and numbers only.
@@ -63,5 +65,7 @@ No credential. Everything runs on your Mac, and Claude's own dictation does the 
 - Never updates itself unless you turn on automatic checks or press Check for Updates; updates are signed, and the app installs only an update signed with its own key.
 - Never sends telemetry, analytics or crash reports.
 - Never acts on another app: with anything else in front, gestures do nothing. The one exception is the audio pause, which presses the system play/pause key while you dictate, and can be turned off.
+
+**Headphone presses.** With Bluetooth headphones as the output, one press on the stem starts dictation in the session you are looking at and one more press stops it, and two presses send, under the same rules as the thumbs-up. macOS gives apps no "headphone tapped" event, so Ensemble listens the way a music player does: it registers for media remote commands and tells macOS it is the Now Playing app, which routes a single press (play/pause) and a double press (next track) to it. It plays no sound, uses no microphone and asks for no extra permission. It holds Now Playing only while the output is Bluetooth, Claude is running and nothing else is playing audio, so while music plays your presses control the music, and Ensemble takes over again when it stops. Turn it off under Settings, Gestures, Headphone presses.
 
 By default a thumbs-up sends only within 30 seconds of your dictation ending, only into the session you dictated into, and only if you have not typed or clicked since. Gesture send can be turned off in Settings, and so can the audio pause. A Claude update that renames its controls can break Ensemble until it is updated, pointing is as precise as a head pose and picks a session, not a line of text, and a second face in view pauses every gesture.

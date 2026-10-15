@@ -34,7 +34,11 @@ final class DictationController {
         self.focus = focus
         self.send = send
         safety = DictationSafety(bridge: ctx.bridge)
-        meter.onLevel = { [weak self] v in self?.ctx.overlay.setAudioLevel(v) }
+        meter.onLevel = { [weak self] v in
+            guard let self else { return }
+            self.ctx.overlay.setAudioLevel(v)
+            if self.meter.isRunning { self.ctx.speech.note(level: v, at: CACurrentMediaTime()) } else { self.ctx.speech.meterStopped() }
+        }
         ctx.overlay.setLiveSoundBars(ctx.settings.liveSoundBars)
         ctx.settings.$liveSoundBars.dropFirst().sink { [weak self] on in
             guard let self else { return }
@@ -122,7 +126,7 @@ final class DictationController {
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 400_000_000)
                         // Typing or a new dictation during the pause means the user is working here: do not move focus.
-                        guard self.ctx.listening == nil, !self.ctx.busy, ClaudeBridge.secondsSinceTypingOrClick() >= CoordinatorContext.inputQuiet else { return }
+                        guard self.ctx.listening == nil, !self.ctx.busy, !self.focus.userLeftClaude, ClaudeBridge.secondsSinceTypingOrClick() >= CoordinatorContext.inputQuiet else { return }
                         _ = await self.ctx.bridge.focus(next, unlessTypedWithin: CoordinatorContext.inputQuiet)
                     }
                 }
