@@ -30,12 +30,19 @@ enum Permissions {
     }
 
     /// Quits and opens Ensemble again so macOS applies a grant made while it ran. Quitting stops any dictation first
-    /// (the normal terminate path); a detached shell reopens the same bundle a moment after this process exits.
+    /// (the normal terminate path), which can take a few seconds, so a detached shell waits for this process to
+    /// exit (up to 10 s) before reopening: a copy started earlier would see this one alive and exit at once,
+    /// leaving nothing running. With open-at-login on, launchd is asked to start its job; otherwise the bundle is opened.
     static func relaunch() {
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        let script = """
+        i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+        if [ "$3" = 1 ]; then /bin/launchctl kickstart "gui/$4/$5" 2>/dev/null && exit 0; fi
+        /usr/bin/open "$2"
+        """
+        task.arguments = ["-c", script, "sh", String(getpid()), path, LoginAgent.isEnabled ? "1" : "0", String(getuid()), LoginAgent.label]
         try? task.run()
         NSApp.terminate(nil)
     }

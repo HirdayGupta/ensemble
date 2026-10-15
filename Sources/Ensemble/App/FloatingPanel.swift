@@ -23,7 +23,8 @@ final class FloatingPanelController {
         panel.setContentSize(size)
 
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens[0]
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens.first
+        guard let screen else { return }
         let area = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.maxY - size.height - 12))
         panel.makeKeyAndOrderFront(nil)

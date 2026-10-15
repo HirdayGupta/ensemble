@@ -25,9 +25,10 @@ Sending by gesture is not restricted by Claude's permission mode. Turn gesture s
 |---|---|
 | Camera | Reads your head direction and hand pose. Frames are analysed in memory and discarded. |
 | Accessibility | Finds Claude's session panes and presses its dictation, Send and scroll controls. |
+| Microphone, optional | Loudness only, for the live sound bars while Claude is listening. Never recorded. |
 | Notifications, optional | Alerts and sound cues when a safety check refuses or stops something. |
 
-Ensemble does not ask for the Microphone permission. Claude records, and Ensemble only watches which apps are recording.
+Ensemble asks for the Microphone permission only for the live sound bars, and only when that setting is on, while Claude is listening. It reduces the input to one loudness number to animate the bars; the audio is never recorded, stored or sent. With the setting off, Ensemble never touches the microphone: Claude records, and Ensemble only watches which apps are recording. A Microphone permission request would appear the first time the bars are turned on.
 
 ## Privacy
 

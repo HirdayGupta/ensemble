@@ -11,7 +11,9 @@ enum CameraError: Error, Equatable {
 final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "ensemble.camera", qos: .userInitiated)
     var onFrame: ((CMSampleBuffer) -> Void)?
-    var onInterrupted: ((String) -> Void)?
+    /// The message and the token of the start whose session reported it, so a late report from a replaced
+    /// session can be told apart from one about the current run.
+    var onInterrupted: ((String, Int) -> Void)?
     var onNote: ((String) -> Void)?
 
     private var session: AVCaptureSession?
@@ -79,10 +81,10 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         observers = [
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
                 let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
-                self?.onInterrupted?(error?.localizedDescription ?? "Camera error")
+                self?.onInterrupted?(error?.localizedDescription ?? "Camera error", token)
             },
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: nil) { [weak self] _ in
-                self?.onInterrupted?("\(device.localizedName) was disconnected")
+                self?.onInterrupted?("\(device.localizedName) was disconnected", token)
             },
             center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
                 self?.onNote?("camera interrupted; frames pause until it ends")

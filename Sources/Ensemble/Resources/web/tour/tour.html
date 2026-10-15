@@ -2,14 +2,16 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ensemble-asset:; style-src 'sha256-a6tWNTnWA3TvoqxihYB6/4UisyNkV5a7D/oihsD6ieo='; connect-src ensemble-asset:; img-src blob: data:; base-uri 'none'; form-action 'none'">
 <title>Ensemble tour</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #04070c; }
+  #stage { position: fixed; inset: 0; }
 </style>
 </head>
 <body>
-<div id="stage" style="position:fixed;inset:0"></div>
+<div id="stage"></div>
 <script src="three.min.js"></script>
 <script src="GLTFLoader.js"></script>
 <script src="CCDIKSolver.js"></script>
