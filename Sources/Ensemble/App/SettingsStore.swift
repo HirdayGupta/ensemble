@@ -239,10 +239,21 @@ extension GestureSlot {
     var detail: String {
         switch self {
         case .talk: return "Pinch twice to dictate into the session you are facing. Pinch twice again to stop."
-        case .send: return "Hold to send the dictated draft after the hold time set under Sending."
-        case .scrollUp: return "Hold to scroll the session up, faster the longer you hold."
-        case .scrollDown: return "Hold to scroll the session down, faster the longer you hold."
+        case .send: return "Sends the dictated draft once the gesture is held for the time below."
+        case .scrollUp: return "Holding the gesture scrolls the session up, faster the longer you hold."
+        case .scrollDown: return "Holding the gesture scrolls the session down, faster the longer you hold."
         case .cancel: return "Stops a pending send before the countdown ends."
+        }
+    }
+
+    /// The action's own icon, for Settings, Actions: what happens, not the hand shape that does it.
+    var actionSymbol: String {
+        switch self {
+        case .talk: return "mic"
+        case .send: return "paperplane"
+        case .scrollUp: return "arrow.up"
+        case .scrollDown: return "arrow.down"
+        case .cancel: return "xmark"
         }
     }
 

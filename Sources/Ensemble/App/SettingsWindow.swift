@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: Hashable {
-    case general, gestures, display, calibration, about
+    case general, actions, display, calibration, about
 }
 
 /// Which Settings tab is showing, so the menu panel can open Settings straight at Calibration.
