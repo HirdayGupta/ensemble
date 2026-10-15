@@ -135,8 +135,14 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             tick()
             return
         }
-        installRequested = availableVersion != nil
-        if let version = availableVersion { installingVersion = version } else { checking = true }
+        switch UpdatePress.decide(availableVersion: availableVersion) {
+        case .install(let version):
+            installRequested = true
+            installingVersion = version
+        case .check:
+            installRequested = false
+            checking = true
+        }
         userCheckInFlight = true
         EnsembleLog.write(installRequested ? "update: install of \(availableVersion ?? "") requested by the user" : "update: check requested by the user")
         updater.checkForUpdates()
@@ -302,8 +308,12 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     /// The update session ended without installing (Later, an error, or nothing found).
     private func endSession() {
-        installingVersion = nil
-        installRequested = false
+        // The previous session (a background find answered Later or quiet) can end after a press started a new
+        // check; its end must not cancel the press, or the find would ask "Install now?" a second time.
+        if !userCheckInFlight {
+            installingVersion = nil
+            installRequested = false
+        }
         waitingForIdle = false
         checking = false
         pendingInstallReply = nil
