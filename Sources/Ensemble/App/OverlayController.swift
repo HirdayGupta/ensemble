@@ -14,6 +14,14 @@ struct OverlayBanner: Equatable, Identifiable {
 struct SessionSwitch: Equatable {
     var name: String?
     var progress: Double
+    /// Every open session, left to right as they sit on screen; the island falls back to the plain two-tile
+    /// glyph when this is 1 or less.
+    var sessionCount: Int = 0
+    /// Column indices (1..<sessionCount) where a new screen or window group starts.
+    var groupBreaks: Set<Int> = []
+    /// Index, into that same left-to-right order, of the session losing and gaining focus.
+    var fromIndex: Int = 0
+    var toIndex: Int = 0
 }
 
 @MainActor
@@ -37,6 +45,8 @@ final class OverlayModel: ObservableObject {
     /// The name of the session a gesture would act on (the dictating one while dictating).
     @Published var sessionName: String?
     @Published var sessionSwitch: SessionSwitch?
+    /// While dictating: what the nose is approaching beyond the dictating session's edge.
+    @Published var edge: OverlayEdge?
 
     var hasContent: Bool {
         (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil
@@ -65,7 +75,7 @@ final class OverlayController {
         latestNose = nose
         model.hasNose = nose != nil
         setIfChanged(&model.listening, listening)
-        setIfChanged(&model.nose, listening || !OverlayScreenView.systemGlassDot ? nose : nil)
+        setIfChanged(&model.nose, listening ? nose : nil)
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
         syncPanels()
@@ -74,13 +84,12 @@ final class OverlayController {
 
     private var latestNose: CGPoint?
     private var glassDotStore: AnyObject?
-    /// On macOS 26 the dot is a separate glass window; the SwiftUI overlay skips drawing it there.
+    /// The dot is its own small window (GlassDot); the SwiftUI overlay never draws it.
     private func syncGlassDot() {
-        guard #available(macOS 26.0, *) else { return }
         let dot = (glassDotStore as? GlassDot) ?? GlassDot()
         glassDotStore = dot
         let visible = !model.listening && (model.showNoseDot || model.gesture != nil)
-        dot.show(at: visible ? latestNose : nil)
+        dot.show(at: visible ? latestNose : nil, dimmed: model.handsOnInput && model.gesture == nil)
     }
 
     /// Re-applies visibility toggles between coordinator updates.
@@ -101,6 +110,8 @@ final class OverlayController {
         setIfChanged(&model.sessionSwitch, switching)
     }
 
+    func setEdge(_ edge: OverlayEdge?) { setIfChanged(&model.edge, edge) }
+
     func setLiveSoundBars(_ on: Bool) { setIfChanged(&model.liveSoundBars, on) }
 
     func setAudioLevel(_ v: Double) {
@@ -108,7 +119,9 @@ final class OverlayController {
     }
 
     func setHandsOnInput(_ on: Bool) {
-        setIfChanged(&model.handsOnInput, on)
+        guard model.handsOnInput != on else { return }
+        model.handsOnInput = on
+        syncGlassDot()
     }
 
     func showBanner(title: String, body: String, style: OverlayBanner.Style = .info, seconds: Double = 5) {

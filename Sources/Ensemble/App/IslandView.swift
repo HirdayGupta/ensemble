@@ -45,6 +45,17 @@ struct IslandView: View {
         }
     }
 
+    /// How far toward the neighbour's column the lit column leans when the nose is at its session's edge. It
+    /// stays short of arriving: arriving is the switch itself.
+    private static let maxLean = 0.4
+
+    /// The columns toward the neighbouring session, while the nose nears (or is just across) its edge.
+    private var approach: SessionSwitch? {
+        guard model.listening, model.sessionSwitch == nil, let e = model.edge, e.warning.neighbourId != nil,
+              let ap = e.approach, ap.sessionCount > 1 else { return nil }
+        return ap
+    }
+
     private var name: String { model.sessionName ?? "this session" }
 
     var body: some View {
@@ -104,24 +115,48 @@ struct IslandView: View {
         Text(s).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).fixedSize()
     }
 
+    /// One column per open session when there is more than one to show; the plain two-tile glyph otherwise
+    /// (a single session, or the list not available yet).
+    @ViewBuilder private var switchGlyph: some View {
+        if let sw = model.sessionSwitch, sw.sessionCount > 1 {
+            SessionColumnsGlyph(count: sw.sessionCount, groupBreaks: sw.groupBreaks, from: sw.fromIndex, to: sw.toIndex, progress: sw.progress)
+        } else {
+            SwitchGlyph()
+        }
+    }
+
+    private var switchGlyphWidth: CGFloat {
+        (model.sessionSwitch?.sessionCount ?? 0) > 1 ? 56 : 26
+    }
+
     @ViewBuilder private var content: some View {
         switch mode {
         case .idle:
             EmptyView()
         case .dictating:
             HStack(spacing: 11) {
-                if model.liveSoundBars {
+                if let ap = approach {
+                    SessionColumnsGlyph(count: ap.sessionCount, groupBreaks: ap.groupBreaks, from: ap.fromIndex, to: ap.toIndex,
+                                        progress: Self.maxLean * (model.edge?.warning.proximity ?? 0))
+                        .frame(width: 56, height: 16)
+                        .transition(.opacity)
+                } else if model.liveSoundBars {
                     SoundWaves(color: .ensembleBlue, level: model.audioLevel).frame(width: 26, height: 16)
                 } else {
                     BlinkingMic()
                 }
-                lines(Text("Claude dictation on"), Text("in ") + session(name))
+                if let ap = approach {
+                    lines(Text("Dictation on, looking toward ") + session(ap.name ?? "another session"), Text("in ") + session(name))
+                } else {
+                    lines(Text("Claude dictation on"), Text("in ") + session(name))
+                }
                 Spacer(minLength: 8)
                 hint("double pinch to stop")
             }
+            .animation(.smooth(duration: 0.3), value: approach != nil)
         case .switching:
             HStack(spacing: 11) {
-                SwitchGlyph().frame(width: 26, height: 16)
+                switchGlyph.frame(width: switchGlyphWidth, height: 16)
                 lines(Text("Activating ") + session(model.sessionSwitch?.name ?? "the other session"), Text("Original message unsent"))
                 Spacer(minLength: 8)
                 hint("look back to stay")

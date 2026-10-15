@@ -15,6 +15,7 @@ final class Coordinator: AppCoordinating {
     private let scroll: ScrollController
     private let send: SendController
     private let dictation: DictationController
+    private let headphone: HeadphoneRemote
     private var state: AppState { ctx.state }
     private var settings: SettingsStore { ctx.settings }
     private var gestures: GestureMachine { ctx.gestures }
@@ -45,12 +46,16 @@ final class Coordinator: AppCoordinating {
         scroll = ScrollController(ctx: ctx)
         send = SendController(ctx: ctx)
         dictation = DictationController(ctx: ctx, focus: focus, send: send)
+        headphone = HeadphoneRemote(settingOn: { [weak settings] in (settings?.headphonePresses ?? false) && (settings?.enabled ?? false) },
+                                    claudeRunning: { [weak ctx] in ctx?.bridge.claudeIsRunning() ?? false })
+        headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
 
         if let data = settings.calibration { ctx.pointer.calibration = data }
-        if ctx.pointer.isCalibrated, settings.calibrationDisplays == nil { settings.calibrationDisplays = ScreenFacts.displayFingerprint() }
+        ctx.setup.startFullCalibration = { [weak self] in self?.calibrate() }
+        ctx.setup.startSubsetCalibration = { [weak self] screens in self?.runCalibration(screens: screens, replacingAll: false) }
         gestures.mapping = settings.mapping
         ctx.pointer.setSmoothing(settings.pointerSmoothing)
         gestures.sendHold = settings.sendCountdownSeconds
@@ -62,6 +67,9 @@ final class Coordinator: AppCoordinating {
             guard let self else { return }
             // @Published fires before the stored value changes, so read settings on the next turn of the run loop.
             DispatchQueue.main.async { on ? self.start() : self.stop(disarm: true) }
+        }.store(in: &cancellables)
+        settings.$headphonePresses.removeDuplicates().dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.headphone.refresh() }
         }.store(in: &cancellables)
         settings.$cameraName.removeDuplicates().dropFirst().sink { [weak self] _ in
             guard let self, self.health.running else { return }
@@ -95,6 +103,7 @@ final class Coordinator: AppCoordinating {
             }
         }
         health.begin()
+        headphone.start()
         ctx.latestHead = nil
         engine.start(cameraName: settings.cameraName)
         tickTimer?.invalidate()
@@ -120,6 +129,7 @@ final class Coordinator: AppCoordinating {
         ctx.latestHead = nil
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
+        headphone.stop()
         if disarm { dictation.clearAndDisarm() } else if ctx.listening != nil { dictation.end(reason: "turned off") }
         engine.stop()
         gestures.reset()
@@ -136,6 +146,7 @@ final class Coordinator: AppCoordinating {
         health.running = false
         tickTimer?.invalidate(); tickTimer = nil
         refreshTimer?.invalidate(); refreshTimer = nil
+        headphone.stop()
         ctx.bridge.beginShutdown()
         engine.stop()
         scroll.cancel()
@@ -167,6 +178,13 @@ final class Coordinator: AppCoordinating {
             }
             return
         }
+        runCalibration(screens: NSScreen.screens, replacingAll: true)
+    }
+
+    /// `replacingAll`: a manual Calibrate from the menu, covering (and replacing) every current screen for
+    /// the current camera. Otherwise just the given screens are calibrated and merged into whatever this
+    /// camera already has (a desk-setup prompt asking about one new screen, say).
+    private func runCalibration(screens: [NSScreen], replacingAll: Bool) {
         // Calibration owns the hands and the head: end any dictation first, because
         // gesture events are ignored while it runs and a held talk pose would never be seen released.
         send.afterStop = false
@@ -176,23 +194,17 @@ final class Coordinator: AppCoordinating {
         let fingerprint = ScreenFacts.displayFingerprint()
         let camera = state.cameraName
         state.calibrating = true
-        CalibrationController.shared.run(headSource: { [weak self] in self?.ctx.latestHead }) { [weak self] samples in
+        CalibrationController.shared.run(screens: screens, headSource: { [weak self] in self?.ctx.latestHead }) { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
-            EnsembleLog.write("calibration samples: \(samples.count)")
-            guard !samples.isEmpty else { return }
+            EnsembleLog.write("calibration samples: \(results.map(\.samples.count))")
+            guard !results.isEmpty else { return }
             guard ScreenFacts.displayFingerprint() == fingerprint, self.state.cameraName == camera else {
                 self.ctx.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
                 return
             }
-            if self.ctx.pointer.fit(samples), let data = self.ctx.pointer.calibration {
-                self.settings.calibration = data
-                self.settings.calibratedAt = Date()
-                self.settings.calibrationDisplays = fingerprint; self.ctx.invalidateCalibrationCache()
-                self.ctx.pointer.resetFilter()
-            } else {
-                self.ctx.refuse("Calibration did not fit; try again sitting where you normally work")
-            }
+            let ok = replacingAll ? self.ctx.setup.storeFullCalibration(results) : self.ctx.setup.storeSubsetCalibration(results)
+            if !ok { self.ctx.refuse("Calibration did not fit; try again sitting where you normally work") }
             self.health.update()
         }
     }
@@ -226,7 +238,7 @@ final class Coordinator: AppCoordinating {
         }
         logHeadStats(head)
         guard !state.calibrating else { return }
-        if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head) {
+        if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head), ctx.setup.isUsable(p) {
             // A pinch or scroll in progress holds everything still: the hand is in front of the face.
             let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
             dot.follow(nose: p, onSession: under != nil)
@@ -305,7 +317,7 @@ final class Coordinator: AppCoordinating {
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
     private func dropStaleReadings() {
         guard let head = ctx.latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
-        guard focus.hasTargetOrCandidate || dot.hasDot || state.nosePoint != nil else { return }
+        guard focus.hasTargetOrCandidate || dot.hasDot || dot.hasEdgeWarning || state.nosePoint != nil else { return }
         EnsembleLog.write("head readings stopped; clearing the highlight")
         focus.forgetTargetAndCandidate(); dot.clear()
         dot.place(target: nil)
@@ -348,11 +360,46 @@ final class Coordinator: AppCoordinating {
         case .talkBegan: dictation.begin()
         case .talkEnded(let reason): if ctx.listening != nil { dictation.end(reason: reason.rawValue) }
         case .sendRequested:
+            // While the setup prompt shows, the held thumbs-up answers it instead of sending.
+            if ctx.setup.isPromptShowing { ctx.setup.start(); return }
             if ctx.listening != nil || ctx.busy { send.afterStop = true; EnsembleLog.write("send after stop") } else { send.request() }
         case .cancelRequested: break
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
         case .dragScrollEnded: scroll.released()
         case .dragScroll(let handDy): scroll.drag(handDy: handDy, target: focus.target)
+        }
+    }
+
+    /// A stem press. Both go through the same guards as the gestures: a press is the double pinch (dictation
+    /// begins only on the session the nose is on, with calibration and every common refusal), a double press is the
+    /// thumbs-up (the narrow send rules in SendController, unchanged).
+    private func apply(headphone action: HeadphoneAction) {
+        ctx.headphoneUntil = CACurrentMediaTime() + 5
+        ctx.overlay.clearBanner()
+        switch action {
+        case .press:
+            guard !ctx.busy else { ctx.refuse("A step is still in flight"); return }
+            if ctx.listening != nil {
+                ctx.overlay.showBanner(title: "Headphone press", body: "Stopping dictation", style: .info, seconds: 1.5)
+                dictation.end(reason: "headphone press")
+            } else {
+                ctx.overlay.showBanner(title: "Headphone press", body: "Starting dictation", style: .info, seconds: 1.5)
+                // The machine takes the state a double pinch leaves: a later double pinch stops this dictation, and
+                // a refusal inside begin() flips it back.
+                gestures.beginTalkExternally()
+                dictation.begin()
+            }
+        case .doublePress:
+            guard settings.mapping.send != nil else { ctx.refuse("Send is off in Settings"); return }
+            guard !ctx.busy else { ctx.refuse("Send ignored: a step is still in flight"); return }
+            ctx.overlay.showBanner(title: "Headphone double press", body: "Sending the draft", style: .info, seconds: 1.5)
+            if ctx.listening != nil {
+                // Same as the thumbs-up held from the talk pose: stop, then send once the stop is confirmed.
+                send.afterStop = true
+                dictation.end(reason: "headphone double press")
+            } else {
+                send.request()
+            }
         }
     }
 
@@ -373,6 +420,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func screensChanged() {
+        ctx.setup.screensChanged()
         ctx.invalidateCalibrationCache()
         EnsembleLog.write("screens changed; calibration valid here: \(ctx.calibratedHere)")
         if ctx.listening != nil { dictation.end(reason: "screens changed") }
@@ -386,6 +434,7 @@ final class Coordinator: AppCoordinating {
         dictation.restoreAudioIfIdle()
         let acting = ctx.listening ?? (gestures.progress?.action == .send ? send.lastSpoken?.session : nil) ?? focus.target
         ctx.overlay.setSession(name: acting.map(ctx.name(of:)), switching: focus.switching())
+        ctx.overlay.setEdge(dot.overlayEdge(focus: focus))
         ctx.overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()

@@ -13,6 +13,13 @@ final class CalibrationModel: ObservableObject {
     @Published var faceMissing = false
 }
 
+/// One screen's calibration: its stable id and the frame it had, with the samples taken on it.
+struct ScreenCalibrationResult {
+    let screenID: String
+    let frame: CGRect
+    let samples: [CalibrationSample]
+}
+
 /// Full-screen calibration: a dot visits five spots per screen and the head angles are averaged at each.
 /// Esc cancels. The completion is called exactly once; an empty array means cancelled or failed.
 @MainActor
@@ -29,12 +36,15 @@ final class CalibrationController {
     private var window: CalibrationWindow?
     private var task: Task<Void, Never>?
     private var keyMonitor: Any?
-    private var completion: (([CalibrationSample]) -> Void)?
+    private var completion: (([ScreenCalibrationResult]) -> Void)?
 
     var isRunning: Bool { task != nil }
 
-    func run(headSource: @escaping () -> HeadObservation?, completion: @escaping ([CalibrationSample]) -> Void) {
-        guard task == nil else { completion([]); return }
+    /// Visits every screen in `screens` (every connected screen by default); pass a subset to calibrate
+    /// only those (a newly connected display, say) while the others keep their own calibration.
+    func run(screens: [NSScreen] = NSScreen.screens, headSource: @escaping () -> HeadObservation?,
+             completion: @escaping ([ScreenCalibrationResult]) -> Void) {
+        guard task == nil, !screens.isEmpty else { completion([]); return }
         self.completion = completion
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 else { return event }
@@ -43,8 +53,8 @@ final class CalibrationController {
         }
         task = Task { [weak self] in
             guard let self else { return }
-            let samples = await self.collect(headSource: headSource)
-            self.finish(samples)
+            let results = await self.collect(screens: screens, headSource: headSource)
+            self.finish(results)
         }
     }
 
@@ -53,7 +63,7 @@ final class CalibrationController {
         finish([])
     }
 
-    private func finish(_ samples: [CalibrationSample]) {
+    private func finish(_ results: [ScreenCalibrationResult]) {
         guard let done = completion else { return }
         completion = nil
         task?.cancel()
@@ -64,14 +74,14 @@ final class CalibrationController {
         window?.close()
         window = nil
         model.dotVisible = false
-        done(samples)
+        done(results)
     }
 
-    private func collect(headSource: () -> HeadObservation?) async -> [CalibrationSample] {
-        var results: [CalibrationSample] = []
-        let screens = NSScreen.screens
+    private func collect(screens: [NSScreen], headSource: () -> HeadObservation?) async -> [ScreenCalibrationResult] {
+        var results: [ScreenCalibrationResult] = []
         for (index, screen) in screens.enumerated() {
             let frame = ScreenGeometry.topLeftFrame(of: screen)
+            guard let screenID = ScreenGeometry.stableID(of: screen) else { return [] }
             present(on: screen)
             model.dotVisible = false
             model.step = screens.count > 1 ? "Screen \(index + 1) of \(screens.count)" : ""
@@ -80,6 +90,7 @@ final class CalibrationController {
             guard await pause(seconds: index == 0 ? 1.2 : 2.0) else { return [] }
 
             let spots = targets(in: frame)
+            var samples: [CalibrationSample] = []
             for (spotIndex, spot) in spots.enumerated() {
                 model.dotVisible = true
                 model.dot = CGPoint(x: spot.x - frame.minX, y: spot.y - frame.minY)
@@ -101,8 +112,9 @@ final class CalibrationController {
                     guard await pause(seconds: 1.0) else { return [] }
                 }
                 guard let sample else { return [] }
-                results.append(sample)
+                samples.append(sample)
             }
+            results.append(ScreenCalibrationResult(screenID: screenID, frame: frame, samples: samples))
         }
         return results
     }

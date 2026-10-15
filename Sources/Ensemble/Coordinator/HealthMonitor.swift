@@ -35,10 +35,11 @@ final class HealthMonitor {
         switch status {
         case .starting:
             cameraProblem = nil; trackerFailure = nil; trackerReady = false
-        case .running(let fps, let camera):
+        case .running(let fps, let camera, let cameraID):
             cameraProblem = nil
             ctx.state.set(\.fps, fps)
             ctx.state.set(\.cameraName, camera)
+            ctx.setup.cameraInUse(id: cameraID, name: camera)
         case .permissionDenied:
             cameraAllowed = false
         case .noCamera:

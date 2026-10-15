@@ -18,6 +18,7 @@ public struct FocusTracker {
     /// A session (or none) the nose moved onto, waiting out its dwell before the target follows.
     public private(set) var candidate: (session: ClaudeSession?, since: TimeInterval)?
     private var covered: (id: String, since: TimeInterval)?
+    private var lastObserved: TimeInterval?
 
     public init() {}
 
@@ -36,14 +37,20 @@ public struct FocusTracker {
     }
 
     /// Feeds one reading. Returns the session the target just moved onto; nil when it did not move or moved
-    /// to nothing. `held` (a pinch or scroll in progress) holds everything still.
-    public mutating func observe(under: ClaudeSession?, at t: TimeInterval, held: Bool, listening: Bool) -> ClaudeSession? {
+    /// to nothing. `held` (a pinch or scroll in progress) holds everything still. `speaking` (only meaningful
+    /// while listening) freezes a running switch dwell: the time spent speaking does not count.
+    public mutating func observe(under: ClaudeSession?, at t: TimeInterval, held: Bool, listening: Bool, speaking: Bool = false) -> ClaudeSession? {
+        defer { lastObserved = t }
         if held {
             candidate = nil
         } else if under?.id == target?.id {
             candidate = nil
         } else if let c = candidate, c.session?.id == under?.id {
             let dwell = listening && under != nil ? Self.listeningSwitchDwell : Self.switchDwell
+            if listening, speaking, under != nil, let last = lastObserved {
+                candidate = (c.session, c.since + max(0, t - last))
+                return nil
+            }
             if t - c.since >= dwell { target = under; candidate = nil; return under }
         } else {
             candidate = (under, t)

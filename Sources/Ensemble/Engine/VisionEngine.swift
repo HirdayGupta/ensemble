@@ -6,7 +6,7 @@ import QuartzCore
 
 enum EngineStatus: Equatable {
     case stopped, starting
-    case running(fps: Int, camera: String)
+    case running(fps: Int, camera: String, cameraID: String)
     case noCamera, permissionDenied
     case error(String)
     case faceTrackerReady
@@ -37,15 +37,29 @@ final class VisionEngine {
     private let hints = OSAllocatedUnfairLock(initialState: RateHints())
     nonisolated(unsafe) private var generation = 0
     nonisolated(unsafe) private var cameraLabel = ""
+    nonisolated(unsafe) private var cameraID = ""
     nonisolated(unsafe) private var fpsWindowStart = 0.0
     nonisolated(unsafe) private var fpsFrames = 0
     nonisolated(unsafe) private var lastFrameAt = 0.0
     private var cameraStarted = false
     private var requestedCamera: String?
     private var watchdog: Timer?
+    private var connectObserver: NSObjectProtocol?
+    private var disconnectObserver: NSObjectProtocol?
     private static let noFrameLimit = 3.0
 
     init() {
+        connectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.deviceConnected() }
+        }
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let id = (note.object as? AVCaptureDevice)?.uniqueID
+            MainActor.assumeIsolated { self?.deviceDisconnected(id) }
+        }
         face.onReady = { [weak self] delegate in
             self?.onDiagnostic?("face tracker ready (\(delegate))")
             self?.onStatus?(.faceTrackerReady)
@@ -82,6 +96,22 @@ final class VisionEngine {
     /// True while something needs every hand frame (dictating, a send pending, calibrating, a gesture held).
     func setForceFullRate(_ on: Bool) { hints.withLock { if $0.forceFull != on { $0.forceFull = on } } }
 
+    /// A camera (re)appeared. In automatic mode, a camera the owner would now be picked over the one running
+    /// (an external camera just plugged in, say) restarts the session onto it.
+    private func deviceConnected() {
+        guard isRunning, requestedCamera == nil, let preferred = CameraSession.pick(named: nil), preferred.uniqueID != cameraID else { return }
+        onDiagnostic?("a camera connected; switching to \(preferred.localizedName)")
+        start(cameraName: nil)
+    }
+
+    /// The camera in use was unplugged: restart so the session moves to whatever camera is left, and the
+    /// setup logic sees the camera it now actually uses.
+    private func deviceDisconnected(_ id: String?) {
+        guard isRunning, requestedCamera == nil, let id, id == cameraID else { return }
+        onDiagnostic?("the camera in use disconnected; picking another")
+        start(cameraName: nil)
+    }
+
     static func cameraNames() -> [String] { CameraSession.names() }
 
     /// Starts the camera and the face tracker. Calling it while running restarts with the new camera.
@@ -99,13 +129,14 @@ final class VisionEngine {
         face.start()
         Task { @MainActor in
             do {
-                let name = try await camera.start(named: cameraName, token: mine)
+                let identity = try await camera.start(named: cameraName, token: mine)
                 guard mine == generation, isRunning else { camera.stop(token: mine); return }
-                cameraLabel = name
+                cameraLabel = identity.name
+                cameraID = identity.id
                 lastFrameAt = CACurrentMediaTime()
                 cameraStarted = true
                 startWatchdog()
-                onStatus?(.running(fps: 0, camera: name))
+                onStatus?(.running(fps: 0, camera: identity.name, cameraID: identity.id))
             } catch {
                 guard mine == generation else { return }
                 halt()
@@ -193,6 +224,7 @@ final class VisionEngine {
             fpsFrames = 0
         }
         let label = cameraLabel
+        let id = cameraID
         if hand == nil, light == nil, jpeg == nil, fps == nil { return }
 
         // Captured by value: older Swift compilers (6.0, 6.1) reject a captured `var` in this concurrently-executing closure.
@@ -205,7 +237,7 @@ final class VisionEngine {
                 if let hand { self.onHand?(hand) }
                 if let light { self.onLight?(light) }
                 if let jpeg { self.face.submit(jpeg: jpeg, t: t) }
-                if let fps { self.onStatus?(.running(fps: fps, camera: label)) }
+                if let fps { self.onStatus?(.running(fps: fps, camera: label, cameraID: id)) }
             }
         }
     }

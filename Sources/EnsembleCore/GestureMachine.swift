@@ -127,6 +127,13 @@ public final class GestureMachine {
         lastToggleAt = -.infinity
     }
 
+    /// Dictation was started by something other than the double pinch (a headphone press). The machine takes the
+    /// same state a double pinch leaves, so a later double pinch stops it and a stale camera ends it.
+    public func beginTalkExternally() {
+        talking = true
+        lastTapEnd = nil
+    }
+
     public func push(_ observation: HandObservation) -> [GestureIntent] {
         // A non-finite reading is a missing reading: it must not reach the filters or the pinch hysteresis.
         var h = observation
