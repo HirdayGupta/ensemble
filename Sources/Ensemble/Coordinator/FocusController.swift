@@ -57,12 +57,18 @@ final class FocusController {
     var target: ClaudeSession? { tracker.target }
     var candidate: (session: ClaudeSession?, since: TimeInterval)? { tracker.candidate }
 
+    /// The target moved while Ensemble was paused for the keyboard or mouse; focus follows it on resume.
+    private var owedFocus = false
+    /// When Ensemble last raised Claude or moved its keyboard focus itself, for `HandsBusy`.
+    private(set) var lastOwnFocusAt: TimeInterval = -.infinity
     /// The session list was just read again (a resize): the highlight takes the fresh frames at once.
     func refreshFrames() { tracker.refresh(from: ctx.sessions) }
 
     /// One nose reading. Moves the target after its dwell and raises a covered session the nose rests on.
+    /// `paused` (hands on the keyboard or mouse): the target still follows the nose, so a gesture acts on the session
+    /// you look at, but no window is raised and keyboard focus stays put until `resumed()`.
     /// Returns the session whose window is in front under the nose, if any.
-    func observe(nose p: CGPoint, at t: TimeInterval, held: Bool) -> ClaudeSession? {
+    func observe(nose p: CGPoint, at t: TimeInterval, held: Bool, paused: Bool = false) -> ClaudeSession? {
         // Claude only: the nose counts only over a Claude session whose window is actually in front there.
         var under = FocusTracker.session(at: p, in: ctx.sessions, current: tracker.target) { _ in claudeInFront(at: p, t: t) }
         let dictating = ctx.listening
@@ -71,7 +77,13 @@ final class FocusController {
             under = ctx.sessions.first { $0.id == d.id } ?? d
         }
         let speaking = dictating != nil && ctx.speech.locked(at: t)
-        if let moved = tracker.observe(under: under, at: t, held: held, listening: dictating != nil, speaking: speaking) { lookedAt(moved) }
+        let moved = tracker.observe(under: under, at: t, held: held, listening: dictating != nil, speaking: speaking)
+        if paused {
+            if moved != nil { owedFocus = true } else if tracker.target == nil { owedFocus = false }
+            tracker.clearCovered()
+            return under
+        }
+        if let moved { lookedAt(moved) }
         // A Claude session hidden behind another app's window: resting the nose on it brings Claude forward.
         if under == nil, !held, let hidden = ctx.sessions.first(where: { $0.frame.contains(p) }) {
             if tracker.noteCovered(hidden.id, at: t) { raise(hidden, at: t) }
@@ -85,6 +97,13 @@ final class FocusController {
     func traceState(at t: TimeInterval) -> String {
         let cand = candidate.map { "\($0.session?.id ?? "none")@\(String(format: "%.2f", t - $0.since))" } ?? "-"
         return "target=\(target?.id ?? "-") cand=\(cand)"
+    }
+
+    /// The pause ended: keyboard focus catches up with a target that moved while it held.
+    func resumed() {
+        guard owedFocus else { return }
+        owedFocus = false
+        if let session = tracker.target { lookedAt(session) }
     }
 
     /// The deferred focus retries from the tick for a few seconds.
@@ -137,9 +156,9 @@ final class FocusController {
     }
 
     var hasTargetOrCandidate: Bool { tracker.target != nil || tracker.candidate != nil }
-    func forgetTarget() { tracker.forgetTarget() }
-    func forgetTargetAndCandidate() { tracker.forgetTargetAndCandidate() }
-    func forgetAll() { tracker.forgetAll() }
+    func forgetTarget() { tracker.forgetTarget(); owedFocus = false }
+    func forgetTargetAndCandidate() { tracker.forgetTargetAndCandidate(); owedFocus = false }
+    func forgetAll() { tracker.forgetAll(); owedFocus = false }
     func clearAfterStop() { afterStop = nil }
     func clearDeferred() { pending = nil; afterStop = nil }
 
@@ -151,6 +170,7 @@ final class FocusController {
             return
         }
         tracker.clearCovered()
+        lastOwnFocusAt = CACurrentMediaTime()
         EnsembleLog.write("raising Claude: nose rested on a covered session")
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 120_000_000)   // a short pause before the raise
@@ -184,6 +204,7 @@ final class FocusController {
         case .focusNow:
             pending = nil
             lastFocusedId = session.id
+            lastOwnFocusAt = CACurrentMediaTime()
             EnsembleLog.write("focus moved to a session")
             Task {
                 if case .refused = await self.ctx.bridge.focus(session, unlessTypedWithin: CoordinatorContext.inputQuiet) { self.lastFocusedId = nil }

@@ -8,9 +8,19 @@ import Testing
 
     /// One reading with nothing but the pointer at rest, unless a field is given.
     private func read(_ s: inout HandsBusy, _ now: Double, key: Double? = nil, click: Double? = nil, scroll: Double? = nil,
-                      move: Double? = nil, at p: CGPoint? = nil, ownKey: Double? = nil, ownPointer: Double? = nil) -> Bool {
+                      move: Double? = nil, at p: CGPoint? = nil, ownKey: Double? = nil, ownPointer: Double? = nil,
+                      ownFocus: Double? = nil) -> Bool {
         s.update(now: now, keyAt: key ?? never, clickAt: click ?? never, scrollAt: scroll ?? never, moveAt: move ?? never,
-                 pointer: p ?? rest, ownKeyAt: ownKey ?? never, ownPointerAt: ownPointer ?? never)
+                 pointer: p ?? rest, ownKeyAt: ownKey ?? never, ownPointerAt: ownPointer ?? never, ownFocusAt: ownFocus ?? never)
+    }
+
+    /// Typing at 10.04 pauses; the reading at 12.05 resumes (the 2 s quiet time has passed).
+    private func pausedThenResumed() -> HandsBusy {
+        var s = HandsBusy()
+        _ = read(&s, 10)
+        _ = read(&s, 10.05, key: 10.04)
+        _ = read(&s, 12.05, key: 10.04)
+        return s
     }
 
     @Test func nothingTouchedNeverPauses() {
@@ -131,5 +141,62 @@ import Testing
         _ = read(&t, 10)
         let p24 = read(&t, 10.4, key: 10.3, ownKey: 10.3)
         #expect(!p24)
+    }
+
+    @Test func oneStrayReadingRightAfterAResumeDoesNotPauseAgain() {
+        var s = pausedThenResumed()
+        let first = read(&s, 12.3, click: 12.28)
+        #expect(!first)
+        // The same click read again is not a second reading.
+        let again = read(&s, 12.35, click: 12.28)
+        #expect(!again)
+        let later = read(&s, 13.5, click: 12.28)
+        #expect(!later)
+    }
+
+    @Test func twoReadingsRightAfterAResumePauseAgain() {
+        var s = pausedThenResumed()
+        let first = read(&s, 12.3, key: 12.28)
+        #expect(!first)
+        let second = read(&s, 12.35, key: 12.33)
+        #expect(second)
+        #expect(s.lastInputKind == .key)
+    }
+
+    @Test func aSecondReadingTooLongAfterTheFirstStartsOver() {
+        var s = pausedThenResumed()
+        let first = read(&s, 12.2, key: 12.18)
+        #expect(!first)
+        // 0.7 s later: still inside the guard, but too far from the first to confirm it.
+        let second = read(&s, 12.9, key: 12.88)
+        #expect(!second)
+        let third = read(&s, 12.95, key: 12.94)
+        #expect(third)
+    }
+
+    @Test func pastTheGuardOneReadingPauses() {
+        var s = pausedThenResumed()
+        let p = read(&s, 13.2, key: 13.19)
+        #expect(p)
+    }
+
+    @Test func oneReadingRightAfterEnsembleMovedFocusDoesNotPause() {
+        var s = HandsBusy()
+        _ = read(&s, 20)
+        let first = read(&s, 20.1, move: 20.09, at: CGPoint(x: 540, y: 400), ownFocus: 19.9)
+        #expect(!first)
+        // Real use goes on: the next reading confirms it.
+        let second = read(&s, 20.15, move: 20.14, at: CGPoint(x: 580, y: 400), ownFocus: 19.9)
+        #expect(second)
+        #expect(s.lastInputKind == .move)
+    }
+
+    @Test func thePauseNamesTheKindOfInput() {
+        var s = HandsBusy()
+        _ = read(&s, 10, scroll: 9.99)
+        #expect(s.lastInputKind == .scroll)
+        var t = HandsBusy()
+        _ = read(&t, 10, click: 9.99)
+        #expect(t.lastInputKind == .click)
     }
 }

@@ -65,7 +65,7 @@ private struct GeneralSettings: View {
                             .frame(width: 46, alignment: .trailing)
                     }
                 }
-                Text("While you type, click, scroll or move the pointer, Ensemble moves no focus and acts on no gesture.")
+                Text("While you type, click, scroll or move the pointer, focus and the highlight hold; gestures still work.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

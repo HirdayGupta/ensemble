@@ -5,7 +5,7 @@ import EnsembleCore
 /// decide whether a gesture may act on Claude.
 @MainActor
 final class CoordinatorContext {
-    /// Gestures are refused within this long after the keyboard, mouse or trackpad was used.
+    /// A send is refused, and focus is not moved, within this long after typing or a click.
     static let inputQuiet = 1.5
 
     let state: AppState
@@ -31,7 +31,8 @@ final class CoordinatorContext {
     var listening: ClaudeSession?
     /// A start, stop or send is in flight.
     var busy = false
-    /// Your hands are on the keyboard, mouse or trackpad (`HandsBusy`): no focus moves, highlight moves or gestures.
+    /// Your hands are on the keyboard, mouse or trackpad (`HandsBusy`): focus and the highlight hold, no resizes;
+    /// gestures still work, on the session the nose is on.
     var handsBusy = false
     /// Dictations Claude runs without Ensemble, as the session refresh sees them.
     var claudeDictations = ForeignDictations()
@@ -78,7 +79,9 @@ final class CoordinatorContext {
 
     /// Shared guards for every gesture that acts on Claude. Returns a refusal reason, or nil when allowed.
     /// `inputAge`: seconds since typing or a click; a send asked for with Return passes its own, without those Returns.
-    func commonRefusal(inputAge: Double = ClaudeBridge.secondsSinceTypingOrClick()) -> String? {
+    /// `checkInput` false (talk and scroll): gestures work through the keyboard-and-mouse pause, so a pinch made right
+    /// after typing acts; only a send keeps the recent-input refusal, so a draft you just edited is never sent by a stray pose.
+    func commonRefusal(inputAge: Double = ClaudeBridge.secondsSinceTypingOrClick(), checkInput: Bool = true) -> String? {
         if !settings.enabled { return "Ensemble is off" }
         if cover.covered { return "Camera is covered" }
         if ScreenFacts.sessionAway() { return "The screen is locked" }
@@ -86,7 +89,7 @@ final class CoordinatorContext {
         // when they persist: a stray two-face reading is a false alarm.
         let now = CACurrentMediaTime()
         if now - lastOneFaceT > 1.5 { return "No face in view" }
-        if inputAge < Self.inputQuiet { return "You just typed or clicked" }
+        if checkInput, inputAge < Self.inputQuiet { return "You just typed or clicked" }
         return nil
     }
 

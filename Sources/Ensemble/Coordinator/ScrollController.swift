@@ -29,7 +29,7 @@ final class ScrollController {
     }
 
     func scroll(_ dy: Double, target: ClaudeSession?) {
-        guard dy.isFinite, ctx.commonRefusal() == nil else { return }
+        guard dy.isFinite, ctx.commonRefusal(checkInput: false) == nil else { return }
         let found: ClaudeSession
         if let s = session { found = s.session } else if let t = ctx.listening ?? target { found = t } else { return }
         if session == nil { EnsembleLog.write("scroll started") }

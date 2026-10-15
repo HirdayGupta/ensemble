@@ -89,7 +89,7 @@ final class DictationController {
             if ctx.listening == nil || ctx.busy { ctx.gestures.abortTalk() }
             return
         }
-        if let why = ctx.commonRefusal() { refuseStart(why); return }
+        if let why = ctx.commonRefusal(checkInput: false) { refuseStart(why); return }
         guard ctx.calibratedHere else { refuseStart("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = focus.target else {
             // No session at all while Claude runs: its windows are on another Space, minimized or behind a
@@ -133,7 +133,7 @@ final class DictationController {
             if let other { refusal = "\(other) is using a microphone" } else { refusal = await self.safety.episodeStarting(session: session) }
             // While those were read, the pose may have been released, the screen locked or Ensemble switched off.
             let called = self.disarming || self.stopWhenStarted || self.interrupted || !self.ctx.gestures.talking
-                || self.ctx.commonRefusal() != nil
+                || self.ctx.commonRefusal(checkInput: false) != nil
             if refusal != nil || called {
                 self.ctx.busy = false
                 self.startInFlight = false
