@@ -16,6 +16,18 @@ struct CalibrationPlan {
     let screens: [NSScreen]
     let purpose: CalibrationPurpose
     let note: String?
+    /// For a run over only some screens: an already calibrated screen and its centre sample, so the first dot needs
+    /// a turn away from that screen rather than only stillness.
+    var firstDotFrom: (frame: CGRect, centre: CalibrationSample)? = nil
+}
+
+/// What storing a calibration run came to.
+enum CalibrationStoreOutcome: Equatable {
+    case saved
+    /// The samples could not be fitted, or no screen is valid with them.
+    case didNotFit
+    /// `screenID`'s samples repeat the angle range of `otherScreenID`, already calibrated from the same spot.
+    case repeats(screenID: String, otherScreenID: String)
 }
 
 /// Tracks the desk setup (camera plus screen arrangement), detects when it changes, and decides what that
@@ -211,7 +223,8 @@ final class SetupController {
             let ids = Set(newScreens.map(\.id))
             let targets = NSScreen.screens.filter { ScreenGeometry.stableID(of: $0).map(ids.contains) == true }
             guard !targets.isEmpty else { return }
-            runPlan(CalibrationPlan(screens: targets, purpose: .screens(spotInUseID), note: nil))
+            runPlan(CalibrationPlan(screens: targets, purpose: .screens(spotInUseID), note: nil,
+                                    firstDotFrom: firstDotReference(for: targets)))
         }
     }
 
@@ -266,17 +279,31 @@ final class SetupController {
             let targets = all.filter { ScreenGeometry.stableID(of: $0) == id }
             guard !targets.isEmpty else { return nil }
             return CalibrationPlan(screens: targets, purpose: .screens(inUse),
-                                   note: several ? inUseName.map { "Updates this screen in \($0), the position in use now." } : nil)
+                                   note: several ? inUseName.map { "Updates this screen in \($0), the position in use now." } : nil,
+                                   firstDotFrom: firstDotReference(for: targets))
         }
+    }
+
+    /// The calibrated screen nearest the first of `targets`, in the spot in use, for that run's first dot.
+    private func firstDotReference(for targets: [NSScreen]) -> (frame: CGRect, centre: CalibrationSample)? {
+        guard let first = targets.first, let spot = spotInUseID, let profile else { return nil }
+        let ids = Set(targets.compactMap { ScreenGeometry.stableID(of: $0) })
+        return profile.neighbour(of: ScreenGeometry.topLeftFrame(of: first), inSpot: spot,
+                                 validScreenIDs: validScreenIDs, excluding: ids)
+    }
+
+    /// A screen's display name, for messages; the id itself when it is no longer connected.
+    func name(ofScreenID id: String) -> String {
+        NSScreen.screens.first { ScreenGeometry.stableID(of: $0) == id }?.localizedName ?? id
     }
 
     /// Stores what a calibration run collected as its purpose says, then refits the pointer over every screen
     /// that is valid now, from every spot: each screen keeps its own map per spot, so replacing one screen or one
     /// spot leaves the other screens' maps, planes and regions exactly as they were. Nothing is stored if the
-    /// fit fails.
+    /// fit fails, or when a screen's samples repeat another screen's angle range from the same spot.
     @discardableResult
-    func storeCalibration(_ results: [ScreenCalibrationResult], purpose: CalibrationPurpose) -> Bool {
-        guard let cameraID, let cameraName else { return false }
+    func storeCalibration(_ results: [ScreenCalibrationResult], purpose: CalibrationPurpose) -> CalibrationStoreOutcome {
+        guard let cameraID, let cameraName else { return .didNotFit }
         var profile = self.profile ?? CameraProfile(cameraID: cameraID, cameraName: cameraName)
         profile.cameraName = cameraName
         let now = Date()
@@ -284,24 +311,33 @@ final class SetupController {
         func existing(_ id: String?) -> String? {
             id.flatMap { id in profile.spots.contains { $0.id == id } ? id : nil } ?? profile.spots.first?.id
         }
+        let spotID: String
         switch purpose {
         case .wholeSpot(let id):
             profile.dropLegacy()
-            if let spot = existing(id) { profile.replaceSpot(spot, with: done) } else { profile.addSpot(done) }
+            if let spot = existing(id) { profile.replaceSpot(spot, with: done); spotID = spot } else { spotID = profile.addSpot(done) }
         case .screens(let id):
-            if let spot = existing(id) { profile.store(done, inSpot: spot) } else { profile.addSpot(done) }
+            if let spot = existing(id) { profile.store(done, inSpot: spot); spotID = spot } else { spotID = profile.addSpot(done) }
         case .newSpot:
-            profile.addSpot(done)
+            spotID = profile.addSpot(done)
         }
         var next = profiles
         next.setProfile(profile)
         guard case .ready(_, let valid, _, _) = SetupEvaluator.evaluate(
-            profiles: next, cameraID: cameraID, cameraName: cameraName, previousCameraName: nil, screens: currentScreens()) else { return false }
+            profiles: next, cameraID: cameraID, cameraName: cameraName, previousCameraName: nil, screens: currentScreens()) else { return .didNotFit }
         let newValid = Set(valid)
+        for result in done {
+            if let other = profile.screenRepeated(by: result.samples, forScreen: result.screenID, inSpot: spotID, validScreenIDs: newValid) {
+                EnsembleLog.write("calibration not saved: \(result.screenID) repeats the angles of \(other) in \(spotID)")
+                return .repeats(screenID: result.screenID, otherScreenID: other)
+            }
+        }
         // A screen still on the migrated model keeps pointing with it (refitPointer); nothing else to fit then.
+        var maps = 0
         if !profile.hasModelOnly(newValid) {
             let screens = profile.pointerScreens(for: newValid)
-            guard !screens.isEmpty, ctx.pointer.fit(screens: screens) else { return false }
+            guard !screens.isEmpty, ctx.pointer.fit(screens: screens) else { return .didNotFit }
+            maps = screens.count
             changes.fittedFrom(.init(cameraID: cameraID, validScreenIDs: newValid, profile: profile))
         } else {
             changes.forgetFit()
@@ -311,7 +347,9 @@ final class SetupController {
         validScreenIDs = newValid
         finishCalibration(at: now)
         publish()
-        return true
+        let saved = done.map { "\($0.screenID)@\(Int($0.frame.minX)),\(Int($0.frame.minY)),\(Int($0.frame.width))x\(Int($0.frame.height))" }
+        EnsembleLog.write("calibration saved: \(saved) in \(spotID) (\(purpose)); pointing on \(newValid.sorted()) with \(maps) screen maps")
+        return .saved
     }
 
     /// Forgets one saved position; the others keep pointing. A screen only that position covered asks to be
