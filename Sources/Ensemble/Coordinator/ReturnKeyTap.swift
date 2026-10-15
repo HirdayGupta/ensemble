@@ -23,6 +23,9 @@ final class ReturnKeyTap {
     private var failed = false
     private var wanted = false
 
+    /// The watch is on: a key posted now would reach it.
+    var isActive: Bool { wanted }
+
     /// Turns the watch on or off. Created on first use; when creation fails it stays off for this run.
     func setActive(_ on: Bool) {
         guard on != wanted else { return }

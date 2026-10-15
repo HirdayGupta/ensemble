@@ -73,6 +73,13 @@ final class Coordinator: AppCoordinating {
         headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
         panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
+        panes.keyWatchOn = { [weak self] in self?.keyTap.isActive ?? true }
+        panes.framesChanged = { [weak self] in
+            guard let self else { return }
+            self.focus.refreshFrames()
+            self.dot.place(target: self.focus.target)
+            self.pushOverlay()
+        }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
         dictation.stopResolved = { [weak self] confirmed in self?.stopResolved(confirmed: confirmed) }
@@ -501,12 +508,11 @@ final class Coordinator: AppCoordinating {
     private func updateHandsBusy(now: TimeInterval) {
         handsBusy.quiet = settings.pauseAfterInputSeconds
         let input = ClaudeBridge.lastHardwareInput(now: now)
-        let ownPointerAt = HandsBusy.ownPointerAt(drags: ClaudeBridge.ownPointerEventsNow(),
-                                                  ownScrollAt: ClaudeBridge.ownPointerMove.withLock { $0 }, now: now)
+        let ownKeyAt = HandsBusy.ownKeyAt(keys: ClaudeBridge.ownKeysNow(), keyAt: input.key,
+                                          other: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt))
         let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
-                                    pointer: NSEvent.mouseLocation,
-                                    ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
-                                    ownPointerAt: ownPointerAt)
+                                    pointer: NSEvent.mouseLocation, ownKeyAt: ownKeyAt,
+                                    ownPointerAt: ClaudeBridge.ownPointerMove.withLock { $0 })
         ctx.overlay.setHandsOnInput(busy)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy

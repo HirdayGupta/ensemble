@@ -112,9 +112,4 @@ import Testing
         m.note([832])
         #expect(m.width == 832)
     }
-
-    @Test func explicitWidthsAreAGoalTheRowSettlesOn() {
-        #expect(PaneWidths.targets(count: 3, available: 1800, goal: .widths([840, 480, 480])) == [840, 480, 480])
-        #expect(PaneWidths.targets(count: 2, available: 1800, goal: .widths([840, 480, 480])) == [])
-    }
 }

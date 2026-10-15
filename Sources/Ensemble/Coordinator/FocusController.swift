@@ -57,6 +57,9 @@ final class FocusController {
     var target: ClaudeSession? { tracker.target }
     var candidate: (session: ClaudeSession?, since: TimeInterval)? { tracker.candidate }
 
+    /// The session list was just read again (a resize): the highlight takes the fresh frames at once.
+    func refreshFrames() { tracker.refresh(from: ctx.sessions) }
+
     /// One nose reading. Moves the target after its dwell and raises a covered session the nose rests on.
     /// Returns the session whose window is in front under the nose, if any.
     func observe(nose p: CGPoint, at t: TimeInterval, held: Bool) -> ClaudeSession? {
