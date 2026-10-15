@@ -16,6 +16,8 @@ public enum PaneWidths {
         case maximize(Int)
         /// Every pane gets the same width.
         case evenOut
+        /// Each pane gets the width at its index (`SessionFit.widths`), planned once from the layout at the start.
+        case widths([Double])
     }
 
     /// What a minimized pane is sized to. Claude's own minimum may be larger: its drag stops there and the
@@ -29,6 +31,7 @@ public enum PaneWidths {
     /// Target width of each pane. `available` is the row's width without the gaps between panes.
     public static func targets(count: Int, available: Double, goal: Goal) -> [Double] {
         guard count > 0, available > 0 else { return [] }
+        if case .widths(let w) = goal { return w.count == count ? w : [] }
         let even = Array(repeating: available / Double(count), count: count)
         guard case .maximize(let k) = goal, (0..<count).contains(k), count > 1 else { return even }
         let rest = Double(count - 1) * narrowWidth
@@ -45,15 +48,12 @@ public enum PaneWidths {
         let n = panes.count
         guard n >= 2, dividers.count == n - 1, panes.allSatisfy({ $0.width > 0 && $0.minX.isFinite && $0.maxX.isFinite }),
               dividers.allSatisfy(\.isFinite) else { return nil }
-        let gaps = (0..<(n - 1)).map { max(0, Double(panes[$0 + 1].minX - panes[$0].maxX)) }
-        let gap = min(gaps.reduce(0, +) / Double(n - 1), 24)
+        let (widths, gap) = layout(panes: panes, dividers: dividers)
         let left = Double(panes[0].minX), right = Double(panes[n - 1].maxX)
         let available = right - left - Double(n - 1) * gap
         let want = targets(count: n, available: available, goal: goal)
         guard want.count == n else { return nil }
-        // Pane i spans from boundary i to boundary i+1, less one gap; the outer boundaries sit half a gap outside.
         let bounds = [left - gap / 2] + dividers + [right + gap / 2]
-        let widths = (0..<n).map { bounds[$0 + 1] - bounds[$0] - gap }
         var best: (divider: Int, toX: Double, clean: Bool, excess: Double)?
         var edge = left - gap / 2
         for j in 0..<(n - 1) {
@@ -71,6 +71,18 @@ public enum PaneWidths {
             best = (j, target, clean, excess)
         }
         return best.map { ($0.divider, $0.toX) }
+    }
+
+    /// Each pane's width as the dividers place it, and the gap between panes. Pane i spans from boundary i to
+    /// boundary i+1, less one gap; the outer boundaries sit half a gap outside the row. The caller checks that
+    /// there is one divider fewer than panes.
+    public static func layout(panes: [CGRect], dividers: [Double]) -> (widths: [Double], gap: Double) {
+        let n = panes.count
+        guard n >= 2, dividers.count == n - 1 else { return (panes.map { Double($0.width) }, 0) }
+        let gaps = (0..<(n - 1)).map { max(0, Double(panes[$0 + 1].minX - panes[$0].maxX)) }
+        let gap = min(gaps.reduce(0, +) / Double(n - 1), 24)
+        let bounds = [Double(panes[0].minX) - gap / 2] + dividers + [Double(panes[n - 1].maxX) + gap / 2]
+        return ((0..<n).map { bounds[$0 + 1] - bounds[$0] - gap }, gap)
     }
 
     /// Pairs each divider between neighbouring panes with the splitter frame nearest the gap between them.
