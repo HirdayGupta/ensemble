@@ -17,14 +17,20 @@ enum UpdateConfig {
 }
 
 /// Sparkle 2 wrapper. Policy, in order of what matters for a tool that drives dictation:
-/// - No network until the user turns on automatic checks (About tab) or presses Check for Updates.
+/// - No network until the user turns on automatic updates (Settings > General) or presses Check for Updates.
 /// - Sparkle's own "check automatically?" prompt is suppressed, so no window appears at login or mid-dictation.
-/// - A scheduled check that finds an update never opens a window; it only changes the menu entry to "Update to x.y.z...".
-/// - With automatic checks on, Sparkle checks at most once a day (SUScheduledCheckInterval).
+/// - Automatic updates (opt-in) check every 6 hours (SUScheduledCheckInterval), download in the background, and
+///   install only while Ensemble is idle: never while Claude is listening, calibrating or the tour is open.
+/// - Without them, a check that finds an update never opens a window; it changes the menu entry to "Update to x.y.z...".
 @MainActor
 final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     @Published private(set) var availableVersion: String?
-    @Published private(set) var automaticChecks = false
+    @Published private(set) var autoInstall = false
+    /// True while installing would interrupt the user (dictating, calibrating, tour open); set by the app.
+    var isBusy: () -> Bool = { false }
+    static let checkInterval: TimeInterval = 6 * 3600
+    private var pendingInstall: (() -> Void)?
+    private var installTimer: Timer?
 
     private var controller: SPUStandardUpdaterController!
     let isConfigured = UpdateConfig.isConfigured
@@ -32,13 +38,34 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     override init() {
         super.init()
         controller = SPUStandardUpdaterController(startingUpdater: isConfigured, updaterDelegate: self, userDriverDelegate: self)
-        automaticChecks = isConfigured && controller.updater.automaticallyChecksForUpdates
+        let updater = controller.updater
+        autoInstall = isConfigured && updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
+        if autoInstall { updater.updateCheckInterval = Self.checkInterval }
     }
 
-    func setAutomaticChecks(_ on: Bool) {
+    func setAutoInstall(_ on: Bool) {
         guard isConfigured else { return }
-        controller.updater.automaticallyChecksForUpdates = on
-        automaticChecks = on
+        let updater = controller.updater
+        updater.updateCheckInterval = Self.checkInterval
+        updater.automaticallyChecksForUpdates = on
+        updater.automaticallyDownloadsUpdates = on
+        autoInstall = on
+        if on { updater.checkForUpdatesInBackground() }
+    }
+
+    /// A downloaded update installs at the first idle moment, checked every 30 s; Sparkle then relaunches Ensemble.
+    private func installWhenIdle() {
+        installTimer?.invalidate()
+        installTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let install = self.pendingInstall, !self.isBusy() else { return }
+                self.installTimer?.invalidate()
+                self.installTimer = nil
+                self.pendingInstall = nil
+                EnsembleLog.write("installing a downloaded update while idle")
+                install()
+            }
+        }
     }
 
     func checkForUpdates() {
@@ -58,6 +85,14 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? { UpdateConfig.feedURL }
 
     nonisolated func updaterShouldPromptForPermissionToCheck(forUpdates updater: SPUUpdater) -> Bool { false }
+
+    nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock: @escaping () -> Void) -> Bool {
+        Task { @MainActor in
+            self.pendingInstall = immediateInstallationBlock
+            self.installWhenIdle()
+        }
+        return true
+    }
 
     // MARK: SPUStandardUserDriverDelegate
 

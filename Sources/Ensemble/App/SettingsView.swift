@@ -11,7 +11,7 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            GeneralSettings(state: state, settings: settings, replayTour: replayTour)
+            GeneralSettings(state: state, settings: settings, updates: updates, replayTour: replayTour)
                 .tabItem { Label("General", systemImage: "gearshape") }
             GestureSettings(settings: settings)
                 .tabItem { Label("Gestures", systemImage: "hand.raised") }
@@ -29,6 +29,7 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var updates: UpdateController
     let replayTour: (TourStep?) -> Void
     @State private var tourStep: TourStep = .welcome
 
@@ -51,6 +52,16 @@ private struct GeneralSettings: View {
             }
             Section {
                 LabeledContent("Show the panel from anywhere", value: "⌥⌘K")
+            }
+            Section {
+                Toggle("Update automatically", isOn: Binding(get: { updates.autoInstall }, set: { updates.setAutoInstall($0) }))
+                    .disabled(!updates.isConfigured)
+                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
+                    .disabled(!updates.isConfigured)
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("Checks every 6 hours and installs a new version only while you are not dictating, calibrating or in the tour; Ensemble then restarts on its own. Off: nothing is checked until you press Check for Updates.")
             }
             Section("Tour") {
                 Button("Replay tour") { replayTour(nil) }
@@ -246,9 +257,6 @@ private struct AboutSettings: View {
             .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
             VStack(spacing: 8) {
                 Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
-                Toggle("Check for updates automatically (once a day)", isOn: Binding(
-                    get: { updates.automaticChecks }, set: { updates.setAutomaticChecks($0) }))
-                    .toggleStyle(.switch).controlSize(.small).disabled(!updates.isConfigured)
             }
             Spacer(minLength: 0)
         }
