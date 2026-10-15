@@ -52,21 +52,29 @@ public struct ReturnKeys {
         return false
     }
 
-    /// True while the key watch must stay on: a stop pending, the double window open, or a kept Return still held.
-    public func wantsKeys(now: TimeInterval) -> Bool {
-        awaitingStop || inDoubleWindow(now: now) || holdSeenAt.map { now - $0 <= Self.holdLimit } == true
+    /// True while the key watch must stay on: a stop pending, the double window open, a kept Return still held, or
+    /// a send asked for with Return still pending (`returnSendPending`), so a key typed before Send is pressed is
+    /// seen and refuses it.
+    public func wantsKeys(now: TimeInterval, returnSendPending: Bool = false) -> Bool {
+        returnSendPending || awaitingStop || inDoubleWindow(now: now) || holdSeenAt.map { now - $0 <= Self.holdLimit } == true
     }
+
+    /// macOS reports the watch as paused both when it really paused it (a slow callback, secure input) and when
+    /// Ensemble switched the watch off itself. Only the first can hide keys; the second, counted as typing, would
+    /// refuse the very send two Returns just asked for. So a pause means unseen keys only while the watch was wanted.
+    public static func pauseMeansUnseenKeys(watchWanted: Bool) -> Bool { watchWanted }
 
     /// Return was released.
     public mutating func returnReleased() { holdSeenAt = nil }
 
     /// One key press. `isReturn` is Return or keypad Enter; `modified` any of Shift, Control, Option or Command
-    /// held; `dictating` an Ensemble dictation is on (or its start or stop is in flight).
+    /// held; `dictating` an Ensemble dictation is on (or its start or stop is in flight); `returnSendPending` a send
+    /// asked for with Return has not finished yet, so any other key, or a Return that reaches Claude, counts as typing.
     public mutating func press(isReturn: Bool, modified: Bool, isRepeat: Bool, claudeInFront: Bool,
-                               dictating: Bool, now: TimeInterval) -> Decision {
+                               dictating: Bool, returnSendPending: Bool = false, now: TimeInterval) -> Decision {
         expire(now: now)
         guard isReturn, !modified else {
-            if dictating || phase != .idle { lastOtherKeyAt = now }
+            if dictating || phase != .idle || returnSendPending { lastOtherKeyAt = now }
             return .pass
         }
         // Acting only on Claude: with another app in front the key is that app's.
@@ -80,7 +88,10 @@ public struct ReturnKeys {
         let decision: Decision
         switch phase {
         case .idle:
-            guard dictating else { return .pass }
+            guard dictating else {
+                if returnSendPending { lastOtherKeyAt = now }
+                return .pass
+            }
             phase = .stopping(firstAt: now, sendAfter: false)
             decision = .swallowAndStop
         case .stopping(let first, let sendAfter):

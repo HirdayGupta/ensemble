@@ -88,7 +88,12 @@ final class DictationController {
         }
         if let why = ctx.commonRefusal() { refuseStart(why); return }
         guard ctx.calibratedHere else { refuseStart("Calibrate first (or recalibrate for this screen arrangement)"); return }
-        guard let session = focus.target else { refuseStart("Your nose is not on a Claude session"); return }
+        guard let session = focus.target else {
+            // No session at all while Claude runs: its windows are on another Space, minimized or behind a
+            // full-screen app, and pointing better cannot help.
+            refuseStart(ctx.sessions.isEmpty && ctx.bridge.claudeIsRunning() ? "Claude isn't on screen" : "Your nose is not on a Claude session")
+            return
+        }
         send.afterStop = false; focus.clearDeferred()
         interrupted = false
         // Busy from here: no second start, and switching off waits for this one.

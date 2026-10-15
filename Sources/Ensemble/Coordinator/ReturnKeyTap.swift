@@ -1,4 +1,5 @@
 import AppKit
+import EnsembleCore
 
 /// Watches key presses only while the Coordinator asks (an Ensemble dictation, and a moment after it), and lets the
 /// Coordinator keep a Return from Claude. Every other key, and every key while it is off, passes untouched. It fails
@@ -53,7 +54,9 @@ final class ReturnKeyTap {
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let tap, wanted { CGEvent.tapEnable(tap: tap, enable: true) }
+            // Switching the watch off ourselves arrives here too; that hid no key and must not count as typing.
+            guard ReturnKeys.pauseMeansUnseenKeys(watchWanted: wanted) else { return false }
+            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             EnsembleLog.write("Return key watch was paused by macOS; switched back on")
             onUnseenKeys()
             return false

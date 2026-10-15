@@ -139,10 +139,21 @@ enum AX {
         return n
     }
 
+    /// The window server's number for an accessibility window. Claude's windows do not answer "AXWindowNumber"
+    /// (attribute unsupported, measured 2026-10-15), so this asks `_AXUIElementGetWindow`, the lookup window
+    /// managers use. It is looked up at run time and is nil when macOS no longer has it; callers then match by frame.
     static func windowNumber(_ window: AXUIElement) -> Int? {
-        if let n = number(window, "AXWindowNumber") { return Int(n) }
-        return nil
+        guard let getWindow = getWindowFn else { return nil }
+        var id: CGWindowID = 0
+        guard getWindow(window, &id) == .success, id != 0 else { return nil }
+        return Int(id)
     }
+
+    private typealias GetWindowFn = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+    private static let getWindowFn: GetWindowFn? = {
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") else { return nil }
+        return unsafeBitCast(sym, to: GetWindowFn.self)
+    }()
 
     static func hash(_ el: AXUIElement) -> UInt { CFHash(el) }
 }

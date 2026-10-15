@@ -177,6 +177,38 @@ import Testing
         #expect(keys.lastOtherKeyAt == 8)
     }
 
+    /// Measured: the watch switching itself off after "dictation stopped" came back from macOS as "paused", was
+    /// counted as typing, and refused the send two Returns had just asked for ("You just typed or clicked").
+    @Test func switchingTheWatchOffIsNotTyping() {
+        #expect(!ReturnKeys.pauseMeansUnseenKeys(watchWanted: false))
+        #expect(ReturnKeys.pauseMeansUnseenKeys(watchWanted: true))
+    }
+
+    /// Two Returns, then a stop slower than the double window: the watch must stay on until the send ends, so
+    /// it is never switched off (and never "paused") in between, and a key typed meanwhile still refuses the send.
+    @Test func aPendingReturnSendKeepsTheWatchOnAndSeesTyping() {
+        var keys = ReturnKeys()
+        #expect(ret(&keys, at: 1) == .swallowAndStop)
+        #expect(ret(&keys, at: 1.2) == .swallowAndSendAfterStop)
+        keys.returnReleased()
+        keys.stopConfirmed(now: 1.8)
+        // The stop took longer than the double window: nothing in the rules themselves wants keys any more.
+        #expect(!keys.wantsKeys(now: 1.85))
+        #expect(keys.wantsKeys(now: 1.85, returnSendPending: true))
+        #expect(keys.lastOtherKeyAt == -.infinity)
+        // A letter typed while the transcript settles counts as typing, and so does a Return that reaches Claude.
+        #expect(keys.press(isReturn: false, modified: false, isRepeat: false, claudeInFront: true, dictating: false,
+                           returnSendPending: true, now: 2) == .pass)
+        #expect(keys.lastOtherKeyAt == 2)
+        #expect(keys.press(isReturn: true, modified: false, isRepeat: false, claudeInFront: true, dictating: false,
+                           returnSendPending: true, now: 2.2) == .pass)
+        #expect(keys.lastOtherKeyAt == 2.2)
+        // With no send pending, keys after the dictation are not this watch's business, as before.
+        var idle = ReturnKeys()
+        #expect(idle.press(isReturn: false, modified: false, isRepeat: false, claudeInFront: true, dictating: false, now: 2) == .pass)
+        #expect(idle.lastOtherKeyAt == -.infinity)
+    }
+
     @Test func messageBoxFocusOnlyWithClaudeInFront() {
         #expect(ReturnKeys.focusComposerAfterStart(claudeInFront: true, composerFocused: false))
         #expect(ReturnKeys.focusComposerAfterStart(claudeInFront: true, composerFocused: nil))

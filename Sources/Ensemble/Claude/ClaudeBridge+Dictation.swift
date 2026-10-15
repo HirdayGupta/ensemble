@@ -28,21 +28,50 @@ extension ClaudeBridge {
         guard let composer = entry.elements.composer else { return .unknown("raised Claude; composer not found") }
         let err = AX.set(composer, kAXFocusedAttribute, kCFBooleanTrue)
         if err != .success { return .unknown("raised Claude; focusing the composer failed (\(err.rawValue))") }
-        return AX.bool(composer, kAXFocusedAttribute) == true ? .done : .unknown("raised Claude; composer focus not confirmed")
+        return composerHasKeyboard(composer, pid: pid) ? .done : .unknown("raised Claude; composer focus not confirmed")
     }
 
     /// Puts the keyboard in the session's message box once dictation is on, so a key typed meanwhile lands there.
     /// Never raises Claude or moves it in front: with another app in front nothing is touched. Returns a log note.
     func focusComposerIfNeeded(_ s: ClaudeSession) async -> String {
         await run {
-            guard let composer = self.liveEntry(s)?.elements.composer else { return "message box not found" }
+            guard let entry = self.liveEntry(s), let composer = entry.elements.composer, let pid = self.claudePID else {
+                return "message box not found"
+            }
             guard ReturnKeys.focusComposerAfterStart(claudeInFront: self.claudeIsFrontmost(),
-                                                     composerFocused: AX.bool(composer, kAXFocusedAttribute)) else {
+                                                     composerFocused: self.composerHasKeyboard(composer, pid: pid)) else {
                 return "message box left as is"
             }
             let err = AX.set(composer, kAXFocusedAttribute, kCFBooleanTrue)
             if err != .success { return "focusing the message box failed (\(err.rawValue))" }
-            return AX.bool(composer, kAXFocusedAttribute) == true ? "message box focused" : "message box focus not confirmed"
+            if self.waitForComposerKeyboard(composer, pid: pid) { return "message box focused" }
+            // Keys go to Claude's main window; with several windows open the session's own may not be it yet.
+            AX.set(entry.elements.window, kAXMainAttribute, kCFBooleanTrue)
+            AX.set(composer, kAXFocusedAttribute, kCFBooleanTrue)
+            return self.waitForComposerKeyboard(composer, pid: pid) ? "message box focused (after making its window main)"
+                : "message box focus not confirmed"
+        }
+    }
+
+    /// True when a key typed now goes to `composer`: Claude's focused element is the composer or sits inside it.
+    /// Claude's composer never reports AXFocused true, even while it has the caret, so its own flag is not read.
+    func composerHasKeyboard(_ composer: AXUIElement, pid: pid_t) -> Bool {
+        guard var el = AX.element(AX.application(pid: pid), kAXFocusedUIElementAttribute) else { return false }
+        for _ in 0..<12 {
+            if CFEqual(el, composer) { return true }
+            guard let parent = AX.parent(el) else { return false }
+            el = parent
+        }
+        return false
+    }
+
+    /// Focus lands a moment after it is set; polls for up to 0.2 s.
+    private func waitForComposerKeyboard(_ composer: AXUIElement, pid: pid_t) -> Bool {
+        let deadline = Date().addingTimeInterval(0.2)
+        while true {
+            if composerHasKeyboard(composer, pid: pid) { return true }
+            if Date() >= deadline { return false }
+            Thread.sleep(forTimeInterval: 0.04)
         }
     }
 

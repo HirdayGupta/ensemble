@@ -10,6 +10,10 @@ Analyses are scheduled per frame. Hand pose runs on every frame only while a han
 
 CPU: the face tracker running every frame instead of every second frame roughly doubles the work of the web content and GPU processes (JPEG encode, decode and one landmark pass per frame); hand pose, brightness and the idle slowdown are unchanged.
 
+## Claude's accessibility tree
+
+Reading Claude's tree costs Claude's own main thread a round trip per node. The session list refreshes every second while a face is in view, but a full walk (thousands of nodes per window) runs only when Claude's window list or frames change, a cached checkbox or pane stops answering, or every 10 seconds; otherwise the refresh reads each cached dictation checkbox and pane frame, three reads per session. A walk stops after 2 seconds, so a hung Claude cannot hold the bridge queue (`SessionScan`).
+
 ## The nose dot
 
 Each head reading goes through a One Euro filter (`NosePointer`, strong smoothing when still and light when moving; the Settings slider picks how strong), then the rest rule (`NoseDot`: a resting dot ignores the nose until it is 32 pt away for 3 readings in a row, then follows it exactly and rests again where it stops), then a critically damped spring (`DotSpring`) that moves the dot's window on every screen refresh, so it glides between the 30 readings a second at 50 to 120 Hz. Focus decisions use the filtered reading, not the drawn dot.

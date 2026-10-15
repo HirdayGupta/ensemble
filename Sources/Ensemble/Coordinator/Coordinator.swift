@@ -430,7 +430,7 @@ final class Coordinator: AppCoordinating {
         dictation.supervise(now: now)
         refreshDictatingFrame(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
-        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now)))
+        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized
@@ -554,7 +554,8 @@ final class Coordinator: AppCoordinating {
     private func handleKey(isReturn: Bool, modified: Bool, isRepeat: Bool) -> Bool {
         let now = CACurrentMediaTime()
         let decision = returnKeys.press(isReturn: isReturn, modified: modified, isRepeat: isRepeat,
-                                        claudeInFront: ctx.bridge.claudeIsFrontmost(), dictating: ctx.listening != nil, now: now)
+                                        claudeInFront: ctx.bridge.claudeIsFrontmost(), dictating: ctx.listening != nil,
+                                        returnSendPending: send.returnSendPending, now: now)
         switch decision {
         case .pass:
             return false
