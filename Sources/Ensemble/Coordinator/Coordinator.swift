@@ -24,7 +24,6 @@ final class Coordinator: AppCoordinating {
     private var refreshTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
-    private var calibrationPending = false
     private var refreshInFlight = false
     private var promptedAccessibility = false
     private var lastAwayCheck: TimeInterval = 0
@@ -158,58 +157,60 @@ final class Coordinator: AppCoordinating {
     }
 
     func calibrate() {
-        guard !calibrationPending, !state.calibrating else { EnsembleLog.write("calibrate ignored: already in progress"); return }
-        EnsembleLog.write("calibrate requested (engine running=\(engine.isRunning), face tracker ready=\(health.trackerReady))")
-        // Calibrating while off, or while the camera is down, turns Ensemble on or restarts the camera and waits
-        // (up to 30 s: a first camera prompt plus the model load) for the face tracker to produce a reading.
-        if !engine.isRunning || !health.trackerReady || ctx.latestHead == nil {
-            calibrationPending = true
-            if !settings.enabled { settings.enabled = true } else if !health.running || !engine.isRunning { start() }   // the enabled sink starts it
-            Task { @MainActor in
-                defer { self.calibrationPending = false }
-                for _ in 0..<300 where !(self.engine.isRunning && self.health.trackerReady && self.ctx.latestHead != nil) {
-                    if self.health.cameraFailed { break }
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                }
-                guard self.engine.isRunning, self.health.trackerReady, self.ctx.latestHead != nil else {
-                    if !self.health.cameraAllowed { self.ctx.refuse("Calibration needs Camera permission") }
-                    else { self.ctx.refuse("The camera did not start: \(self.health.failure ?? "no reading within 30 s")") }
-                    return
-                }
-                self.calibrationPending = false
-                self.calibrate()
-            }
-            return
-        }
-        runCalibration(screens: NSScreen.screens, replacingAll: true)
+        let clickedAt = CACurrentMediaTime()
+        guard !state.calibrating else { EnsembleLog.write("calibrate ignored: already in progress"); return }
+        EnsembleLog.write("calibrate requested (enabled=\(settings.enabled), engine running=\(engine.isRunning), face tracker ready=\(health.trackerReady))")
+        // The window goes up first, before anything that can take time. Calibrating while off, or while the camera is
+        // down, then turns Ensemble on or restarts the camera behind the window, which says what it is waiting for.
+        runCalibration(screens: NSScreen.screens, replacingAll: true, clickedAt: clickedAt)
+        if !settings.enabled { settings.enabled = true } else if !health.running || !engine.isRunning { start() }   // the enabled sink starts it
     }
 
     /// `replacingAll`: a manual Calibrate from the menu, covering (and replacing) every current screen for
     /// the current camera. Otherwise just the given screens are calibrated and merged into whatever this
     /// camera already has (a desk-setup prompt asking about one new screen, say).
-    private func runCalibration(screens: [NSScreen], replacingAll: Bool) {
-        // Calibration owns the hands and the head: end any dictation first, because
-        // gesture events are ignored while it runs and a held talk pose would never be seen released.
-        send.afterStop = false
-        gestures.reset()
-        scroll.cancel()
-        if ctx.listening != nil { dictation.endWhenIdle(reason: "calibrating") }
+    private func runCalibration(screens: [NSScreen], replacingAll: Bool, clickedAt: TimeInterval = CACurrentMediaTime()) {
         let fingerprint = ScreenFacts.displayFingerprint()
         let camera = state.cameraName
         state.calibrating = true
-        CalibrationController.shared.run(screens: screens, headSource: { [weak self] in self?.ctx.latestHead }) { [weak self] results in
+        let feed = CalibrationFeed(
+            head: { [weak self] in self?.ctx.latestHead },
+            waitingFor: { [weak self] in
+                guard let self else { return "Looking for your face\u{2026}" }
+                if !self.health.cameraAllowed { return "Waiting for Camera permission\u{2026}" }
+                if !self.engine.isRunning { return "Starting the camera\u{2026}" }
+                if !self.health.trackerReady { return "Loading face tracking\u{2026}" }
+                return "Looking for your face\u{2026}"
+            },
+            failure: { [weak self] in
+                // Only once the camera path has been (re)started for this run: an earlier failure is not this run's.
+                guard let self, self.health.running, self.health.cameraFailed else { return nil }
+                return self.health.cameraAllowed ? "The camera did not start: \(self.health.failure ?? "no reading")" : "Calibration needs Camera permission"
+            })
+        CalibrationController.shared.run(screens: screens, feed: feed, clickedAt: clickedAt) { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
             EnsembleLog.write("calibration samples: \(results.map(\.samples.count))")
-            guard !results.isEmpty else { return }
+            let failure = CalibrationController.shared.failure
+            guard !results.isEmpty else {
+                if let failure { self.ctx.refuse(failure) }
+                return
+            }
             guard ScreenFacts.displayFingerprint() == fingerprint, self.state.cameraName == camera else {
                 self.ctx.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
                 return
             }
             let ok = replacingAll ? self.ctx.setup.storeFullCalibration(results) : self.ctx.setup.storeSubsetCalibration(results)
             if !ok { self.ctx.refuse("Calibration did not fit; try again sitting where you normally work") }
+            else if let failure { self.ctx.refuse(failure) }
             self.health.update()
         }
+        // Calibration owns the hands and the head: end any dictation first, because
+        // gesture events are ignored while it runs and a held talk pose would never be seen released.
+        send.afterStop = false
+        gestures.reset()
+        scroll.cancel()
+        if ctx.listening != nil { dictation.endWhenIdle(reason: "calibrating") }
     }
 
     /// While the tour practices gestures, real intents and head readings go to `sink` instead of acting on
@@ -335,7 +336,7 @@ final class Coordinator: AppCoordinating {
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
     private var needsFullRate: Bool {
-        ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating || calibrationPending
+        ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating
             || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil || practiceSink != nil
     }
 
