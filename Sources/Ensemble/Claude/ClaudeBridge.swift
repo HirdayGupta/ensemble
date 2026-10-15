@@ -19,6 +19,13 @@ final class ClaudeBridge: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cache: [String: CachedSession] = [:]
+    /// The cached sessions' ids in the order the walk found them.
+    private var cacheOrder: [String] = []
+    /// Claude's window list as of the last full walk, and when it ran: the 1 s refresh re-walks only when these
+    /// say the layout may have changed (`SessionScan`).
+    private var walkedWindows: [WindowCandidate]?
+    private var lastFullWalk = Date.distantPast
+    private var listHold = SessionListHold()
     private var flaggedPID: pid_t = 0
     private var lastStopPressAt: Date?
     private var scrollMethod: ScrollMethod?
@@ -117,8 +124,42 @@ final class ClaudeBridge: @unchecked Sendable {
 
     // MARK: Sessions
 
+    /// The session list, for the 1 s refresh. A full walk costs Claude's own main thread a read per node, so while
+    /// Claude's windows are unchanged this re-reads only each cached checkbox and pane frame, walking again when a
+    /// window moved, opened or closed, a cached element stopped answering, or every `SessionScan.fullWalkEvery`.
     func refreshSessions() async -> [ClaudeSession] {
-        await run { self.discover().map(\.session) }
+        await run { self.refreshNow() }
+    }
+
+    private func refreshNow() -> [ClaudeSession] {
+        let windows = Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
+        lock.lock()
+        let cached = cacheOrder.compactMap { cache[$0] }
+        let windowsChanged = walkedWindows != windows
+        let sinceWalk = Date().timeIntervalSince(lastFullWalk)
+        lock.unlock()
+        var refreshed: [CachedSession] = []
+        var answer = true
+        if !cached.isEmpty, !windowsChanged, sinceWalk < SessionScan.fullWalkEvery {
+            for var entry in cached {
+                guard Self.isMicCheckbox(entry.elements.mic), let frame = AX.frame(entry.elements.pane),
+                      frame.width > 50, frame.height > 50 else { answer = false; break }
+                entry.session.frame = frame
+                refreshed.append(entry)
+            }
+        }
+        guard !SessionScan.needsFullWalk(cached: cached.count, windowsChanged: windowsChanged, cachedAnswer: answer,
+                                         sinceFullWalk: sinceWalk) else {
+            return discover(windows: windows).map(\.session)
+        }
+        lock.lock()
+        // A stop or send may have re-walked meanwhile; its result wins over these frames.
+        if cacheOrder == refreshed.map(\.session.id) {
+            for entry in refreshed { cache[entry.session.id]?.session.frame = entry.session.frame }
+        }
+        let current = cacheOrder.compactMap { cache[$0]?.session }
+        lock.unlock()
+        return current
     }
 
     func session(at point: CGPoint) -> ClaudeSession? {
@@ -128,50 +169,81 @@ final class ClaudeBridge: @unchecked Sendable {
             .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }
 
-    /// Full discovery; replaces the cache. Runs on a bridge queue.
-    func discover() -> [CachedSession] {
+    /// A walk that has not finished by then stops, so a hung Claude (every read waiting out its timeout) cannot hold
+    /// the bridge queue for minutes; a healthy walk takes a fraction of this.
+    private static let walkBudget: TimeInterval = 2
+
+    /// Full discovery; replaces the cache, except that one doubtful walk (nothing found, or cut short) keeps the
+    /// previous sessions while they still answer (`SessionListHold`). Runs on a bridge queue.
+    func discover(windows given: [WindowCandidate]? = nil) -> [CachedSession] {
         guard let pid = claudePID else {
             noteAX(.success)
-            replaceCache([])
+            lock.lock(); listHold.reset(); lock.unlock()
+            replaceCache([], windows: nil)
             return []
         }
         let app = AX.application(pid: pid)
         let justEnabled = ensureManualAccessibility(app: app, pid: pid)
 
-        let cgWindows = Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
+        let cgWindows = given ?? Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
         var found: [CachedSession] = []
+        var complete = true
         // Right after the flag is set Chromium builds its tree incrementally; give it a few passes.
         for attempt in 0..<(justEnabled ? 8 : 1) {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.4) }
             found = []
+            complete = true
+            let deadline = Date().addingTimeInterval(Self.walkBudget)
             let windows = AX.read(app, kAXWindowsAttribute)
             noteAX(windows.error)
             for (windowIndex, window) in ((windows.value as? [AXUIElement]) ?? []).enumerated() {
                 if AX.bool(window, kAXMinimizedAttribute) == true { continue }
                 guard let wf = AX.frame(window), wf.width > 50, wf.height > 50 else { continue }
-                var number = 0
-                if let match = cgWindows.first(where: { Self.close($0.bounds, wf) }) {
-                    if !match.onScreen { continue }
-                    number = match.number
-                }
-                found += sessions(in: window, windowNumber: number, idKey: number != 0 ? number : -(windowIndex + 1))
+                // A window on another Space, or hidden behind a full-screen app, has no session to point at.
+                let match = WindowMatch.match(axNumber: AX.windowNumber(window), axFrame: wf, among: cgWindows)
+                if let match, !match.onScreen { continue }
+                let number = match?.number ?? 0
+                let walked = sessions(in: window, windowNumber: number, idKey: number != 0 ? number : -(windowIndex + 1),
+                                      deadline: deadline)
+                found += walked.sessions
+                complete = complete && walked.complete
             }
             if !found.isEmpty { break }
         }
-        replaceCache(found)
+        lock.lock()
+        let previous = cacheOrder.compactMap { cache[$0] }
+        lock.unlock()
+        let doubtful = found.isEmpty || !complete
+        let previousAnswer = doubtful && !previous.isEmpty && previous.allSatisfy { Self.isMicCheckbox($0.elements.mic) }
+        lock.lock()
+        let keep = listHold.keepPrevious(found: found.count, walkComplete: complete, previous: previous.count,
+                                         previousAnswer: previousAnswer)
+        lock.unlock()
+        if keep {
+            // Walk again on the next refresh instead of trusting the cache: a second doubtful walk drops the list.
+            lock.lock(); lastFullWalk = .distantPast; lock.unlock()
+            return previous
+        }
+        replaceCache(found, windows: cgWindows)
         return found
     }
 
-    private func replaceCache(_ sessions: [CachedSession]) {
+    private func replaceCache(_ sessions: [CachedSession], windows: [WindowCandidate]?) {
         lock.lock(); defer { lock.unlock() }
         cache = Dictionary(sessions.map { ($0.session.id, $0) }, uniquingKeysWith: { a, _ in a })
+        cacheOrder = []
+        for s in sessions where !cacheOrder.contains(s.session.id) { cacheOrder.append(s.session.id) }
+        walkedWindows = windows
+        lastFullWalk = Date()
     }
 
-    private func sessions(in window: AXUIElement, windowNumber: Int, idKey: Int) -> [CachedSession] {
-        let mics = Self.collectMics(in: window)
+    private func sessions(in window: AXUIElement, windowNumber: Int, idKey: Int,
+                          deadline: Date) -> (sessions: [CachedSession], complete: Bool) {
+        let (mics, complete) = Self.collectMics(in: window, deadline: deadline)
         var result: [CachedSession] = []
         for (i, mic) in mics.enumerated() {
-            guard let paneIndex = Self.paneIndex(for: i, among: mics),
+            guard Date() < deadline else { return (result, false) }
+            guard let paneIndex = Self.paneIndex(for: i, among: mics, deadline: deadline),
                   let pane = Optional(mic.path[paneIndex]),
                   let frame = AX.frame(pane) else { continue }
             let scan = Self.scanPane(pane)
@@ -181,7 +253,7 @@ final class ClaudeBridge: @unchecked Sendable {
                                         modeControl: scan.mode, transcript: scan.transcript)
             result.append(CachedSession(session: ClaudeSession(id: id, frame: frame, windowNumber: windowNumber, title: scan.title), elements: elements))
         }
-        return result
+        return (result, complete && Date() < deadline)
     }
 
     /// Keyed on the window and the mic's order in it, never on the frame, so dragging or resizing a window
@@ -252,12 +324,17 @@ final class ClaudeBridge: @unchecked Sendable {
 
     /// Every dictation checkbox under `window` with its ancestor path. The transcript is not entered:
     /// it holds most of the nodes and never contains a composer.
-    static func collectMics(in window: AXUIElement, maxNodes: Int = 12_000) -> [MicHit] {
+    /// `complete` is false when the walk ran out of time before `deadline`.
+    static func collectMics(in window: AXUIElement, maxNodes: Int = 12_000,
+                            deadline: Date = .distantFuture) -> (hits: [MicHit], complete: Bool) {
         var hits: [MicHit] = []
         var count = 0
+        var outOfTime = false
         func go(_ el: AXUIElement, _ path: [AXUIElement], _ roles: [String], _ depth: Int) {
             count += 1
-            if count > maxNodes || depth > 70 { return }
+            if count > maxNodes || depth > 70 || outOfTime { return }
+            // Checking the clock every 64 nodes keeps the check itself out of the cost.
+            if count % 64 == 0, Date() >= deadline { outOfTime = true; return }
             let v = AX.multi(el, walkAttrs)
             let role = (v[0] as? String) ?? ""
             let desc = v[1] as? String
@@ -271,18 +348,18 @@ final class ClaudeBridge: @unchecked Sendable {
             for c in (v[3] as? [AXUIElement]) ?? [] { go(c, path, roles, depth + 1) }
         }
         go(window, [], [], 0)
-        return hits
+        return (hits, !outOfTime)
     }
 
     /// Index into `mics[i].path` of the session's pane. The choice itself is `PaneChoice`; this reads the
     /// facts it needs (frame, which session parts and whether the sidebar each ancestor holds) in one walk.
-    static func paneIndex(for i: Int, among mics: [MicHit]) -> Int? {
+    static func paneIndex(for i: Int, among mics: [MicHit], deadline: Date = .distantFuture) -> Int? {
         let me = mics[i]
         let lowest = (me.roles.lastIndex(of: "AXWebArea") ?? 0) + 1
         let micIndex = me.path.count - 1
         guard lowest < micIndex else { return nil }
         let ks = Array(lowest..<micIndex)
-        let found = ownParts(under: me.path, from: lowest)
+        let found = ownParts(under: me.path, from: lowest, deadline: deadline)
         let ancestors = ks.map { k -> PaneAncestor in
             PaneAncestor(frame: AX.frame(me.path[k]) ?? .zero,
                          hasHeader: found.header >= k, hasTranscript: found.transcript >= k,
@@ -293,13 +370,16 @@ final class ClaudeBridge: @unchecked Sendable {
     }
 
     /// For each page part, the deepest index on `path` whose subtree holds it (-1 when not found).
-    private static func ownParts(under path: [AXUIElement], from lowest: Int, maxNodes: Int = 12_000)
+    private static func ownParts(under path: [AXUIElement], from lowest: Int, maxNodes: Int = 12_000,
+                                 deadline: Date = .distantFuture)
         -> (header: Int, transcript: Int, composer: Int, sidebar: Int) {
         var r = (header: -1, transcript: -1, composer: -1, sidebar: -1)
         var count = 0
+        var outOfTime = false
         func go(_ el: AXUIElement, _ shared: Int, _ depth: Int) {
             count += 1
-            if count > maxNodes || depth > 70 { return }
+            if count > maxNodes || depth > 70 || outOfTime { return }
+            if count % 64 == 0, Date() >= deadline { outOfTime = true; return }
             var shared = shared
             if shared + 1 < path.count, CFEqual(el, path[shared + 1]) { shared += 1 }
             let v = AX.multi(el, walkAttrs)
@@ -364,25 +444,20 @@ final class ClaudeBridge: @unchecked Sendable {
 
     // MARK: Windows
 
-    struct CGWin { var number: Int; var bounds: CGRect; var onScreen: Bool }
-
-    static func cgWindows(pids: Set<pid_t>) -> [CGWin] {
+    static func cgWindows(pids: Set<pid_t>) -> [WindowCandidate] {
         guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return [] }
-        var out: [CGWin] = []
+        var out: [WindowCandidate] = []
         for w in list {
             guard let pid = w[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
                   (w[kCGWindowLayer as String] as? Int) == 0,
                   let number = w[kCGWindowNumber as String] as? Int,
                   let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b) else { continue }
-            out.append(CGWin(number: number, bounds: rect, onScreen: (w[kCGWindowIsOnscreen as String] as? Bool) ?? false))
+            out.append(WindowCandidate(number: number, bounds: rect, onScreen: (w[kCGWindowIsOnscreen as String] as? Bool) ?? false))
         }
         return out
     }
 
-    private static func close(_ a: CGRect, _ b: CGRect) -> Bool {
-        abs(a.minX - b.minX) < 3 && abs(a.minY - b.minY) < 3 && abs(a.width - b.width) < 3 && abs(a.height - b.height) < 3
-    }
 
     // MARK: Shared state used by the other extensions
 

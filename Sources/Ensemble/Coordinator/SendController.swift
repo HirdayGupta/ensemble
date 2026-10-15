@@ -20,7 +20,13 @@ final class SendController {
     /// For a send asked for with Return: seconds since a click or any key other than those Returns.
     var returnInputAge: () -> Double = { ClaudeBridge.secondsSinceTypingOrClick() }
     /// A send is between its request and its result (reading the draft, waiting for it to settle, pressing Send).
-    private(set) var inFlight = false
+    private(set) var inFlight = false {
+        didSet { if !inFlight { inFlightByReturn = false } }
+    }
+    private var inFlightByReturn = false
+    /// A send asked for with Return is pending or in flight: the key watch stays on until it ends, so a key typed
+    /// meanwhile is seen and refuses it.
+    var returnSendPending: Bool { afterStopByReturn || (inFlight && inFlightByReturn) }
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
@@ -48,6 +54,7 @@ final class SendController {
     /// `settle`: the dictation stopped a moment ago; wait for Claude to finish the transcript before reading it.
     func request(byReturn: Bool = false, settle: Bool = false) {
         inFlight = true
+        inFlightByReturn = byReturn
         guard byReturn || ctx.settings.mapping.send != nil else { finish(nil); return }
         let inputAge = { byReturn ? self.returnInputAge() : ClaudeBridge.secondsSinceTypingOrClick() }
         // Acting only on Claude: a thumbs-up made while another app is in front sends nothing.
