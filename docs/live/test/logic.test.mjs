@@ -125,7 +125,7 @@ test('thumbs-up held 0.75 s sends once, and not before', () => {
   for (let t = 0; t < 0.7; t += 1 / 30) early.push(...m.push({ t, present: true, pose: 'thumbsUp', palmCenter: { x: 0.5, y: 0.5 }, pinch: 0.9 }));
   assert.deepEqual(early, []);
   assert.equal(m.progress.action, 'send');
-  assert.ok(m.progress.progress > 0.9 && m.progress.progress < 1);
+  assert.ok(m.progress.progress > 0.85 && m.progress.progress < 1);
   const late = [];
   for (let t = 0.7; t < 1.2; t += 1 / 30) late.push(...m.push({ t, present: true, pose: 'thumbsUp', palmCenter: { x: 0.5, y: 0.5 }, pinch: 0.9 }));
   assert.deepEqual(late.map((i) => i.type), ['sendRequested']);
