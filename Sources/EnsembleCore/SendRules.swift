@@ -12,6 +12,26 @@ public enum SendRules {
         return typedRefusal(spokenAgo: ago, inputAge: inputAge)
     }
 
+    public enum Dictated: Equatable, Sendable {
+        /// A dictation Ensemble started (or took over) and stopped.
+        case ensemble
+        /// A dictation Claude ran without Ensemble, seen recording in the looked-at session and then seen to end.
+        case claude
+    }
+
+    /// Which dictation a send is for, and how long ago it ended: the most recent one that ended within the window,
+    /// Ensemble's own on a tie. nil when neither did, which the send refuses as "Nothing dictated".
+    public static func dictated(ensembleAgo: TimeInterval?, claudeAgo: TimeInterval?) -> (source: Dictated, ago: TimeInterval)? {
+        let own = ensembleAgo.flatMap { $0 <= window ? $0 : nil }
+        let claude = claudeAgo.flatMap { $0 <= window ? $0 : nil }
+        switch (own, claude) {
+        case let (a?, b?): return b < a ? (.claude, b) : (.ensemble, a)
+        case let (a?, nil): return (.ensemble, a)
+        case let (nil, b?): return (.claude, b)
+        case (nil, nil): return nil
+        }
+    }
+
     /// Acting only on Claude: with another app in front (a full-screen call swiped to, say) a thumbs-up sends nothing,
     /// however recent the dictation.
     public static func frontRefusal(claudeInFront: Bool) -> String? {

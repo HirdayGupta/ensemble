@@ -49,7 +49,7 @@ final class Coordinator: AppCoordinating {
     var cameraNames: [String] { VisionEngine.cameraNames() }
 
     var isBusy: Bool {
-        ctx.busy || ctx.listening != nil || send.afterStop || send.inFlight || gestures.progress != nil || panes.isRunning
+        ctx.busy || ctx.listening != nil || send.afterStop || send.inFlight || send.earlyArmed || gestures.progress != nil || panes.isRunning
     }
 
     init(state: AppState, settings: SettingsStore, overlay: OverlayController) {
@@ -75,6 +75,7 @@ final class Coordinator: AppCoordinating {
         }
         keyTap.onReturnUp = { [weak self] in self?.returnKeys.returnReleased() }
         keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
+        send.lookedAt = { [weak self] in self?.focus.target }
         send.returnInputAge = { [weak self] in
             let clicks = ClaudeBridge.secondsSinceClick()
             guard let self else { return clicks }
@@ -226,7 +227,8 @@ final class Coordinator: AppCoordinating {
         engine.stop()
         gestures.reset()
         scroll.cancel()
-        focus.clearDeferred(); send.afterStop = false; send.forget()
+        focus.clearDeferred(); send.afterStop = false; send.forget(); send.dropEarly()
+        ctx.claudeDictations.forgetAll()
         focus.forgetTarget()
         returnKeys.reset(); keyTap.setActive(false)
         state.status = .off
@@ -440,11 +442,13 @@ final class Coordinator: AppCoordinating {
         dictation.supervise(now: now)
         refreshDictatingFrame(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
+        if send.earlyHoldPending { send.earlyObserve(holding: gestures.holdingSend) }
         if state.lastRefusal != nil {
             state.clearRefusalIfStale(now: now, lastInputAt: now - ClaudeBridge.secondsSinceTypingOrClick(),
                                       dictating: ctx.listening != nil, onSession: focus.target != nil)
         }
-        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
+        keyTap.setActive(health.running && (ctx.listening != nil || claudeDictatingHere
+                                            || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized
@@ -467,7 +471,7 @@ final class Coordinator: AppCoordinating {
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
     private var needsFullRate: Bool {
-        ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating
+        ctx.listening != nil || ctx.busy || send.afterStop || send.earlyArmed || state.calibrating
             || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil || practiceSink != nil
             || gestures.peaceOpen || panes.isRunning
     }
@@ -487,7 +491,8 @@ final class Coordinator: AppCoordinating {
         let claudeUp = ctx.bridge.claudeIsRunning()
         dictation.dropIfClaudeGone(running: claudeUp)
         guard claudeUp else {
-            health.sessionsScanned = false; ctx.sessions = []; focus.forgetAll(); send.forget(); scroll.cancel(); health.update(); return
+            health.sessionsScanned = false; ctx.sessions = []; ctx.claudeDictations.forgetAll()
+            focus.forgetAll(); send.forget(); scroll.cancel(); health.update(); return
         }
         if awayState.isAway { reconcileAway() }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
@@ -500,7 +505,16 @@ final class Coordinator: AppCoordinating {
         refreshInFlight = true
         Task { @MainActor in
             defer { self.refreshInFlight = false }
-            let found = await self.ctx.bridge.refreshSessions()
+            let epoch = self.ctx.dictationEpoch
+            let scan = await self.ctx.bridge.refreshSessions()
+            let found = scan.sessions
+            // A read taken before Ensemble started, took over or stopped a dictation would report Ensemble's own.
+            if epoch == self.ctx.dictationEpoch, self.ctx.listening == nil {
+                let before = self.ctx.claudeDictations.recording
+                self.ctx.claudeDictations.observe(present: found.map(\.id), recordingNow: scan.recording, at: CACurrentMediaTime())
+                let now = self.ctx.claudeDictations.recording
+                if now != before { EnsembleLog.write("Claude is dictating without Ensemble in \(now.count) session(s)") }
+            }
             if found.map(\.id) != self.ctx.sessions.map(\.id) { EnsembleLog.write("Claude sessions found: \(found.count) (named \(found.filter { $0.title != nil }.count)) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.ctx.sessions = found
             self.health.sessionsScanned = true
@@ -518,11 +532,21 @@ final class Coordinator: AppCoordinating {
         if intent == .talkBegan || intent == .sendRequested { ctx.overlay.clearBanner() }
         switch intent {
         case .talkBegan: dictation.begin()
-        case .talkEnded(let reason): if ctx.listening != nil { dictation.end(reason: reason.rawValue) }
+        case .talkEnded(let reason):
+            guard let session = ctx.listening else { break }
+            if gestures.holdingSendAfterStop, settings.mapping.send != nil, !ctx.busy, !ctx.setup.isPromptShowing {
+                // A thumbs-up while dictating: stop now and settle the transcript during the hold, so Send is
+                // pressed the moment the hold completes.
+                send.armEarly(in: session)
+                dictation.end(reason: "thumbs-up", tail: DictationController.sendStopTail)
+            } else {
+                dictation.end(reason: reason.rawValue)
+            }
         case .sendRequested:
             // While the setup prompt shows, the held thumbs-up answers it instead of sending.
-            if ctx.setup.isPromptShowing { ctx.setup.start(); return }
-            if ctx.listening != nil || ctx.busy { send.sendAfterStop(in: ctx.listening); EnsembleLog.write("send after stop") } else { send.request() }
+            if ctx.setup.isPromptShowing { send.dropEarly(); ctx.setup.start(); return }
+            if send.earlyArmed { send.earlyHoldCompleted(); return }
+            if ctx.listening != nil || ctx.busy { send.sendAfterStop(in: ctx.listening); EnsembleLog.write("send after stop") } else { requestSend() }
         case .cancelRequested: break
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
         case .dragScrollEnded: scroll.released()
@@ -562,7 +586,30 @@ final class Coordinator: AppCoordinating {
                 send.sendAfterStop(in: ctx.listening)
                 dictation.end(reason: "headphone double press")
             } else {
-                send.request()
+                requestSend()
+            }
+        }
+    }
+
+    /// The looked-at session shows a dictation Claude runs without Ensemble (as of the last refresh).
+    private var claudeDictatingHere: Bool {
+        ctx.listening == nil && ctx.claudeDictations.isRecording(focus.target?.id)
+    }
+
+    /// A send asked for with no Ensemble dictation running and nothing in flight. If Claude is dictating in the
+    /// looked-at session, whoever started it, that dictation is stopped through Ensemble's own stop path and sent once
+    /// the transcript settles, under every send rule; otherwise the dictated draft is sent under the usual rules.
+    private func requestSend() {
+        guard let target = focus.target, settings.mapping.send != nil, ctx.bridge.claudeIsFrontmost(),
+              ctx.commonRefusal() == nil else { send.request(); return }
+        Task { @MainActor in
+            let result = await self.dictation.takeOverIfDictating(target, reason: "send") {
+                self.send.sendAfterStop(in: target)
+            }
+            switch result {
+            case .stopping: EnsembleLog.write("send after stopping a dictation Claude was running")
+            case .notDictating: self.send.request()
+            case .refused(let why): self.send.afterStop = false; self.ctx.refuse("Not sent: \(why)")
             }
         }
     }
@@ -572,7 +619,8 @@ final class Coordinator: AppCoordinating {
     private func handleKey(isReturn: Bool, modified: Bool, isRepeat: Bool) -> Bool {
         let now = CACurrentMediaTime()
         let decision = returnKeys.press(isReturn: isReturn, modified: modified, isRepeat: isRepeat,
-                                        claudeInFront: ctx.bridge.claudeIsFrontmost(), dictating: ctx.listening != nil,
+                                        claudeInFront: ctx.bridge.claudeIsFrontmost(),
+                                        dictating: ctx.listening != nil || claudeDictatingHere,
                                         returnSendPending: send.returnSendPending, now: now)
         switch decision {
         case .pass:
@@ -580,14 +628,23 @@ final class Coordinator: AppCoordinating {
         case .swallow:
             return true
         case .swallowAndStop:
-            EnsembleLog.write("Return: stopping dictation")
             ctx.overlay.clearBanner()
+            if ctx.listening == nil, let target = focus.target {
+                // A dictation Claude runs without Ensemble: taken over and stopped the same way.
+                EnsembleLog.write("Return: stopping a dictation Claude was running")
+                Task { @MainActor in
+                    if case .stopping = await self.dictation.takeOverIfDictating(target, reason: "Return", beforeStop: {}) { return }
+                    self.send.afterStop = false; self.stopResolved(confirmed: false)
+                }
+                return true
+            }
+            EnsembleLog.write("Return: stopping dictation")
             // A start or stop press may be in flight; the stop then waits for it, the same as calibrating does.
             if ctx.busy { dictation.endWhenIdle(reason: "Return") } else { dictation.end(reason: "Return") }
             return true
         case .swallowAndSendAfterStop:
             EnsembleLog.write("Return twice: send after stop")
-            send.sendAfterStop(in: ctx.listening, byReturn: true)
+            send.sendAfterStop(in: ctx.listening ?? focus.target, byReturn: true)
             return true
         case .swallowAndSend:
             EnsembleLog.write("Return twice: sending")
@@ -612,7 +669,8 @@ final class Coordinator: AppCoordinating {
         dictation.markInterrupted()
         send.afterStop = false; focus.clearDeferred()
         returnKeys.reset()
-        send.forget()
+        send.forget(); send.dropEarly()
+        ctx.claudeDictations.forgetAll()
         scroll.cancel()
         panes.cancel()
         gestures.reset()

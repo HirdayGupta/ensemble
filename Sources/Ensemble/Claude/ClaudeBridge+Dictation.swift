@@ -86,14 +86,14 @@ extension ClaudeBridge {
         if isShuttingDown { return .refused("Ensemble is quitting") }
         guard let before = liveEntry(s) else { return .refused(self.sessionNotFound) }
         let state = micStateSync(mic: before.elements.mic)
-        guard state == .off else { return .refused("mic is not verifiably off: \(describe(state))") }
+        if let why = ClaudeDictation.startRefusal(state) { return .refused(why) }
 
         _ = focusNow(s)
 
         // Focusing can re-render the pane; re-resolve the element and re-check right before the press.
         guard let entry = liveEntry(s) else { return .refused("session vanished while focusing") }
         let recheck = micStateSync(mic: entry.elements.mic)
-        guard recheck == .off else { return .refused("mic state changed while focusing: \(describe(recheck))") }
+        if let why = ClaudeDictation.startRefusal(recheck) { return .refused(why) }
 
         if isShuttingDown { return .refused("Ensemble is quitting") }
         let err = AX.perform(entry.elements.mic, kAXPressAction)

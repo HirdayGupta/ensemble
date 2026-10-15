@@ -28,6 +28,19 @@ final class SendController {
     /// meanwhile is seen and refuses it.
     var returnSendPending: Bool { afterStopByReturn || (inFlight && inFlightByReturn) }
 
+    /// The session the nose is on, for a dictation Claude ran there without Ensemble (wired by the Coordinator).
+    var lookedAt: () -> ClaudeSession? = { nil }
+
+    /// A thumbs-up made while dictating, sent as one motion (`EarlySend`): stopped when recognised, settled during
+    /// the hold, pressed when the hold completes.
+    private var early = EarlySend()
+    private var earlySession: ClaudeSession?
+    private var earlyText: String?
+    /// The hand dropped before the hold completed while the stop was still under way: "Kept, not sent" once it lands.
+    private var keptWhenStopped = false
+    var earlyArmed: Bool { early.isArmed }
+    var earlyHoldPending: Bool { early.isArmed && !early.holdCompleted }
+
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
     func spoke(in session: ClaudeSession) { lastSpoken = (session, Date()) }
@@ -39,6 +52,115 @@ final class SendController {
         afterStop = true
         if byReturn { afterStopByReturn = true }
         showSending(session)
+    }
+
+    // MARK: - A thumbs-up while dictating, as one motion
+
+    /// The thumbs-up was recognised while dictating and the stop begins now.
+    func armEarly(in session: ClaudeSession) {
+        early.arm(at: CACurrentMediaTime())
+        earlySession = session
+        earlyText = nil
+        keptWhenStopped = false
+        EnsembleLog.write("thumbs-up while dictating: stopping now, sending when the hold completes")
+    }
+
+    /// The stop under an early send is confirmed: the transcript settles while the hold runs. True when this send (or
+    /// its "Kept, not sent") speaks for the stop, so no "Dictation stopped" banner or cue plays in between.
+    func earlyStopConfirmed(_ session: ClaudeSession) -> Bool {
+        if keptWhenStopped {
+            keptWhenStopped = false
+            showKept(session)
+            return true
+        }
+        guard early.isArmed else { return false }
+        _ = early.stopWasConfirmed(at: CACurrentMediaTime())
+        let armedAt = early.armedAt
+        Task { @MainActor in
+            let text = await self.settledDraft(session)
+            // Dropped, let go or re-armed meanwhile: this reading belongs to nothing.
+            guard self.early.isArmed, self.early.armedAt == armedAt else { return }
+            self.earlyText = text
+            self.applyEarly(self.early.draftSettled(at: CACurrentMediaTime()))
+        }
+        return true
+    }
+
+    /// The stop under an early send was not confirmed: nothing is sent.
+    func earlyStopFailed() {
+        keptWhenStopped = false
+        guard early.isArmed else { return }
+        let held = early.holdCompleted
+        applyEarly(early.stopFailed())
+        if held { finish("Not sent: the stop was not confirmed") }
+    }
+
+    /// The thumbs-up hold completed: "Sending" now, and Send is pressed at once if the draft is already stable.
+    func earlyHoldCompleted() {
+        showSending(earlySession)
+        applyEarly(early.holdWasCompleted(at: CACurrentMediaTime()))
+    }
+
+    /// From the 20 Hz tick while the hold runs: whether the send pose is still held.
+    func earlyObserve(holding: Bool) {
+        let stopped = early.stopConfirmed
+        guard early.observe(holding: holding, at: CACurrentMediaTime()) == .keptNotSent else { return }
+        let session = earlySession
+        earlySession = nil
+        earlyText = nil
+        EnsembleLog.write("thumbs-up let go before the hold completed; the text stays unsent")
+        if stopped, let session { showKept(session) } else { keptWhenStopped = true }
+    }
+
+    /// Sleep, a lock, switching off or an interrupted dictation: forget the early send without a word.
+    func dropEarly() {
+        early.drop()
+        earlySession = nil
+        earlyText = nil
+        keptWhenStopped = false
+        if !inFlight { showSending(nil) }
+    }
+
+    private func applyEarly(_ outcome: EarlySend.Outcome) {
+        switch outcome {
+        case .wait: return
+        case .dropped, .keptNotSent:
+            earlySession = nil
+            earlyText = nil
+        case .press:
+            pressEarly()
+        }
+    }
+
+    private func showKept(_ session: ClaudeSession) {
+        ctx.overlay.showBanner(title: "Kept, not sent", body: ctx.name(of: session), style: .stopped, seconds: 2.5)
+        Notifier.shared.playCue(.listenEnd)
+    }
+
+    /// Every send rule again, right before the press: the gesture send setting, Claude in front, nothing else started,
+    /// the stop counted as dictated (an interrupted dictation never does), the common refusals, no typing since the
+    /// dictation ended, and a draft that is not empty. The bridge checks Claude in front once more at the press.
+    private func pressEarly() {
+        let timeline = early.timeline()
+        early.drop()
+        let session = earlySession, text = earlyText
+        earlySession = nil
+        earlyText = nil
+        inFlight = true
+        EnsembleLog.write("send timeline: \(timeline)")
+        guard ctx.settings.mapping.send != nil, let session else { finish(nil); return }
+        guard claudeInFront() else { finish(nil); return }
+        guard ctx.listening == nil, !ctx.busy else { finish("Send dropped: something else started"); return }
+        guard let spoken = lastSpoken, spoken.session.id == session.id else { finish(nil); return }
+        let inputAge = ClaudeBridge.secondsSinceTypingOrClick()
+        if let why = ctx.commonRefusal(inputAge: inputAge) { finish("Not sent: \(why)"); return }
+        if let why = SendRules.typedRefusal(spokenAgo: Date().timeIntervalSince(spoken.stoppedAt), inputAge: inputAge) {
+            finish(why); return
+        }
+        guard let text else { finish("Could not read the dictated session's message box"); return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { finish("The draft is empty"); return }
+        EnsembleLog.write("sending (\(text.count) characters)")
+        sendNow(session, shown: text)
     }
 
     /// The stop a pending send waited for is confirmed: send once the transcript has settled.
@@ -64,8 +186,15 @@ final class SendController {
             return
         }
         if let why = ctx.commonRefusal(inputAge: inputAge()) { finish(why); return }
-        let spokenAgo = lastSpoken.map { Date().timeIntervalSince($0.stoppedAt) }
-        if let why = SendRules.refusal(spokenAgo: spokenAgo, inputAge: inputAge()) { finish(why); return }
+        // Ensemble's own dictation, or one Claude ran in the looked-at session that the refresh saw end; the most recent.
+        let here = lookedAt()
+        let picked = SendRules.dictated(ensembleAgo: lastSpoken.map { Date().timeIntervalSince($0.stoppedAt) },
+                                        claudeAgo: ctx.claudeDictations.endedAgo(here?.id, now: CACurrentMediaTime()))
+        if let why = SendRules.refusal(spokenAgo: picked?.ago, inputAge: inputAge()) { finish(why); return }
+        if let picked, picked.source == .claude, let here {
+            EnsembleLog.write("sending a dictation Claude ran without Ensemble (ended \(Int(picked.ago)) s ago)")
+            lastSpoken = (here, Date().addingTimeInterval(-picked.ago))
+        }
         guard let spoken = lastSpoken else { finish(nil); return }
         let session = spoken.session
         showSending(session)
@@ -76,7 +205,10 @@ final class SendController {
                 self.finish("\(other) is using a microphone"); return
             }
             let text = settle ? await self.settledDraft(session) : await bridge.draftText(session)
-            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // nil: the pane it was dictated into is not where it was (a layout change, a closed window); no other
+            // pane's draft is read in its place.
+            guard let text else { self.finish("Could not read the dictated session's message box"); return }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 self.finish("The draft is empty"); return
             }
             // The draft read takes a moment; a new dictation or keystroke may have started meanwhile.
@@ -134,6 +266,7 @@ final class SendController {
             switch result {
             case .done:
                 EnsembleLog.write("sent"); self.lastSpoken = nil; Notifier.shared.playCue(.send)
+                self.ctx.claudeDictations.forget(session.id)
                 self.inFlight = false
                 // "Sending" turns straight into "Sent": the banner replaces it in the same update.
                 self.ctx.overlay.showBanner(title: "Sent", body: self.ctx.name(of: session), style: .sent, seconds: 1.5)
