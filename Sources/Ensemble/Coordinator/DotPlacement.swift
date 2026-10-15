@@ -34,20 +34,20 @@ final class DotPlacement {
     func place(target: ClaudeSession?) {
         if let session = ctx.listening {
             frozen = nil
-            ctx.state.set(\.nosePoint, nil)
+            ctx.nosePoint = nil
             let warning = lastNose.flatMap { EdgeWarnings.warning(nose: $0, dictating: session, sessions: ctx.sessions) }
             // Leaving Claude is warned about only when the setting is on; a neighbouring session always is.
             edgeWarning = warning.flatMap { $0.neighbourId == nil && !ctx.settings.warnWhenLeavingClaude ? nil : $0 }
         } else if ctx.gestureShowing {
             edgeWarning = nil
             if frozen == nil { frozen = dot }
-            ctx.state.set(\.nosePoint, frozen)
+            ctx.nosePoint = frozen
         } else {
             edgeWarning = nil
             frozen = nil
-            ctx.state.set(\.nosePoint, ctx.settings.showNoseDot ? dot : nil)
+            ctx.nosePoint = ctx.settings.showNoseDot ? dot : nil
         }
-        ctx.state.set(\.targetFrame, ctx.listening?.frame ?? target?.frame)
+        ctx.targetFrame = ctx.listening?.frame ?? target?.frame
     }
 }
 

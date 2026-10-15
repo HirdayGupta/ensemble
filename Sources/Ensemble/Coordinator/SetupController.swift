@@ -35,8 +35,12 @@ final class SetupController {
     private var pendingDecision: SetupDecision?
     /// Setups the owner chose "Later" for; cleared when the setup changes again or the app relaunches.
     private var dismissedSignature: String?
-    private var lastRestoreSignature: String?
     private var debounceTask: Task<Void, Never>?
+    /// Which camera reports and refits are news; see `SetupChangeFilter`.
+    private var changes = SetupChangeFilter()
+    /// Connected screens with their stable ids, in `NSScreen.screens` order. Read on every head reading
+    /// (`isUsable`) and status pass; rebuilt only when the arrangement changes.
+    private var screenIDCache: [(frame: CGRect, id: String?)]?
     private let promptWindow = SetupPromptController()
 
     /// Wired by the coordinator: the manual calibration path (every current screen, the position in use) and a
@@ -64,29 +68,64 @@ final class SetupController {
     /// A point on a new or moved screen reads the same as no target: that screen is ignored until it is
     /// calibrated, while the valid screens keep working.
     func isUsable(_ point: CGPoint) -> Bool {
-        guard let screen = ScreenGeometry.screen(containing: point), let id = ScreenGeometry.stableID(of: screen) else { return false }
+        let screens = connectedScreens
+        // Same rule as `ScreenGeometry.screen(containing:)`: off every screen counts as the first one.
+        guard let id = (screens.first { $0.frame.contains(point) } ?? screens.first)?.id else { return false }
         return validScreenIDs.contains(id)
+    }
+
+    /// The stable ids of the connected screens, from the cache.
+    var connectedScreenIDs: [String] { connectedScreens.compactMap(\.id) }
+
+    private var connectedScreens: [(frame: CGRect, id: String?)] {
+        if let cached = screenIDCache { return cached }
+        let fresh = NSScreen.screens.map { (frame: ScreenGeometry.topLeftFrame(of: $0), id: ScreenGeometry.stableID(of: $0)) }
+        screenIDCache = fresh
+        return fresh
     }
 
     // MARK: - Detection
 
-    /// The engine reports which camera it is actually using, at every start and camera switch.
+    /// The engine reports which camera it is actually using, at every start and camera switch, and again with
+    /// every frame-rate reading (about once a second). Only a different camera is acted on: re-deciding the setup
+    /// each second refitted the pointer, and that restarted its smoothing, a visible hitch in the dot.
     func cameraInUse(id: String, name: String) {
+        guard changes.cameraReported(id: id, name: name) else { return }
         migrateLegacyIfNeeded(cameraID: id, cameraName: name)
         if let old = cameraID, old != id {
             previousCameraName = cameraName
             // A different camera's angles mean nothing here; do not point with its leftover model.
             ctx.pointer.calibration = nil
+            changes.forgetFit()
             ctx.invalidateCalibrationCache()
         }
         cameraID = id
         cameraName = name
+        if ctx.settings.lastCameraID != id { ctx.settings.lastCameraID = id }
         scheduleEvaluate()
     }
 
     /// The screen arrangement changed (`NSApplication.didChangeScreenParametersNotification`).
     func screensChanged() {
+        screenIDCache = nil
         scheduleEvaluate()
+    }
+
+    /// At launch, before the camera starts: point with the saved calibration of the camera used last, so the
+    /// pointer is calibrated from the first head reading instead of a second or more after the camera reports.
+    /// That report then confirms it (the same camera and screens change nothing) or replaces it. False when there
+    /// is nothing saved that fits the screens connected now.
+    func restoreAtLaunch() -> Bool {
+        guard let id = ctx.settings.lastCameraID, let profile = profiles.profile(forCameraID: id),
+              case .ready(_, let valid, _, _) = SetupEvaluator.evaluate(
+                profiles: profiles, cameraID: id, cameraName: profile.cameraName, previousCameraName: nil, screens: currentScreens()),
+              !valid.isEmpty else { return false }
+        cameraID = id
+        cameraName = profile.cameraName
+        validScreenIDs = Set(valid)
+        refitPointer()
+        ctx.invalidateCalibrationCache()
+        return ctx.pointer.isCalibrated
     }
 
     /// Screens and camera changes each fire several notifications in a row; settle for a moment before deciding.
@@ -101,6 +140,7 @@ final class SetupController {
 
     private func evaluate() {
         defer { publish() }
+        screenIDCache = nil
         guard let cameraID, let cameraName else { return }
         let screens = currentScreens()
         let decision = SetupEvaluator.evaluate(profiles: profiles, cameraID: cameraID, cameraName: cameraName,
@@ -141,8 +181,9 @@ final class SetupController {
     private func announceRestoreIfNeeded(cameraName: String, previousValid: Set<String>, recent: Date?) {
         guard !validScreenIDs.isEmpty, previousValid != validScreenIDs else { return }
         let signature = "\(cameraID ?? ""):\(validScreenIDs.sorted().joined(separator: ","))"
-        guard signature != lastRestoreSignature else { return }
-        lastRestoreSignature = signature
+        // Persisted, so a relaunch on the same setup does not announce it again.
+        guard signature != ctx.settings.lastRestoreSignature else { return }
+        ctx.settings.lastRestoreSignature = signature
         let count = validScreenIDs.count
         let date = recent.map { Self.dateFormatter.string(from: $0) } ?? "earlier"
         ctx.overlay.showBanner(
@@ -259,6 +300,9 @@ final class SetupController {
         if !profile.hasModelOnly(newValid) {
             let screens = profile.pointerScreens(for: newValid)
             guard !screens.isEmpty, ctx.pointer.fit(screens: screens) else { return false }
+            changes.fittedFrom(.init(cameraID: cameraID, validScreenIDs: newValid, profile: profile))
+        } else {
+            changes.forgetFit()
         }
         profiles = next
         save()
@@ -277,6 +321,7 @@ final class SetupController {
         save()
         // Its maps go with it, even if no screen is left to refit.
         ctx.pointer.calibration = nil
+        changes.forgetFit()
         evaluate()
     }
 
@@ -284,7 +329,7 @@ final class SetupController {
         ctx.settings.calibratedAt = date
         dismissedSignature = nil
         pendingDecision = nil
-        lastRestoreSignature = nil
+        ctx.settings.lastRestoreSignature = nil
         promptWindow.hide()
         ctx.invalidateCalibrationCache()
     }
@@ -304,18 +349,24 @@ final class SetupController {
     }
 
     /// Points the pointer at what the screens now valid actually have: a fresh fit of their samples, or the
-    /// migrated model when the profile came from the old single calibration.
+    /// migrated model when the profile came from the old single calibration. Skipped when nothing it fits from
+    /// changed since the last fit: a refit restarts the pointer's smoothing.
     private func refitPointer() {
         guard let cameraID, !validScreenIDs.isEmpty, let profile = profiles.profile(forCameraID: cameraID) else { return }
+        let key = SetupChangeFilter.FitKey(cameraID: cameraID, validScreenIDs: validScreenIDs, profile: profile)
+        guard changes.needsFit(key, pointerCalibrated: ctx.pointer.isCalibrated) else { return }
         if !profile.hasModelOnly(validScreenIDs), ctx.pointer.fit(screens: profile.pointerScreens(for: validScreenIDs)) {
+            changes.fittedFrom(key)
             return
         }
         if let legacy = profile.legacyModel {
             ctx.pointer.calibration = legacy
+            changes.fittedFrom(key)
         } else {
             // Nothing usable to fit: pointing off rather than the previous camera's or screen set's model.
             validScreenIDs = []
             ctx.pointer.calibration = nil
+            changes.forgetFit()
         }
     }
 
@@ -331,7 +382,7 @@ final class SetupController {
     /// The screen the owner is facing (wherever the nose is currently resting), or the main screen.
     /// Nil when no screen is attached (a closed lid with no display): the prompt is skipped and shows on the next change.
     private func targetScreen() -> NSScreen? {
-        if let frame = ctx.state.targetFrame, let screen = ScreenGeometry.screen(containing: CGPoint(x: frame.midX, y: frame.midY)) {
+        if let frame = ctx.targetFrame, let screen = ScreenGeometry.screen(containing: CGPoint(x: frame.midX, y: frame.midY)) {
             return screen
         }
         return NSScreen.main ?? NSScreen.screens.first

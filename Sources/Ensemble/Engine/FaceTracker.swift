@@ -121,7 +121,9 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
             gate.setOpen(true)
             onReady?(m["delegate"] as? String ?? "?")
         } else if let t = (m["t"] as? NSNumber)?.doubleValue {
-            gate.leave()
+            if let g = gate.leave(), EnsembleTrace.enabled {
+                EnsembleTrace.write(t, "face gate held \(Int((g.held * 1000).rounded())) ms, frames skipped \(g.skipped)")
+            }
             if let message = m["frameError"] as? String {
                 consecutiveFrameErrors += 1
                 onDiagnostic?("frame error: \(message)")

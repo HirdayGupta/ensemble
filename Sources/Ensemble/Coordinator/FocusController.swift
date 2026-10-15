@@ -189,9 +189,19 @@ final class FocusController {
     }
 
     private func claudeInFront(at p: CGPoint, t: TimeInterval) -> Bool {
-        if let c = topOwner, t - c.t < 0.15, hypot(c.at.x - p.x, c.at.y - p.y) < 40 { return c.pid == ctx.bridge.claudePID }
+        if let c = topOwner, t - c.t < 0.15, hypot(c.at.x - p.x, c.at.y - p.y) < 40 { return c.pid == claudePID(at: t) }
         let pid = ScreenFacts.topWindowOwner(at: p)
         topOwner = (p, t, pid)
-        return pid != nil && pid == ctx.bridge.claudePID
+        return pid != nil && pid == claudePID(at: t)
+    }
+
+    /// Claude's process id, looked up at most once a second: the lookup lists running applications, and this is
+    /// asked on every head reading.
+    private var claudePIDCache: (pid: pid_t?, t: TimeInterval)?
+    private func claudePID(at t: TimeInterval) -> pid_t? {
+        if let c = claudePIDCache, t - c.t >= 0, t - c.t < 1 { return c.pid }
+        let pid = ctx.bridge.claudePID
+        claudePIDCache = (pid, t)
+        return pid
     }
 }

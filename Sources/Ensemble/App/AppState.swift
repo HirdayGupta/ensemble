@@ -40,8 +40,6 @@ struct ScreenChoice: Identifiable, Hashable {
 final class AppState: ObservableObject {
     @Published var status: AppStatus = .off
     @Published var lastRefusal: String?
-    @Published var targetFrame: CGRect?
-    @Published var nosePoint: CGPoint?
     @Published var listening = false
     @Published var muted = false
     @Published var fps = 0

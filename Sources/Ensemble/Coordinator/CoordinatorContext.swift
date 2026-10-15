@@ -19,6 +19,11 @@ final class CoordinatorContext {
     lazy var setup = SetupController(ctx: self)
 
     var latestHead: HeadObservation?
+    /// Where the nose dot is drawn and the highlighted pane, global top-left. They change on every head reading, so
+    /// they live here, not in the published `AppState`: there they re-rendered Settings and the menu 30 times a second.
+    /// The overlay gets them through `OverlayController.update`.
+    var nosePoint: CGPoint?
+    var targetFrame: CGRect?
     /// Whether the person is speaking, from the level meter; never active while the meter is not running.
     var speech = SpeechLock()
     var sessions: [ClaudeSession] = []

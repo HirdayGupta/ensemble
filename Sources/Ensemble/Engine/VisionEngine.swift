@@ -31,6 +31,14 @@ final class VisionEngine {
     private let camera = CameraSession()
     private let face = FaceTracker()
     private let analyzer = FrameAnalyzer()
+    /// Hand pose runs here, never on the camera queue. On the camera queue it held the queue for its whole run, and
+    /// with late frames discarded (`CameraSession`) every frame that arrived meanwhile was dropped: fewer head
+    /// readings than the camera's 30 a second, and a dot that stepped unevenly.
+    private let handQueue = DispatchQueue(label: "ensemble.hand", qos: .userInitiated)
+    /// One hand frame at a time: a frame that arrives while one is analysed skips hand pose (face and light still run).
+    private let handBusy = OSAllocatedUnfairLock(initialState: false)
+    /// The latest hand result, for the planner, which only the camera queue touches; taken at the next frame.
+    private let handNote = OSAllocatedUnfairLock<(present: Bool, t: TimeInterval)?>(initialState: nil)
     /// Owned by the camera queue. Decides which analyses run on each frame.
     nonisolated(unsafe) private var planner = FrameRatePlanner()
     private struct RateHints { var forceFull = false; var lastFaceSeenAt: TimeInterval? }
@@ -206,11 +214,13 @@ final class VisionEngine {
         lastFrameAt = t
         let mine = generation
 
+        if let note = handNote.withLock({ n -> (present: Bool, t: TimeInterval)? in defer { n = nil }; return n }) {
+            planner.noteHand(present: note.present, at: note.t)
+        }
         let hint = hints.withLock { $0 }
         let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt)
 
-        // The face frame goes out before hand pose runs: the nose dot waits on the face tracker, and hand pose
-        // (the longest step here) would otherwise delay every head reading by its own duration.
+        // The face frame goes out first: the nose dot waits on the face tracker.
         if plan.runFace, face.gate.tryEnter(now: t) {
             if let jpeg = analyzer.jpeg(from: pixels) {
                 DispatchQueue.main.async { [weak self] in
@@ -224,12 +234,7 @@ final class VisionEngine {
             }
         }
 
-        var hand: HandObservation?
-        if plan.runHand {
-            let h = analyzer.hand(from: buffer, at: t)
-            planner.noteHand(present: h.present, at: t)
-            hand = h
-        }
+        if plan.runHand { analyzeHand(buffer, at: t, generation: mine) }
         let light = plan.runLight ? analyzer.light(from: pixels, at: t) : nil
 
         if fpsWindowStart == 0 { fpsWindowStart = t }
@@ -242,16 +247,48 @@ final class VisionEngine {
         }
         let label = cameraLabel
         let id = cameraID
-        if hand == nil, light == nil, fps == nil { return }
+        if light == nil, fps == nil { return }
 
         // Captured by value: older Swift compilers (6.0, 6.1) reject a captured `var` in this concurrently-executing closure.
-        DispatchQueue.main.async { [weak self, hand, light, fps] in
+        DispatchQueue.main.async { [weak self, light, fps] in
             MainActor.assumeIsolated {
                 guard let self, self.isRunning, self.generation == mine else { return }
-                if let hand { self.onHand?(hand) }
                 if let light { self.onLight?(light) }
                 if let fps { self.onStatus?(.running(fps: fps, camera: label, cameraID: id)) }
             }
         }
     }
+
+    /// Hand pose for one frame on its own queue, latest frame only: while one runs, others skip it. The result
+    /// reaches the main actor only if the run that sent the frame is still the current one.
+    nonisolated private func analyzeHand(_ buffer: CMSampleBuffer, at t: TimeInterval, generation mine: Int) {
+        let free = handBusy.withLock { busy -> Bool in
+            if busy { return false }
+            busy = true
+            return true
+        }
+        guard free else {
+            EnsembleTrace.write(t, "hand frame skipped: the previous one is still being analysed")
+            return
+        }
+        let frame = HandFrame(buffer: buffer)
+        handQueue.async { [weak self] in
+            guard let self else { return }
+            let started = CACurrentMediaTime()
+            let hand = self.analyzer.hand(from: frame.buffer, at: t)
+            self.handNote.withLock { $0 = (hand.present, t) }
+            self.handBusy.withLock { $0 = false }
+            EnsembleTrace.write(t, "hand pose took \(Int(((CACurrentMediaTime() - started) * 1000).rounded())) ms")
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning, self.generation == mine else { return }
+                    self.onHand?(hand)
+                }
+            }
+        }
+    }
 }
+
+/// A camera frame handed to the hand queue. The capture output never writes to a delivered buffer, and after the
+/// hand-off only the hand queue reads it, so sharing it is safe though `CMSampleBuffer` is not marked `Sendable`.
+private struct HandFrame: @unchecked Sendable { let buffer: CMSampleBuffer }

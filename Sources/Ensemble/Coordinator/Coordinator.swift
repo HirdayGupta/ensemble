@@ -80,7 +80,9 @@ final class Coordinator: AppCoordinating {
 
         ctx.pointer.correctsForPosition = settings.correctForPosition
         ctx.pointer.screenSizeProvider = { ScreenGeometry.physicalSizeCm(ofScreenID: $0) }
-        if let data = settings.calibration { ctx.pointer.calibration = data }
+        // The saved profile of the camera used last points from the first reading; the old single calibration is the
+        // fallback for a setup saved before profiles.
+        if !ctx.setup.restoreAtLaunch(), let data = settings.calibration { ctx.pointer.calibration = data }
         ctx.setup.startFullCalibration = { [weak self] in self?.calibrate() }
         ctx.setup.runPlan = { [weak self] plan in self?.runCalibration(plan) }
         gestures.mapping = settings.mapping
@@ -460,7 +462,7 @@ final class Coordinator: AppCoordinating {
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
     private func dropStaleReadings() {
         guard let head = ctx.latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
-        guard focus.hasTargetOrCandidate || dot.hasDot || dot.hasEdgeWarning || state.nosePoint != nil else { return }
+        guard focus.hasTargetOrCandidate || dot.hasDot || dot.hasEdgeWarning || ctx.nosePoint != nil else { return }
         EnsembleLog.write("head readings stopped; clearing the highlight")
         focus.forgetTargetAndCandidate(); dot.clear()
         dot.place(target: nil)
@@ -621,7 +623,7 @@ final class Coordinator: AppCoordinating {
         let acting = ctx.listening ?? (gestures.progress?.action == .send ? send.lastSpoken?.session : nil) ?? focus.target
         ctx.overlay.setSession(name: acting.map(ctx.name(of:)), switching: focus.switching())
         ctx.overlay.setEdge(dot.overlayEdge(focus: focus))
-        ctx.overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
+        ctx.overlay.update(target: ctx.targetFrame, nose: ctx.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()
     }
