@@ -91,8 +91,15 @@ final class AppEnvironment {
             guard let self else { return true }
             return self.state.listening || self.state.calibrating || self.tourWindow.isShown || self.coordinator.isBusy
         }
+        updates.notice = { [weak self] title, body in self?.overlay.showBanner(title: title, body: body, style: .info) }
         guard !started else { return }
         started = true
+        if let version = UpdateController.justUpdatedTo {
+            // After the overlay's panels exist, so the island can show it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.overlay.showBanner(title: "Updated to \(version)", body: "Ensemble is running the new version.", style: .info)
+            }
+        }
 
         notifier.overlay = overlay
         notifier.settings = settings

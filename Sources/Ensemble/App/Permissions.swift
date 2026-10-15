@@ -53,17 +53,17 @@ enum Permissions {
     /// exit (up to 10 s) before reopening: a copy started earlier would see this one alive and exit at once,
     /// leaving nothing running. With open-at-login on, launchd is asked to start its job; otherwise the bundle is opened.
     static func relaunch() {
-        let path = Bundle.main.bundlePath
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        let script = """
-        i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
-        if [ "$3" = 1 ]; then /bin/launchctl kickstart "gui/$4/$5" 2>/dev/null && exit 0; fi
-        /usr/bin/open "$2"
-        """
-        task.arguments = ["-c", script, "sh", String(getpid()), path, LoginAgent.isEnabled ? "1" : "0", String(getuid()), LoginAgent.label]
-        try? task.run()
+        reopenAfterExit()
         NSApp.terminate(nil)
+    }
+
+    /// Starts the detached shell that opens Ensemble again once this process has exited (see `relaunch`). Also
+    /// used by the copy Sparkle opens after an update to hand itself to the login agent (`UpdateController.afterLaunch`).
+    static func reopenAfterExit() {
+        DetachedShell.run("""
+        i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+        reopen
+        """)
     }
 
     /// A grant that shows on but does not work belongs to an earlier signature of the app (gotcha 1). Clearing
