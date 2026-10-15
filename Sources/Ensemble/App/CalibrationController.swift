@@ -62,7 +62,6 @@ struct CalibrationFeed {
 final class CalibrationController {
     static let shared = CalibrationController()
 
-    private let inset = 0.08
     private let introSeconds = 2.5
     private let cameraWaitSeconds = 30.0
 
@@ -84,7 +83,10 @@ final class CalibrationController {
     /// `clickedAt` (`CACurrentMediaTime`) lets the log say how long the window and the first face reading took.
     /// `verifyAim: false` is for the demo stub, whose fake head never moves.
     /// `note` is a line for the intro naming the position this run is for.
-    func run(screens: [NSScreen] = NSScreen.screens, note: String? = nil, feed: CalibrationFeed, clickedAt: TimeInterval = CACurrentMediaTime(),
+    /// `firstDotFrom` is a screen already calibrated and its centre sample: a screen with no earlier screen in this run
+    /// needs a turn away from it for its first dot, not only stillness.
+    func run(screens: [NSScreen] = NSScreen.screens, note: String? = nil, firstDotFrom: (frame: CGRect, centre: CalibrationSample)? = nil,
+             feed: CalibrationFeed, clickedAt: TimeInterval = CACurrentMediaTime(),
              verifyAim: Bool = true, completion: @escaping ([ScreenCalibrationResult]) -> Void) {
         guard task == nil, !screens.isEmpty else { completion([]); return }
         self.completion = completion
@@ -104,10 +106,15 @@ final class CalibrationController {
         prepareModel(screens: screens)
         model.note = note
         presentAll(screens: screens)
-        EnsembleLog.write(String(format: "calibration window up %.0f ms after the click (%d screens)", (CACurrentMediaTime() - clickedAt) * 1000, screens.count))
+        let visits = screens.map { s -> String in
+            let f = ScreenGeometry.topLeftFrame(of: s)
+            return "\(ScreenGeometry.stableID(of: s) ?? "?")@\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width))x\(Int(f.height))"
+        }
+        EnsembleLog.write(String(format: "calibration window up %.0f ms after the click (%d screens)", (CACurrentMediaTime() - clickedAt) * 1000, screens.count)
+                          + ": \(visits), first dot \(firstDotFrom == nil ? "on stillness" : "needs a turn from a calibrated screen")")
         task = Task { [weak self] in
             guard let self else { return }
-            let results = await self.collect(screens: screens, feed: feed, clickedAt: clickedAt, verifyAim: verifyAim)
+            let results = await self.collect(screens: screens, firstDotFrom: firstDotFrom, feed: feed, clickedAt: clickedAt, verifyAim: verifyAim)
             self.finish(results)
         }
     }
@@ -157,7 +164,8 @@ final class CalibrationController {
         model.faceMissing = false
     }
 
-    private func collect(screens: [NSScreen], feed: CalibrationFeed, clickedAt: TimeInterval, verifyAim: Bool) async -> [ScreenCalibrationResult] {
+    private func collect(screens: [NSScreen], firstDotFrom: (frame: CGRect, centre: CalibrationSample)?, feed: CalibrationFeed,
+                         clickedAt: TimeInterval, verifyAim: Bool) async -> [ScreenCalibrationResult] {
         // The intro shows at once and the camera path catches up behind it; the first dot waits for a face reading.
         let introStart = CACurrentMediaTime()
         var sawFace = false
@@ -193,9 +201,9 @@ final class CalibrationController {
             model.dotVisible = false
             model.step = ScreenLayout.stepTitle(index: index, count: screens.count, name: screen.localizedName, facing: index > 0)
 
-            let spots = targets(in: frame)
+            let spots = CalibrationTargets.points(in: frame, topReserve: Self.topReserve(of: screen))
             var samples: [CalibrationSample] = []
-            let previousScreen = results.last.flatMap { last in last.samples.first.map { (frame: last.frame, centre: $0) } }
+            let previousScreen = results.last.flatMap { last in last.samples.first.map { (frame: last.frame, centre: $0) } } ?? firstDotFrom
             for (spotIndex, spot) in spots.enumerated() {
                 model.dot = CGPoint(x: spot.x - frame.minX, y: spot.y - frame.minY)
                 model.dotVisible = true
@@ -292,17 +300,10 @@ final class CalibrationController {
         return HeadPosition(x: ps.map(\.x).reduce(0, +) / n, y: ps.map(\.y).reduce(0, +) / n, z: ps.map(\.z).reduce(0, +) / n)
     }
 
-    /// Centre, left, right, top, bottom, in global top-left coordinates.
-    private func targets(in frame: CGRect) -> [CGPoint] {
-        let dx = frame.width * inset
-        let dy = frame.height * inset
-        return [
-            CGPoint(x: frame.midX, y: frame.midY),
-            CGPoint(x: frame.minX + dx, y: frame.midY),
-            CGPoint(x: frame.maxX - dx, y: frame.midY),
-            CGPoint(x: frame.midX, y: frame.minY + dy),
-            CGPoint(x: frame.midX, y: frame.maxY - dy),
-        ]
+    /// The top band a dot must clear: the menu bar (hidden under the calibration window, but where a top session's
+    /// edge sits) or the notch's safe area, whichever is taller.
+    private static func topReserve(of screen: NSScreen) -> CGFloat {
+        max(screen.frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top, 0)
     }
 
     /// One window per connected screen, all up at once and fading in; the first is key so Esc reaches it.

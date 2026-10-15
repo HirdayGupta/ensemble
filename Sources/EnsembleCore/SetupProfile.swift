@@ -147,6 +147,43 @@ public struct CameraProfile: Codable, Equatable, Sendable {
         }
     }
 
+    /// The screen, among `validScreenIDs` in spot `spotID` and other than `screenID`, whose calibrated angle range
+    /// holds at least four in five of `samples`. From one spot two screens never share an angle range, so such samples
+    /// were taken looking at that other screen; stored, they would leave the pointer unable to tell the two apart
+    /// (2026-10-15: a one-screen recalibration of the left screen repeated the main screen's angles point for point,
+    /// and the nose never reached the left screen again).
+    public func screenRepeated(by samples: [CalibrationSample], forScreen screenID: String, inSpot spotID: String,
+                               validScreenIDs: Set<String>) -> String? {
+        guard !samples.isEmpty, let spot = spots.first(where: { $0.id == spotID }) else { return nil }
+        for other in spot.screens where other.screenID != screenID && validScreenIDs.contains(other.screenID) && !other.samples.isEmpty {
+            let ys = other.samples.map(\.yaw), ps = other.samples.map(\.pitch)
+            guard let y0 = ys.min(), let y1 = ys.max(), let p0 = ps.min(), let p1 = ps.max() else { continue }
+            let inside = samples.filter { (y0...y1).contains($0.yaw) && (p0...p1).contains($0.pitch) }.count
+            if inside * 5 >= samples.count * 4 { return other.screenID }
+        }
+        return nil
+    }
+
+    /// For a run over only some screens: the calibrated screen in spot `spotID` (among `validScreenIDs`, not in
+    /// `excluding`) whose centre is nearest `frame`, with its sample nearest its own centre. The first dot of such a
+    /// run then needs a turn away from where that screen's centre was looked at, instead of only stillness, which
+    /// captured the head still resting on the screen the Recalibrate click came from.
+    public func neighbour(of frame: CGRect, inSpot spotID: String, validScreenIDs: Set<String>,
+                          excluding: Set<String>) -> (frame: CGRect, centre: CalibrationSample)? {
+        guard let spot = spots.first(where: { $0.id == spotID }) else { return nil }
+        func gap(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
+        let candidates = spot.screens.filter {
+            validScreenIDs.contains($0.screenID) && !excluding.contains($0.screenID) && !$0.samples.isEmpty
+        }
+        guard let nearest = candidates.min(by: {
+            gap(CGPoint(x: $0.frame.midX, y: $0.frame.midY), centre) < gap(CGPoint(x: $1.frame.midX, y: $1.frame.midY), centre)
+        }) else { return nil }
+        let own = CGPoint(x: nearest.frame.midX, y: nearest.frame.midY)
+        guard let sample = nearest.samples.min(by: { gap($0.target, own) < gap($1.target, own) }) else { return nil }
+        return (nearest.frame, sample)
+    }
+
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey { case cameraID, cameraName, spots, screens, legacyModel }
