@@ -20,8 +20,10 @@ public struct HandObservation: Sendable {
     public var palmCenter: CGPoint?       // normalized image coords, origin bottom-left, 0...1
     /// Thumb tip to index tip distance in palm lengths (wrist to middle knuckle); nil when either tip is unseen.
     public var pinch: Double?
-    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil) {
-        self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter; self.pinch = pinch
+    /// The 21 joint coordinates, for the tour's skeleton inset. Points only, never pixels.
+    public var skeleton: HandSkeletonFrame?
+    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil, skeleton: HandSkeletonFrame? = nil) {
+        self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter; self.pinch = pinch; self.skeleton = skeleton
     }
 }
 

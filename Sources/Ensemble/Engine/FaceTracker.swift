@@ -169,15 +169,6 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
 }
 
-/// WKUserContentController retains its handlers; this keeps the tracker from being kept alive by its own web view.
-private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
-    weak var target: WKScriptMessageHandler?
-    init(_ target: WKScriptMessageHandler) { self.target = target }
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        target?.userContentController(controller, didReceive: message)
-    }
-}
-
 private final class OffscreenWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     override var canBecomeKey: Bool { false }

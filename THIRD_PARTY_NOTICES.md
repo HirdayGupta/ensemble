@@ -6,6 +6,8 @@ Ensemble bundles the following third-party code and models. Each keeps its own l
 |---|---|---|---|
 | MediaPipe Tasks Vision (JavaScript runtime and WebAssembly) | `Sources/Ensemble/Resources/web/vision_bundle.mjs`, `Sources/Ensemble/Resources/web/wasm/` | Google | Apache-2.0 |
 | MediaPipe Face Landmarker model (`face_landmarker.task`) | `Sources/Ensemble/Resources/web/face_landmarker.task` | Google | Apache-2.0 |
+| three.js r128 (3D scene library, with its glTF loader and IK solver) | `Sources/Ensemble/Resources/web/tour/three.min.js`, `GLTFLoader.js`, `CCDIKSolver.js` | three.js authors | MIT |
+| WebXR generic hand model (`hand.glb`, from `@webxr-input-profiles/assets` 1.0.19) | `Sources/Ensemble/Resources/web/tour/hand.glb` | Amazon | MIT |
 | Sleight (hand-pose classifier rules, adapted) | `Sources/EnsembleCore/Vendor/Sleight/` | Florian Riquelme | MIT |
 | claude-dictation-hotkey (approach to driving Claude's dictation) | `Sources/EnsembleCore/Vendor/LICENSE-claude-dictation-hotkey` | Rene Banuelos | MIT |
 | Sparkle 2.10.0 (update framework) | `Sparkle.framework` inside the app, fetched by Swift Package Manager | Sparkle Project and the contributors listed below | MIT, plus the bundled-code licenses listed below |
@@ -25,6 +27,62 @@ The runtime in `vision_bundle.mjs` and `wasm/` is built from the MediaPipe proje
 - Blendshape V2 (not shipped): <https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf>
 
 Both model cards state "LICENSED UNDER Apache License, Version 2.0" (read 2026-10-14 from the BlazeFace short-range card and the Face Mesh V2 card linked above). The license text is at <https://www.apache.org/licenses/LICENSE-2.0>.
+
+## three.js (MIT)
+
+The tour's 3D scenes (`Sources/Ensemble/Resources/web/tour/scene3d.js`, Ensemble's own) are drawn with three.js r128, <https://threejs.org>: `three.min.js`, the glTF loader `GLTFLoader.js` and the inverse-kinematics solver `CCDIKSolver.js` are the unmodified r128 release files, MIT licensed, copyright 2010-2021 three.js authors. The packaged app stores the larger ones LZMA-compressed and expands them byte for byte. Nothing is fetched at run time: the page can reach only the app's own `ensemble-asset` scheme.
+
+```
+The MIT License
+
+Copyright © 2010-2021 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## WebXR generic hand model (MIT)
+
+`Sources/Ensemble/Resources/web/tour/hand.glb` is the right-hand model of the generic-hand profile in the npm package `@webxr-input-profiles/assets` 1.0.19 (project: github.com/immersive-web/webxr-input-profiles), copyright 2019 Amazon, MIT licensed. The file is the package's `right.glb`, renamed and unmodified:
+
+```
+MIT License
+
+Copyright (c) 2019 Amazon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ## Sleight (MIT)
 

@@ -292,6 +292,7 @@ final class Coordinator: AppCoordinating {
         dictation.heartbeat()
         guard !state.calibrating else { return }
         let intents = gestures.push(hand)
+        practiceSink?.tourPractice(hand: hand)
         if let sink = practiceSink {
             for intent in intents { sink.tourPractice(intent: intent) }
             return
