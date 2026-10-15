@@ -280,7 +280,7 @@ final class VisionEngine {
     }
 
     /// Sends the frame to the face tracker, unless the picture has been still (`StillFace`): then the last reading is
-    /// handed on again instead, and the JPEG encode, the page's decode and its landmark pass are all skipped.
+    /// handed on again instead, and the frame scaling, the page's landmark pass and its GPU work are all skipped.
     nonisolated private func submitFace(_ pixels: CVPixelBuffer, at t: TimeInterval, generation mine: Int, forceFull: Bool,
                                         lastReadingAt: TimeInterval?) {
         if stillRun != mine { stillRun = mine; still.reset(); stillReference = nil; lastSubmittedT = -.infinity }
@@ -309,11 +309,11 @@ final class VisionEngine {
         noteStill(sent: true, at: t)
         stillReference = grid.isEmpty ? nil : grid
         lastSubmittedT = t
-        if let jpeg = analyzer.jpeg(from: pixels) {
+        if let frame = analyzer.facePixels(from: pixels) {
             DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self, self.isRunning, self.generation == mine else { self?.face.gate.leave(); return }
-                    self.face.submit(jpeg: jpeg, t: t)
+                    self.face.submit(rgba: frame.bytes, width: frame.width, height: frame.height, t: t)
                 }
             }
         } else {

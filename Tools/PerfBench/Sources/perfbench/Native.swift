@@ -31,6 +31,20 @@ func scaleToLuma(_ pb: CVPixelBuffer, w: Int, h: Int, scratch: inout [UInt8], in
     }
 }
 
+/// Scales a BGRA frame to w x h, tightly packed, as RGBA or left as BGRA, into `out` (w * h * 4 bytes). The same
+/// vImage calls as `FrameAnalyzer.facePixels` in the app.
+func scalePixels(_ pb: CVPixelBuffer, into out: UnsafeMutableRawBufferPointer, w: Int, h: Int, rgba: Bool) {
+    CVPixelBufferLockBaseAddress(pb, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+    var src = vImage_Buffer(data: CVPixelBufferGetBaseAddress(pb), height: vImagePixelCount(CVPixelBufferGetHeight(pb)),
+                            width: vImagePixelCount(CVPixelBufferGetWidth(pb)), rowBytes: CVPixelBufferGetBytesPerRow(pb))
+    var dst = vImage_Buffer(data: out.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w * 4)
+    vImageScale_ARGB8888(&src, &dst, nil, vImage_Flags(kvImageNoFlags))
+    if rgba {
+        let map: [UInt8] = [2, 1, 0, 3]
+        vImagePermuteChannels_ARGB8888(&dst, &dst, map, vImage_Flags(kvImageNoFlags))
+    }
+}
+
 func visionPerform(_ pb: CVPixelBuffer, request: VNDetectHumanHandPoseRequest) -> Int {
     let handler = VNImageRequestHandler(cvPixelBuffer: pb, orientation: .up, options: [:])
     try? handler.perform([request])
