@@ -31,6 +31,8 @@ final class CoordinatorContext {
     var listening: ClaudeSession?
     /// A start, stop or send is in flight.
     var busy = false
+    /// Your hands are on the keyboard, mouse or trackpad (`HandsBusy`): no focus moves, highlight moves or gestures.
+    var handsBusy = false
     /// Dictations Claude runs without Ensemble, as the session refresh sees them.
     var claudeDictations = ForeignDictations()
     /// Moves on whenever Ensemble starts, takes over or stops a dictation, so a refresh that read the checkboxes

@@ -110,6 +110,16 @@ extension ClaudeBridge {
         return types.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
     }
 
+    /// When each kind of hardware input last happened, on the `CACurrentMediaTime` clock, for `HandsBusy`. The HID
+    /// state never holds the scrolls and keys Ensemble posts itself.
+    static func lastHardwareInput(now: TimeInterval) -> (key: TimeInterval, click: TimeInterval, scroll: TimeInterval, move: TimeInterval) {
+        func at(_ types: [CGEventType]) -> TimeInterval {
+            now - (types.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity)
+        }
+        return (at([.keyDown]), at([.leftMouseDown, .rightMouseDown, .otherMouseDown]), at([.scrollWheel]),
+                at([.mouseMoved, .leftMouseDragged, .rightMouseDragged]))
+    }
+
     static func secondsSinceTypingOrClick() -> Double {
         let types: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown]
         return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity

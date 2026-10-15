@@ -81,7 +81,7 @@ final class StatusIconModel: ObservableObject {
     static func look(_ status: AppStatus) -> Look {
         switch status {
         case .off, .claudeNotRunning: return .off
-        case .watching, .listening, .claudeNotOnScreen: return .on
+        case .watching, .pausedForInput, .listening, .claudeNotOnScreen: return .on
         case .cameraCovered, .needsCalibration, .needsPermission, .error: return .attention
         }
     }

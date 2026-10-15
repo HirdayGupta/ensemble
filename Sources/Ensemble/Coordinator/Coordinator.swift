@@ -19,6 +19,10 @@ final class Coordinator: AppCoordinating {
     /// Return while dictating: the first press stops, a second sends. See `handleKey`.
     private let keyTap = ReturnKeyTap()
     private var returnKeys = ReturnKeys()
+    /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
+    private var handsBusy = HandsBusy()
+    /// The last key the Return watch held back from Claude: your command to Ensemble, not typing.
+    private var lastHeldBackKeyAt: TimeInterval = -.infinity
     private var state: AppState { ctx.state }
     private var settings: SettingsStore { ctx.settings }
     private var gestures: GestureMachine { ctx.gestures }
@@ -362,11 +366,18 @@ final class Coordinator: AppCoordinating {
         logHeadStats(head)
         guard !state.calibrating else { return }
         if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head), ctx.setup.isUsable(p) {
-            // A pinch or scroll in progress holds everything still: the hand is in front of the face.
             state.set(\.spotInUse, ctx.setup.spotInUseID)
-            let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
-            dot.follow(nose: p, at: head.t, onSession: under != nil)
-            EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")
+            if ctx.handsBusy {
+                // Hands on the keyboard or mouse: focus and the highlight stay where they are. The faded dot keeps
+                // up with the nose so it comes back where you look; while dictating the edge warnings hold still.
+                if ctx.listening == nil { dot.follow(nose: p, at: head.t, onSession: false) }
+                EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) paused faces=\(head.faceCount)")
+            } else {
+                // A pinch or scroll in progress holds everything still: the hand is in front of the face.
+                let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
+                dot.follow(nose: p, at: head.t, onSession: under != nil)
+                EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")
+            }
         } else if head.faceCount != 1 && head.t - ctx.lastOneFaceT <= 1.5 {
             // A hand in front of the face hides it or reads as a second face for a moment: keep the last target and dot.
         } else {
@@ -398,7 +409,7 @@ final class Coordinator: AppCoordinating {
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
-        let progress = ctx.cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress
+        let progress = ctx.cover.covered || !settings.enabled || !onClaude || ctx.handsBusy ? nil : gestures.progress
         ctx.gestureShowing = progress != nil
         ctx.overlay.setGesture(progress)
         dot.place(target: focus.target)
@@ -419,13 +430,13 @@ final class Coordinator: AppCoordinating {
 
     private func tick() {
         dropStaleReadings()
+        updateHandsBusy(now: CACurrentMediaTime())
         // Away: a deferred focus move must not land behind the lock screen.
-        if !awayState.isAway { focus.tick() }
+        if !awayState.isAway, !ctx.handsBusy { focus.tick() }
         for intent in gestures.tick(now: CACurrentMediaTime()) {
             if let sink = practiceSink { sink.tourPractice(intent: intent) } else if !tourOpen { apply(intent) }
         }
         engine.setForceFullRate(needsFullRate)
-        ctx.overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         scroll.tick()
         let now = CACurrentMediaTime()
         if now - lastAwayCheck >= 0.5 {
@@ -460,6 +471,38 @@ final class Coordinator: AppCoordinating {
             self.dot.place(target: self.focus.target)
             self.pushOverlay()
         }
+    }
+
+    /// Any key, click, scroll or pointer movement of yours pauses Ensemble until the hardware has rested for the
+    /// quiet time: no focus moves, no highlight moves, no gesture acted on, the dot and highlight faded out. The camera
+    /// and tracking keep running so resuming is instant, and the dictation safety checks never pause. Keys the Return
+    /// watch held back, keys Ensemble posts and the pointer moves of its own scrolls are not yours.
+    private func updateHandsBusy(now: TimeInterval) {
+        handsBusy.quiet = settings.pauseAfterInputSeconds
+        let input = ClaudeBridge.lastHardwareInput(now: now)
+        let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
+                                    pointer: NSEvent.mouseLocation,
+                                    ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
+                                    ownPointerAt: ClaudeBridge.ownPointerMove.withLock { $0 })
+        ctx.overlay.setHandsOnInput(busy)
+        guard busy != ctx.handsBusy else { return }
+        ctx.handsBusy = busy
+        EnsembleLog.write(busy ? "paused: keyboard or mouse in use" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
+        // A gesture half made on either side of the pause never completes across it; a running dictation keeps its
+        // place in the machine, so a double pinch afterwards still stops it.
+        let talking = gestures.talking
+        gestures.reset()
+        if talking { gestures.beginTalkExternally() }
+        if busy {
+            focus.clearDeferred()
+            scroll.cancel()
+            if send.earlyArmed { send.dropEarly() }
+            if send.afterStop, !send.returnSendPending { send.afterStop = false }
+            ctx.gestureShowing = false
+            ctx.overlay.setGesture(nil)
+        }
+        health.update()
+        pushOverlay()
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
@@ -521,6 +564,16 @@ final class Coordinator: AppCoordinating {
         case .scroll, .dragScroll: break
         default: EnsembleLog.write("gesture: \(intent)")
         }
+        if ctx.handsBusy {
+            // Paused: nothing a gesture asks for is done, except stopping a dictation, which only ever turns the
+            // microphone off. The machine forgets a start it announced, so the next double pinch starts again.
+            switch intent {
+            case .talkBegan: gestures.abortTalk()
+            case .talkEnded(let reason): if ctx.listening != nil { dictation.end(reason: reason.rawValue) }
+            default: break
+            }
+            return
+        }
         if intent == .talkBegan || intent == .sendRequested { ctx.overlay.clearBanner() }
         switch intent {
         case .talkBegan: dictation.begin()
@@ -554,6 +607,8 @@ final class Coordinator: AppCoordinating {
         guard practiceSink == nil, !tourOpen else { return }
         ctx.headphoneUntil = CACurrentMediaTime() + 5
         ctx.overlay.clearBanner()
+        // Paused for the keyboard or mouse: only a press that stops a running dictation is acted on.
+        if ctx.handsBusy, !(action == .press && ctx.listening != nil) { ctx.refuse("Paused while you type or use the mouse"); return }
         switch action {
         case .press:
             guard !ctx.busy else { ctx.refuse("A step is still in flight"); return }
@@ -612,6 +667,7 @@ final class Coordinator: AppCoordinating {
                                         claudeInFront: ctx.bridge.claudeIsFrontmost(),
                                         dictating: ctx.listening != nil || claudeDictatingHere,
                                         returnSendPending: send.returnSendPending, now: now)
+        if decision != .pass { lastHeldBackKeyAt = now }
         switch decision {
         case .pass:
             return false

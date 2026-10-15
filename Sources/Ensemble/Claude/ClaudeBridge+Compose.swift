@@ -2,6 +2,8 @@ import ApplicationServices
 import EnsembleCore
 import CoreGraphics
 import Foundation
+import os
+import QuartzCore
 
 extension ClaudeBridge {
     func draftText(_ s: ClaudeSession) async -> String? {
@@ -84,6 +86,10 @@ extension ClaudeBridge {
 
     // MARK: Scrolling
 
+    /// When Ensemble last moved the pointer for its own scroll (posted scrolls move it, and it is put back), so that
+    /// movement is never read as yours. Written from the scroll queue and read on the main thread.
+    static let ownPointerMove = OSAllocatedUnfairLock<TimeInterval>(initialState: -.infinity)
+
     /// Positive dy scrolls down the transcript. Fire and forget; `lastScrollMethod` reports what was used.
     /// Scrolls whatever is under a screen point right away, without touching the accessibility queue: posts a
     /// pixel scroll through the session event stream (the only route Claude honours) and restores the pointer.
@@ -93,6 +99,7 @@ extension ClaudeBridge {
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.location = point
         let saved = CGEvent(source: nil)?.location
+        Self.ownPointerMove.withLock { $0 = CACurrentMediaTime() }
         event.post(tap: .cgSessionEventTap)
         if let saved { CGWarpMouseCursorPosition(saved) }
     }
@@ -128,6 +135,7 @@ extension ClaudeBridge {
         // pointer to that location, so it is put straight back: measured live, the page still scrolls.
         event.location = CGPoint(x: s.frame.midX, y: s.frame.midY)
         let saved = CGEvent(source: nil)?.location
+        Self.ownPointerMove.withLock { $0 = CACurrentMediaTime() }
         event.post(tap: .cgSessionEventTap)
         if let saved { CGWarpMouseCursorPosition(saved) }
         setScrollMethod(.wheelEvent)
