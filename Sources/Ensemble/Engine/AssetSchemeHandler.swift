@@ -15,6 +15,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
         case "js", "mjs": return "text/javascript"
         case "wasm": return "application/wasm"
         case "json": return "application/json"
+        case "glb": return "model/gltf-binary"
         default: return "application/octet-stream"
         }
     }
