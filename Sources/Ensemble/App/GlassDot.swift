@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 /// The nose dot as its own tiny borderless window: a glass bead you can see through. AppKit's Liquid Glass view
 /// only samples its own window, so over other apps it renders as an opaque dark disc (measured 2026-10-14);
@@ -38,16 +39,33 @@ final class GlassDot {
     }()
     /// The opacity the dot is heading to; an animation runs only when this changes.
     private var target: CGFloat = 0
+    /// Head readings arrive about 15 times a second (FrameRatePlanner.faceInterval); jumping the window to each one
+    /// reads as a 15 fps dot. The window instead glides toward the latest reading on every screen refresh.
+    private var goal: CGPoint?
+    private var drawn: CGPoint?
+    private var lastTick: CFTimeInterval?
+    private var link: CADisplayLink?
+    private lazy var ticker = DisplayTicker { [weak self] in self?.tick($0) }
+    /// Time constant of the glide: about one head reading, so the dot never trails more than a frame behind.
+    private let glide: Double = 0.05
 
     /// Shows the dot centred on a global top-left point, or hides it when `point` is nil. `dimmed` (hands on the
     /// keyboard or trackpad) fades it away and back over 0.7 s.
     func show(at point: CGPoint?, dimmed: Bool) {
         guard let point else {
             target = 0
+            goal = nil; drawn = nil
+            stopLink()
             if panel.isVisible { panel.alphaValue = 0; panel.orderOut(nil) }
             return
         }
-        panel.setFrameOrigin(NSPoint(x: point.x - size / 2, y: ScreenGeometry.primaryHeight - point.y - size / 2))
+        goal = point
+        if drawn == nil || !panel.isVisible {
+            drawn = point
+            place(point)
+        } else {
+            startLink()
+        }
         if !panel.isVisible { panel.orderFrontRegardless() }
         let next: CGFloat = dimmed ? 0 : 1
         guard next != target else { return }
@@ -58,6 +76,47 @@ final class GlassDot {
             panel.animator().alphaValue = next
         }
     }
+
+    private func place(_ p: CGPoint) {
+        panel.setFrameOrigin(NSPoint(x: p.x - size / 2, y: ScreenGeometry.primaryHeight - p.y - size / 2))
+    }
+
+    private func tick(_ now: CFTimeInterval) {
+        guard let goal, let from = drawn else { stopLink(); return }
+        let dt = min(max(now - (lastTick ?? now - 1.0 / 60), 0), 0.1)
+        lastTick = now
+        let k = 1 - exp(-dt / glide)
+        let next = CGPoint(x: from.x + (goal.x - from.x) * k, y: from.y + (goal.y - from.y) * k)
+        if hypot(goal.x - next.x, goal.y - next.y) < 0.25 {
+            drawn = goal
+            place(goal)
+            stopLink()
+        } else {
+            drawn = next
+            place(next)
+        }
+    }
+
+    private func startLink() {
+        guard link == nil else { return }
+        lastTick = nil
+        let l = (panel.screen ?? NSScreen.main)?.displayLink(target: ticker, selector: #selector(DisplayTicker.fire(_:)))
+        l?.add(to: .main, forMode: .common)
+        link = l
+    }
+
+    private func stopLink() {
+        link?.invalidate()
+        link = nil
+        lastTick = nil
+    }
+}
+
+/// CADisplayLink needs an Objective-C target; this forwards each refresh to the dot.
+private final class DisplayTicker: NSObject {
+    private let onFire: (CFTimeInterval) -> Void
+    init(_ onFire: @escaping (CFTimeInterval) -> Void) { self.onFire = onFire }
+    @objc func fire(_ link: CADisplayLink) { onFire(link.targetTimestamp) }
 }
 
 /// The bead's edge: a faint fill, a light rim, and a small highlight in the upper left.
