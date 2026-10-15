@@ -19,9 +19,11 @@ struct OverlayScreenView: View {
                 // One critically damped spring family (SwiftUI's .smooth, the curve macOS uses for its own
                 // fades): it eases in from rest and settles without a visible end, no overshoot.
                 HighlightView(frame: local, listening: model.listening)
+                    // While a pane resize moves this session, the outline springs to its new frame.
+                    .animation(model.glide == nil ? nil : .smooth(duration: 0.35), value: target)
                     .opacity(model.handsOnInput && !model.listening ? 0 : 1)
                     .animation(.smooth(duration: 0.7), value: model.handsOnInput)
-                    .id(highlightKey(target))
+                    .id(model.glide ?? highlightKey(target))
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 1.008)).animation(.smooth(duration: 0.5).delay(0.06)),
                         removal: .opacity.combined(with: .scale(scale: 0.996)).animation(.smooth(duration: 0.4))))
@@ -39,7 +41,7 @@ struct OverlayScreenView: View {
         }
         .frame(width: screenFrame.width, height: screenFrame.height, alignment: .topLeading)
         // Insertions and removals only animate inside an animated change: these drive the highlight's fades.
-        .animation(.smooth(duration: 0.5), value: model.target.map(highlightKey))
+        .animation(.smooth(duration: 0.5), value: model.glide ?? model.target.map(highlightKey))
         .animation(.smooth(duration: 0.5), value: model.showHighlight)
         .animation(.smooth(duration: 0.2), value: model.listening)
         .animation(.smooth(duration: 0.3), value: model.edge.map { edgeKey($0.warning) })
@@ -53,8 +55,7 @@ struct OverlayScreenView: View {
         return model.target == nil && isPrimary
     }
 
-    /// One identity per session frame: a new frame is a new outline that fades in, never a moving one.
-    private func highlightKey(_ r: CGRect) -> String { "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))" }
+    private func highlightKey(_ r: CGRect) -> String { OverlayModel.highlightKey(r) }
 
     /// A warning for another side or another neighbour is a new warning that fades in, not a moving one.
     private func edgeKey(_ w: EdgeWarning) -> String { "\(w.side)-\(w.neighbourId ?? "none")" }

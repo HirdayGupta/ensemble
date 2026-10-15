@@ -7,14 +7,17 @@ import EnsembleCore
 /// Claude's chat column widens it to the column the same way (`autoFit`), unless Settings turns it off.
 ///
 /// A divider is given keyboard focus through Accessibility and moved with arrows, Shift and arrows, Home and End
-/// (`PaneKeys` plans which), posted through the session event tap to Claude in front. The pointer never moves.
+/// (`PaneKeys` plans which), posted through the session event tap to Claude in front. The pointer never moves. Each
+/// divider is visited once per pass and gets all its keys in one burst, so a resize lands as one move: maximize
+/// sweeps Home and End from the outer dividers inward until nothing is left to move, which leaves every other pane
+/// at Claude's minimum. The highlight goes straight to where the plan puts the session and springs there
+/// (`CoordinatorContext.resizeFrame`, `OverlayController.glide`); the frames read once the resize ends correct it.
 /// Before every key it checks that Claude is still in front with that divider holding its keyboard, that no
 /// dictation, send or Return watch is running, and that the keyboard, mouse and trackpad are untouched; otherwise
 /// nothing more is pressed. From the moment a divider is asked to take the keyboard, keys you type are held back
 /// (`ResizeKeyHold`): the resize stops, and they go out again once the keyboard is back in the message box. Afterwards
 /// the keyboard goes back to the session's message box only if a divider of the row still holds it (`ResizeKeys`),
-/// and with Claude not in front, when Claude next comes to the front. The session frames are read again during and
-/// after, so the highlight follows the pane.
+/// and with Claude not in front, when Claude next comes to the front.
 @MainActor
 final class PaneWidthController {
     private let ctx: CoordinatorContext
@@ -29,7 +32,6 @@ final class PaneWidthController {
     /// When this resize began, for the hand-on-the-keyboard-or-mouse check, and whether it has pressed any key.
     private var startedAt: TimeInterval = 0
     private var pressedAny = false
-    private var refreshInFlight = false
     /// A divider was asked to take the keyboard during this resize, and the row's dividers that were.
     private var askedDivider = false
     private var askedDividers: [AXUIElement] = []
@@ -39,14 +41,13 @@ final class PaneWidthController {
     private let keyHold = ResizeKeyHold()
     private var activationObserver: NSObjectProtocol?
 
-    /// Plan, press, read back: the second pass corrects what Claude's rounding or a lost key left.
+    /// Plan, press, read back: the second pass corrects what Claude's rounding or a lost key left. Maximize runs
+    /// up to `PaneKeys.maximizeSweeps`.
     private static let passes = 2
     /// Claude's frames show a key about 170 ms after it (measured 2026-10-15); the read-back waits this long.
     private static let settle: UInt64 = 220_000_000
     /// How long a divider may take to hold the keyboard: up to 1.6 s was measured after a burst of keys.
     private static let focusWait: TimeInterval = 2
-    /// Frames are read again after this many keys while a glide runs.
-    private static let refreshEvery = 6
 
     /// Claude's chat column, as measured reliably from a pane wide enough to show it.
     private var column = ChatColumn.Memory()
@@ -97,9 +98,9 @@ final class PaneWidthController {
         hold.reset()
         EnsembleLog.write("pane widths: \(maximize ? "maximize" : "even out") around \(place(of: target))")
         Task { @MainActor in
-            let outcome = await self.run(target: target) { widths, k, minimum, _ in
-                maximize ? PaneKeys.maximizeWidths(widths, focus: k, minimum: minimum) : PaneKeys.evenWidths(widths)
-            }
+            let outcome = await self.run(target: target, goal: maximize ? .maximize : .widths(jumps: true) { widths, _, _, _ in
+                PaneKeys.evenWidths(widths)
+            })
             await self.end(target)
             EnsembleLog.write("pane widths: \(outcome)")
             if let refusal = outcome.refusal { self.ctx.refuse(refusal, title: what) }
@@ -131,7 +132,8 @@ final class PaneWidthController {
             let column = self.column.width
             var fit: (ids: [String], from: [Double], to: [Double], k: Int)?
             var heldBack = false
-            let outcome = await self.run(target: target) { widths, k, minimum, row in
+            // Exact width: Shift steps for the bulk and a few arrows, never a jump to a limit and back.
+            let outcome = await self.run(target: target, goal: .widths(jumps: false) { widths, k, minimum, row in
                 let want = ChatColumn.paneWidth(column: column, pane: row[k].frame, transcript: readings[target.id]?.transcript)
                 let ids = row.map(\.id)
                 let floors = self.hold.floors(ids, focus: k, now: CACurrentMediaTime())
@@ -143,7 +145,7 @@ final class PaneWidthController {
                 }
                 if fit == nil { fit = (ids, widths, planned, k) }
                 return planned
-            }
+            })
             await self.end(target)
             if case .done(let n) = outcome, n > 0, let f = fit {
                 let narrowed = f.ids.indices.filter { $0 != f.k && f.to[$0] < f.from[$0] - PaneWidths.tolerance }.map { f.ids[$0] }
@@ -209,20 +211,37 @@ final class PaneWidthController {
             }
         }
         if pressedAny {
-            refreshFrames()
+            // Claude draws the last key about 170 ms after it: the highlight leaves the plan's frame for the real one.
             try? await Task.sleep(nanoseconds: Self.settle)
-            refreshFrames()
+            await readFrames()
         }
+        if pressedAny || ctx.resizeFrame != nil {
+            ctx.resizeFrame = nil
+            framesChanged()
+        }
+        ctx.overlay.glide(false)
         pressedAny = false
         isRunning = false
         cancelled = false
     }
 
-    /// Plans and presses toward the widths `goal` asks for. `goal` gets the row's pane widths, the target's index,
-    /// Claude's minimum pane width and the row's sessions, and answers nil when there is nothing to do.
-    private func run(target: ClaudeSession, goal: ([Double], Int, Double, [ClaudeSession]) -> [Double]?) async -> Outcome {
+    private enum Goal {
+        /// The target as wide as Claude allows: outside-in sweeps of Home and End until nothing moves.
+        case maximize
+        /// The widths the closure asks for, given the row's pane widths, the target's index, Claude's minimum pane
+        /// width and the row's sessions; nil when there is nothing to do. `jumps`: Home or End and steps back where
+        /// that is fewer keys.
+        case widths(jumps: Bool, ([Double], Int, Double, [ClaudeSession]) -> [Double]?)
+    }
+
+    /// Plans and presses toward `goal`, reading the row again before each pass, until a pass has nothing to press,
+    /// a pass changed nothing (Claude went no further), or the passes run out.
+    private func run(target: ClaudeSession, goal: Goal) async -> Outcome {
         var total = 0
-        for pass in 0..<Self.passes {
+        var before: [Double]?
+        let passes: Int
+        if case .maximize = goal { passes = PaneKeys.maximizeSweeps } else { passes = Self.passes }
+        for pass in 0..<passes {
             let sessions = await ctx.bridge.refreshSessions().sessions
             if !sessions.isEmpty { ctx.sessions = sessions; framesChanged() }
             let row = PaneWidths.row(of: sessions.first { $0.id == target.id } ?? target, in: sessions)
@@ -236,21 +255,48 @@ final class PaneWidthController {
                 return pass == 0 ? .refused("Claude's pane dividers were not found") : .stopped("the dividers changed")
             }
             let widths = PaneWidths.layout(panes: row.map(\.frame), dividers: xs).widths
+            if let before, before.count == widths.count, zip(before, widths).allSatisfy({ abs($0 - $1) < 1 }) {
+                return .done(presses: total)
+            }
             let pairs = (0..<(widths.count - 1)).map { widths[$0] + widths[$0 + 1] }
             let minimum = PaneKeys.minimum(pairWidths: pairs, minPercents: dividers.map(\.minPercent))
-            guard let want = goal(widths, k, minimum, row) else { return .done(presses: total) }
-            let presses = PaneKeys.plan(from: widths, to: want, minimum: minimum)
+            let presses: [PaneKeys.Press]
+            let predicted: [Double]?
+            switch goal {
+            case .maximize:
+                // A pane Claude already holds at its minimum is the best reading of that minimum.
+                let others = widths.indices.filter { $0 != k }.map { widths[$0] }
+                let floor = min(minimum, others.min() ?? minimum)
+                presses = PaneKeys.maximizeSweep(widths, focus: k, floor: floor)
+                predicted = PaneKeys.maximizeWidths(widths, focus: k, minimum: floor)
+            case .widths(let jumps, let want):
+                guard let w = want(widths, k, minimum, row) else { return .done(presses: total) }
+                presses = PaneKeys.plan(from: widths, to: w, minimum: minimum, jumps: jumps)
+                predicted = PaneKeys.simulate(widths, minimum: minimum, presses: presses)
+            }
             guard !presses.isEmpty else { return .done(presses: total) }
+            predict(target, row: row, dividers: xs, widths: predicted, k: k)
             EnsembleLog.write("pane widths: pass \(pass + 1), \(presses.count) keys, "
-                              + "minimum \(Int(minimum)) pt, \(widths.map { Int($0) }) to \(want.map { Int($0) })")
+                              + "minimum \(Int(minimum)) pt, \(widths.map { Int($0) }) to \((predicted ?? widths).map { Int($0) })")
             if let why = await press(presses, on: dividers.map(\.element), in: target) { return .stopped(why) }
             total += presses.count
+            before = widths
             try? await Task.sleep(nanoseconds: Self.settle)
         }
         return .done(presses: total)
     }
 
-    /// The planned keys, one every `PaneKeys.interval`. nil when they all went, else why it stopped.
+    /// The highlight goes to where the plan puts the target and springs there now, instead of trailing Claude's
+    /// frames; `end` replaces it with the frame Claude reports.
+    private func predict(_ target: ClaudeSession, row: [ClaudeSession], dividers: [Double], widths: [Double]?, k: Int) {
+        guard let widths, let frames = PaneWidths.frames(panes: row.map(\.frame), dividers: dividers, widths: widths) else { return }
+        ctx.overlay.glide(true)
+        ctx.resizeFrame = (target.id, frames[k])
+        framesChanged()
+    }
+
+    /// The planned keys, each divider's in one burst a `PaneKeys.interval` apart. nil when they all went, else why it
+    /// stopped.
     private func press(_ presses: [PaneKeys.Press], on dividers: [AXUIElement], in target: ClaudeSession) async -> String? {
         let pace = UInt64(PaneKeys.interval * 1_000_000_000)
         let since = startedAt
@@ -272,7 +318,6 @@ final class PaneWidthController {
             if let why = safe() { return why }
             let divider = dividers[p.divider]
             if focused != p.divider {
-                if focused != nil { refreshFrames() }
                 // From here a divider may hold the keyboard: your keys are held back, and the end puts it back.
                 askedDivider = true
                 for d in dividers where !askedDividers.contains(where: { CFEqual($0, d) }) { askedDividers.append(d) }
@@ -296,23 +341,17 @@ final class PaneWidthController {
             if let why = safe() { return why }
             pressedAny = true
             ClaudeBridge.postKey(p.key)
-            if i % Self.refreshEvery == Self.refreshEvery - 1 { refreshFrames() }
-            try? await Task.sleep(nanoseconds: pace)
+            // The last key of a burst needs no wait: the next divider's focus takes longer than any pace.
+            if i + 1 < presses.count, presses[i + 1].divider == p.divider { try? await Task.sleep(nanoseconds: pace) }
         }
         return nil
     }
 
-    /// Reads the session frames again without waiting for them, at most one read at a time.
-    private func refreshFrames() {
-        guard !refreshInFlight else { return }
-        refreshInFlight = true
-        Task { @MainActor in
-            defer { self.refreshInFlight = false }
-            let sessions = await self.ctx.bridge.refreshSessions().sessions
-            guard !sessions.isEmpty, self.ctx.listening == nil else { return }
-            self.ctx.sessions = sessions
-            self.framesChanged()
-        }
+    /// Reads the session frames again and hands them to the highlight.
+    private func readFrames() async {
+        let sessions = await ctx.bridge.refreshSessions().sessions
+        guard !sessions.isEmpty, ctx.listening == nil else { return }
+        ctx.sessions = sessions
     }
 
     /// Where `target` sits in its row ("pane 2 of 4"), for logs: never its name, which is the owner's text.
