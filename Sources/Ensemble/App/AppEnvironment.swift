@@ -23,7 +23,8 @@ final class AppEnvironment {
         dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
         quit: { NSApp.terminate(nil) }
     )
-    private(set) lazy var tourWindow = TourWindowController(state: state, settings: settings) { [unowned self] step, singleStep, close in
+    private(set) lazy var tourWindow: TourWindowController = {
+        let controller = TourWindowController(state: state, settings: settings) { [unowned self] step, singleStep, close in
         TourModel(
             settings: settings, startAt: step, singleStep: singleStep,
             calibrate: { [weak self] in self?.coordinator.calibrate() },
@@ -31,7 +32,11 @@ final class AppEnvironment {
             enterPractice: { [weak self] sink in self?.coordinator.enterGesturePractice(sink) },
             exitPractice: { [weak self] in self?.coordinator.exitGesturePractice() },
             close: close)
-    }
+        }
+        controller.onOpen = { [weak self] in self?.coordinator.enterTour() }
+        controller.onClose = { [weak self] in self?.coordinator.exitTour() }
+        return controller
+    }()
     private(set) lazy var floatingPanel = FloatingPanelController { [unowned self] in
         AnyView(
             MenuPanelView(state: state, settings: settings, updates: updates, actions: floatingActions)
