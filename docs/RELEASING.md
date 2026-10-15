@@ -13,7 +13,7 @@ How a release is built, signed, notarized, published, and delivered to installed
 | `.github/workflows/ci.yml`, `hygiene.yml` | On every pull request and push to `main`: `ci` builds in release mode, runs the tests and the repository's network and size checks; `hygiene` runs zizmor, pinact and a secrets scan over the whole history. Neither signs or publishes. |
 | `Sources/Ensemble/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
 
-Log of the last `release.sh` run: `/tmp/ensemble-release.log`.
+Log of the last `release.sh` run: `build/release.log`.
 
 ## One-time setup (you)
 
@@ -70,7 +70,7 @@ Until a Developer ID exists, releases are built on the owner's Mac right after a
 scripts/ship-release.sh 0.2.0
 ```
 
-It tags `main`, builds and signs the DMG with the local identity, publishes the GitHub Release, adds the DMG to the appcast with the update key in this Mac's login keychain, and pushes `appcast.xml` to `gh-pages`, which GitHub Pages serves at the feed address in `UpdateController.swift`. Installed copies then see the version on their next check, or at once with Check for Updates. The update key and feed are set; the private key is also kept outside the keychain by the owner. Copies signed with the local identity update only on this Mac.
+It builds and signs the DMG with the local identity, adds it to the appcast with the update key in this Mac's login keychain (a refusal here stops the run before anything is public), then tags `main`, publishes the GitHub Release, and pushes `appcast.xml` to `gh-pages`, which GitHub Pages serves at the feed address in `UpdateController.swift`. Installed copies then see the version on their next check, or at once with Check for Updates. The update key and feed are set; the private key is also kept outside the keychain by the owner. Copies signed with the local identity update only on this Mac.
 
 ## Cut a release
 
