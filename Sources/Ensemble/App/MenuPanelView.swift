@@ -74,6 +74,7 @@ struct MenuPanelView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
+            if let line = state.calibratedLine { row(symbol: "display.2", text: line) }
             if settings.enabled, case .needsPermission(let what) = state.status {
                 row(symbol: "exclamationmark.circle", text: Permissions.guidance(for: what), tint: .orange)
                 Button { Permissions.openSettings(for: what) } label: {
