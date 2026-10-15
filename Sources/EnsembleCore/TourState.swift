@@ -8,16 +8,16 @@ public enum TourStep: Int, CaseIterable, Sendable {
         switch self {
         case .welcome: return "Welcome"
         case .calibrate: return "Calibrate every screen"
-        case .gestures: return "Four gestures"
+        case .gestures: return "Three gestures"
         case .permissions: return "Permissions"
         case .done: return "You're set"
         }
     }
 }
 
-/// The four gestures practiced, in the order their tabs appear.
+/// The three gestures practiced, in the order their tabs appear.
 public enum TourGestureTab: Int, CaseIterable, Sendable {
-    case look, dictate, send, scroll
+    case dictate, send, scroll
 }
 
 /// Drives the tour's step, Back/Next bounds, and which gesture tabs have been practiced. Pure: no UI, no

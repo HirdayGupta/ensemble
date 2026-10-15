@@ -97,6 +97,8 @@ struct BlinkingMic: View {
 extension Color {
     /// The listening colour: the highlight while listening, the island's waves and progress rings.
     static let ensembleBlue = Color(red: 0.32, green: 0.58, blue: 1.0)
+    /// The same blue darkened so text and thin strokes read on white (the website's --e-blue-ink).
+    static let ensembleBlueInk = Color(red: 0.176, green: 0.416, blue: 0.878)
     /// Session names on the island: a lighter blue that reads as a name on black.
     static let ensembleSoftBlue = Color(red: 0.56, green: 0.72, blue: 1.0)
 }

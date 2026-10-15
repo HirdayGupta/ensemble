@@ -42,7 +42,7 @@ struct TourPermissionsStep: View {
             Image(systemName: symbol).font(.system(size: 20)).frame(width: 34)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline)
-                Text(detail).font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text(detail).font(.caption).foregroundStyle(Color.tourMuted)
             }
             Spacer(minLength: 12)
             if let action {
@@ -62,7 +62,7 @@ struct TourPermissionsStep: View {
             Image(systemName: "mic.slash.fill").font(.system(size: 20)).frame(width: 34).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Microphone").font(.headline).strikethrough().foregroundStyle(.secondary)
-                Text("Not needed: Claude does the listening.").font(.caption).foregroundStyle(.white.opacity(0.5))
+                Text("Not needed: Claude does the listening.").font(.caption).foregroundStyle(Color.tourMuted)
             }
             Spacer(minLength: 12)
         }
