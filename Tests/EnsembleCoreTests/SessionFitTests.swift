@@ -4,9 +4,50 @@ import Testing
 @testable import EnsembleCore
 
 @Suite struct SessionFitTests {
-    @Test func theNarrowPaneReachesTheColumnAndTheOthersGiveEqually() throws {
+    @Test func theNarrowPaneTakesItsWidthThroughOneDivider() throws {
+        // No pane is wider than the column: the next pane gives it all, so one divider moves.
         let w = try #require(SessionFit.widths(current: [400, 800, 800], focus: 0, width: 840))
-        #expect(w == [840, 580, 580])
+        #expect(w == [840, 360, 800])
+    }
+
+    @Test func theOwnersRowTakesFromTheWidePaneAndLeavesTheFirstAlone() throws {
+        // 0.2.20: [565, 320, 1674] fitting the middle pane took from both sides and left the first at the minimum.
+        let want = SessionFit.fitWidth(paneColumn: 832)
+        let w = try #require(SessionFit.widths(current: [565, 320, 1674], focus: 1, width: want, keep: 832, minimum: 319))
+        #expect(w[0] == 565)
+        #expect(abs(w[1] - want) < 0.001)
+        #expect(abs(w[2] - (1674 - (want - 320))) < 0.001)
+        #expect(w[2] >= 832)
+        // One divider moves, in one burst.
+        let presses = PaneKeys.plan(from: [565, 320, 1674], to: w, minimum: 319)
+        #expect(Set(presses.map(\.divider)) == [1])
+        #expect(presses.count <= 22)
+        #expect(PaneKeys.duration(presses) < 0.15)
+    }
+
+    @Test func theTargetIsTenPercentOverTheColumnAndNeverMore() throws {
+        #expect(abs(SessionFit.fitWidth(paneColumn: 832) - 915.2) < 0.001)
+        let w = try #require(SessionFit.widths(current: [400, 2000], focus: 0, width: 915.2, keep: 832))
+        #expect(abs(w[0] - 915.2) < 0.001)
+    }
+
+    @Test func theWiderSideGivesWhenBothNeighboursCould() throws {
+        let w = try #require(SessionFit.widths(current: [1000, 400, 1400], focus: 1, width: 900, keep: 832))
+        #expect(w == [1000, 900, 900])
+        let left = try #require(SessionFit.widths(current: [1400, 400, 1000], focus: 1, width: 900, keep: 832))
+        #expect(left == [900, 900, 1000])
+    }
+
+    @Test func aFarWidePaneGivesWhenTheNeighbourIsAtTheColumn() throws {
+        // The neighbour is at the column; the pane after it has room above it: two dividers, the neighbour unchanged.
+        let w = try #require(SessionFit.widths(current: [500, 840, 1600], focus: 0, width: 900, keep: 832))
+        #expect(w == [900, 840, 1200])
+    }
+
+    @Test func panesGoUnderTheColumnOnlyWhenTheRowLeavesNoOtherWay() throws {
+        // Nothing above the column anywhere: the neighbour gives down to the minimum before a second divider moves.
+        let w = try #require(SessionFit.widths(current: [600, 700, 700], focus: 0, width: 900, keep: 832, minimum: 320))
+        #expect(w == [900, 400, 700])
     }
 
     @Test func aPaneAlreadyWideEnoughIsLeftAlone() {
@@ -33,14 +74,14 @@ import Testing
     }
 
     @Test func theFitPlanSettlesOnARowLikeClaudes() throws {
-        // Four 630 pt panes 10 pt apart, the second widened to 832: the others end up equal.
+        // Four 630 pt panes 10 pt apart, the second widened to 832: one neighbour gives it, the row keeps its total.
         let panes = [0.0, 640, 1280, 1920].map { CGRect(x: $0, y: 30, width: 630, height: 1300) }
         let dividers = [635.0, 1275, 1915]
         let (widths, _) = PaneWidths.layout(panes: panes, dividers: dividers)
         #expect(widths == [630, 630, 630, 630])
         let fit = try #require(SessionFit.widths(current: widths, focus: 1, width: 832))
         #expect(abs(fit[1] - 832) < 0.001)
-        #expect(abs(fit[0] - fit[2]) < 0.001 && abs(fit[2] - fit[3]) < 0.001)
+        #expect(fit.filter { abs($0 - 630) < 0.001 }.count == 2)
         #expect(abs(fit.reduce(0, +) - 2520) < 0.001)
     }
 
@@ -159,6 +200,19 @@ import Testing
         m.note([700], panes: [828])
         #expect(m.measured == nil)
         #expect(m.width == 832)
+    }
+
+    @Test func aTextMeasureReadingIsTheColumnWithItsGutters() {
+        // 0.2.20: panes 1674 and 1392 pt wide both read 773, the 768 pt text without its gutters.
+        var m = ChatColumn.Memory()
+        m.note([773], panes: [1674])
+        m.note([773], panes: [1392])
+        #expect(m.width == 832)
+        // Never narrower than Claude's narrowest column.
+        var n = ChatColumn.Memory()
+        n.note([700], panes: [1000])
+        n.note([700], panes: [1300])
+        #expect(n.width == 832)
     }
 
     @Test func anUnknownColumnCountsOnceTwoPaneWidthsAgree() {

@@ -4,7 +4,7 @@ import EnsembleCore
 /// Peace sign and scissors: resizes the session panes of the Claude window you are facing with Claude's own keyboard
 /// control of the dividers between them. Maximize makes the session you look at as wide as Claude allows and every
 /// other pane in its row as narrow; evening out gives each the same width. Focus settling on a pane narrower than
-/// Claude's chat column widens it to the column the same way (`autoFit`), unless Settings turns it off.
+/// Claude's chat column widens it to 10 percent past the column (`autoFit`), unless Settings turns it off.
 ///
 /// A divider is given keyboard focus through Accessibility and moved with arrows, Shift and arrows, Home and End
 /// (`PaneKeys` plans which), posted through the session event tap to Claude in front. The pointer never moves. Each
@@ -102,7 +102,7 @@ final class PaneWidthController {
         hold.reset()
         EnsembleLog.write("pane widths: \(maximize ? "maximize" : "even out") around \(place(of: target))")
         Task { @MainActor in
-            let outcome = await self.run(target: target, goal: maximize ? .maximize : .widths(jumps: true) { widths, _, _, _ in
+            let outcome = await self.run(target: target, goal: maximize ? .maximize : .widths(jumps: true, within: PaneKeys.arrow) { widths, _, _, _ in
                 PaneKeys.evenWidths(widths)
             })
             await self.end(target)
@@ -118,9 +118,9 @@ final class PaneWidthController {
         let retry: Bool
     }
 
-    /// The nose has rested on `target`: widen it to Claude's chat column if it is narrower, taking the width equally
-    /// from the other panes in its row (`SessionFit.restingFit`). Silent: it is not something you asked for, so it
-    /// never shows a refusal; anything in the way (a dictation, a send, your hands on the keyboard or mouse, another
+    /// The nose has rested on `target`: widen it to a little more than Claude's chat column if it is narrower, taking
+    /// the width through as few dividers as possible (`SessionFit.restingFit`). Silent: it is not something you asked
+    /// for, so it never shows a refusal; anything in the way (a dictation, a send, your hands on the keyboard or mouse, another
     /// app in front, the seconds after a calibration) skips it and says why. nil when it started. If you look at
     /// another session while it runs, it stops there and the caller fits that one instead.
     func autoFit(_ target: ClaudeSession, calibratedAt: TimeInterval) -> FitSkip? {
@@ -129,7 +129,8 @@ final class PaneWidthController {
         if let why = hold.refusal(now: CACurrentMediaTime(), calibratedAt: calibratedAt) { return FitSkip(why: why, retry: true) }
         let idle = ClaudeBridge.secondsSincePhysicalInput()
         if idle < CoordinatorContext.inputQuiet {
-            return FitSkip(why: "the keyboard or mouse was used \(String(format: "%.1f", idle)) s ago", retry: true)
+            // No seconds in the reason: it is logged once per rest, and a changing number made it log every tick.
+            return FitSkip(why: "the keyboard or mouse was used in the last \(Int(CoordinatorContext.inputQuiet)) s", retry: true)
         }
         let row = PaneWidths.row(of: target, in: ctx.sessions)
         guard row.count >= 2 else { return FitSkip(why: "one session in its row", retry: false) }
@@ -139,13 +140,16 @@ final class PaneWidthController {
             let readings = await self.ctx.bridge.chatColumns(in: row)
             self.column.note(row.map { readings[$0.id]?.column }, panes: row.map { Double($0.frame.width) })
             let column = self.column.width
+            // The pane's padding beside its transcript, read with the transcript from the same frames: a pane frame
+            // read after a pass with a transcript read before it gave a wrong padding and a second, smaller target.
+            let paneColumn = ChatColumn.paneWidth(column: column, pane: target.frame, transcript: readings[target.id]?.transcript)
+            let want = SessionFit.fitWidth(paneColumn: paneColumn)
             var fit: (ids: [String], from: [Double], to: [Double], k: Int)?
-            // Exact width: Shift steps for the bulk and a few arrows, never a jump to a limit and back.
-            let outcome = await self.run(target: target, goal: .widths(jumps: false) { widths, k, minimum, row in
-                let want = ChatColumn.paneWidth(column: column, pane: row[k].frame, transcript: readings[target.id]?.transcript)
+            // One plan, kept for every pass; a second pass only when Claude landed more than a Shift step off it.
+            let outcome = await self.run(target: target, goal: .widths(jumps: true, within: PaneKeys.shiftArrow) { widths, k, minimum, row in
                 let ids = row.map(\.id)
                 let floors = self.hold.floors(ids, focus: k, now: CACurrentMediaTime())
-                guard let planned = SessionFit.restingFit(current: widths, focus: k, width: want,
+                guard let planned = SessionFit.restingFit(current: widths, focus: k, width: want, keep: paneColumn,
                                                           minimum: max(PaneWidths.narrowWidth, minimum), floors: floors) else { return nil }
                 if fit == nil { fit = (ids, widths, planned, k) }
                 return planned
@@ -235,9 +239,10 @@ final class PaneWidthController {
         /// The target as wide as Claude allows: outside-in sweeps of Home and End until nothing moves.
         case maximize
         /// The widths the closure asks for, given the row's pane widths, the target's index, Claude's minimum pane
-        /// width and the row's sessions; nil when there is nothing to do. `jumps`: Home or End and steps back where
-        /// that is fewer keys.
-        case widths(jumps: Bool, ([Double], Int, Double, [ClaudeSession]) -> [Double]?)
+        /// width and the row's sessions; nil when there is nothing to do. Asked once, on the first pass; later passes
+        /// run only while a pane is more than `within` off those widths. `jumps`: Home or End and steps back where the
+        /// target is nearer the limit than the divider is.
+        case widths(jumps: Bool, within: Double, ([Double], Int, Double, [ClaudeSession]) -> [Double]?)
     }
 
     /// Plans and presses toward `goal`, reading the row again before each pass, until a pass has nothing to press,
@@ -245,6 +250,7 @@ final class PaneWidthController {
     private func run(target: ClaudeSession, goal: Goal) async -> Outcome {
         var total = 0
         var before: [Double]?
+        var goalWidths: [Double]?
         let passes: Int
         if case .maximize = goal { passes = PaneKeys.maximizeSweeps } else { passes = Self.passes }
         for pass in 0..<passes {
@@ -275,8 +281,18 @@ final class PaneWidthController {
                 let floor = min(minimum, others.min() ?? minimum)
                 presses = PaneKeys.maximizeSweep(widths, focus: k, floor: floor)
                 predicted = PaneKeys.maximizeWidths(widths, focus: k, minimum: floor)
-            case .widths(let jumps, let want):
-                guard let w = want(widths, k, minimum, row) else { return .done(presses: total) }
+            case .widths(let jumps, let within, let want):
+                var w: [Double]
+                if let g = goalWidths, g.count == widths.count {
+                    if zip(widths, g).allSatisfy({ abs($0 - $1) <= within }) { return .done(presses: total) }
+                    // The row's total can move by a point between reads: the target pane takes the difference.
+                    w = g
+                    w[k] += widths.reduce(0, +) - g.reduce(0, +)
+                } else {
+                    guard let planned = want(widths, k, minimum, row) else { return .done(presses: total) }
+                    goalWidths = planned
+                    w = planned
+                }
                 presses = PaneKeys.plan(from: widths, to: w, minimum: minimum, jumps: jumps)
                 predicted = PaneKeys.simulate(widths, minimum: minimum, presses: presses)
             }
@@ -284,7 +300,9 @@ final class PaneWidthController {
             predict(target, row: row, dividers: xs, widths: predicted, k: k)
             EnsembleLog.write("pane widths: pass \(pass + 1), \(presses.count) keys, "
                               + "minimum \(Int(minimum)) pt, \(widths.map { Int($0) }) to \((predicted ?? widths).map { Int($0) })")
-            if let why = await press(presses, on: dividers.map(\.element), in: target) { return .stopped(why) }
+            // A later pass corrects a first one that landed off, which keys dropped at the fast pace would explain.
+            let pace = pass == 0 ? PaneKeys.interval : PaneKeys.safeInterval
+            if let why = await press(presses, on: dividers.map(\.element), in: target, pace: pace) { return .stopped(why) }
             total += presses.count
             before = widths
             try? await Task.sleep(nanoseconds: Self.settle)
@@ -301,10 +319,11 @@ final class PaneWidthController {
         framesChanged()
     }
 
-    /// The planned keys, each divider's in one burst a `PaneKeys.interval` apart. nil when they all went, else why it
+    /// The planned keys, each divider's in one burst `pace` seconds apart. nil when they all went, else why it
     /// stopped.
-    private func press(_ presses: [PaneKeys.Press], on dividers: [AXUIElement], in target: ClaudeSession) async -> String? {
-        let pace = UInt64(PaneKeys.interval * 1_000_000_000)
+    private func press(_ presses: [PaneKeys.Press], on dividers: [AXUIElement], in target: ClaudeSession,
+                       pace seconds: Double) async -> String? {
+        let pace = UInt64(seconds * 1_000_000_000)
         let since = startedAt
         func safe() -> String? {
             if let why = blocker() { return why }

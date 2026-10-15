@@ -58,9 +58,10 @@ import Testing
         let maxed = run(even, to: target).widths
         let (w, presses) = run(maxed, to: try #require(PaneKeys.evenWidths(maxed)))
         for x in w { #expect(abs(x - 630) <= PaneKeys.arrow) }
-        // Mid-row moves gain little from a jump (no limit is near); the jumps that do save keys are taken.
+        // A divider jumps to a limit only when its target is nearer that limit than the divider is: from a pane
+        // maximized at either end, the first divider's target is.
         #expect(presses.count <= 45)
-        #expect(presses.contains { $0.key == .home || $0.key == .end })
+        if k == 0 || k == 3 { #expect(presses.contains { $0.key == .home || $0.key == .end }) }
     }
 
     @Test func maximizingAnotherSessionMovesTheWidthAcross() throws {
@@ -216,6 +217,18 @@ import Testing
         #expect(PaneKeys.stepKeys(40) == [.shiftRight, .right])
         #expect(PaneKeys.stepKeys(-60) == [.shiftLeft, .shiftLeft])
         #expect(PaneKeys.stepKeys(3) == [])
+        // Never more than two arrows: three arrows' worth is one more Shift step and one arrow back.
+        #expect(PaneKeys.stepKeys(24) == [.shiftRight, .left])
+        #expect(PaneKeys.stepKeys(-88) == [.shiftLeft, .shiftLeft, .shiftLeft, .right])
+    }
+
+    @Test func aTargetNearerTheLimitStartsWithHomeOrEnd() {
+        // 900 pt right in a 2400 pt pair: the target sits 184 pt from End, nearer than the 900 pt glide.
+        let near = PaneKeys.moveKeys(from: 600, to: 1500, lo: 316, hi: 1684, jumps: true)
+        #expect(near.first == .end)
+        #expect(near.count < PaneKeys.stepKeys(900).count)
+        // Nearer where it is than to the limit: Shift steps only.
+        #expect(!PaneKeys.moveKeys(from: 600, to: 900, lo: 316, hi: 1684, jumps: true).contains(.end))
     }
 
     @Test func homeAndEndStopAtClaudesMinimum() {
