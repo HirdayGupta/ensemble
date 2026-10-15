@@ -49,6 +49,8 @@ final class Coordinator: AppCoordinating {
     private var cancellables = Set<AnyCancellable>()
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var refreshInFlight = false
+    /// Claude reported a change while a refresh was in flight: refresh again when it ends.
+    private var refreshAgain = false
     private var promptedAccessibility = false
     private var recoveredAtLaunch = false
     private var lastAwayCheck: TimeInterval = 0
@@ -180,6 +182,8 @@ final class Coordinator: AppCoordinating {
         tick()
         refreshTimer?.invalidate()
         refreshTimer = commonModeTimer(1.0) { [weak self] in self?.refreshSessions() }
+        ctx.bridge.watcher.startWorkspaceWatch()
+        ctx.bridge.watcher.onChange = { [weak self] in self?.refreshSessions(notified: true) }
         refreshSessions()
         health.update()
     }
@@ -253,7 +257,7 @@ final class Coordinator: AppCoordinating {
         health.running = false
         ctx.latestHead = nil
         tickTimer?.invalidate(); tickTimer = nil
-        refreshTimer?.invalidate(); refreshTimer = nil
+        refreshTimer?.invalidate(); refreshTimer = nil; ctx.bridge.watcher.onChange = nil
         headphone.stop()
         if disarm { dictation.clearAndDisarm() } else if ctx.listening != nil { dictation.end(reason: "turned off") }
         engine.stop()
@@ -273,7 +277,7 @@ final class Coordinator: AppCoordinating {
         EnsembleLog.write("shutdown")
         health.running = false
         tickTimer?.invalidate(); tickTimer = nil
-        refreshTimer?.invalidate(); refreshTimer = nil
+        refreshTimer?.invalidate(); refreshTimer = nil; ctx.bridge.watcher.onChange = nil
         headphone.stop()
         ctx.bridge.beginShutdown()
         engine.stop()
@@ -651,7 +655,9 @@ final class Coordinator: AppCoordinating {
         pushOverlay()
     }
 
-    private func refreshSessions() {
+    /// The 1 s check, and `notified` when Claude reported a window or pane change (`ClaudeWatcher`). A notified refresh
+    /// skips the idle slowdown (a change is worth reading at once) and, when one is in flight, runs after it.
+    private func refreshSessions(notified: Bool = false) {
         wake()
         health.checkPermissions()
         let claudeUp = ctx.bridge.claudeIsRunning()
@@ -662,17 +668,27 @@ final class Coordinator: AppCoordinating {
         }
         if awayState.isAway { reconcileAway() }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
-        guard !refreshInFlight, ctx.listening == nil else { return }
+        guard ctx.listening == nil else { return }
+        // A width step reads the frames itself after its own keys, which Claude reports as divider changes.
+        if notified, panes.isRunning { return }
+        guard !refreshInFlight else { refreshAgain = refreshAgain || notified; return }
         // Nobody in front of the camera for 5 s: the window scan (which also costs Claude's own process) runs
         // every 5 s instead of every second, and immediately when a face comes back.
         let now = CACurrentMediaTime()
-        guard now - ctx.lastOneFaceT < Self.sessionScanFaceWindow || now - lastSessionScan >= Self.sessionScanIdleInterval else { return }
+        guard notified || now - ctx.lastOneFaceT < Self.sessionScanFaceWindow
+                || now - lastSessionScan >= Self.sessionScanIdleInterval else { return }
         lastSessionScan = now
         refreshInFlight = true
+        // During a width step the check works the old way: the layout change it causes must not walk Claude's tree in
+        // the middle of it. Its notifications wait for the first check after it.
+        let useNotifications = !panes.isRunning
         Task { @MainActor in
-            defer { self.refreshInFlight = false }
+            defer {
+                self.refreshInFlight = false
+                if self.refreshAgain, self.refreshTimer != nil { self.refreshAgain = false; self.refreshSessions(notified: true) }
+            }
             let epoch = self.ctx.dictationEpoch
-            let scan = await self.ctx.bridge.refreshSessions()
+            let scan = await self.ctx.bridge.refreshSessions(watched: useNotifications)
             let found = scan.sessions
             // A read taken before Ensemble started, took over or stopped a dictation would report Ensemble's own.
             if epoch == self.ctx.dictationEpoch, self.ctx.listening == nil {
