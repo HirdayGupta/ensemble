@@ -27,14 +27,15 @@ struct TourHandView: NSViewRepresentable {
 
     private static func makeScene(rig: TourHandRig) -> SCNScene {
         let scene = SCNScene()
-        rig.root.eulerAngles.y = .pi / 7
         scene.rootNode.addChildNode(rig.root)
 
         let camera = SCNNode()
         camera.camera = SCNCamera()
-        camera.camera?.fieldOfView = 32
-        camera.position = SCNVector3(0.3, 1.1, 2.6)
-        camera.look(at: SCNVector3(0, 0.1, 0))
+        camera.camera?.fieldOfView = 38
+        // Three-quarter view from the thumb side (the thumb is on -X), above and ahead, so the thumb tip and
+        // the index tip are seen meeting.
+        camera.position = SCNVector3(-2.4, 1.0, 2.9)
+        camera.look(at: SCNVector3(0, -0.25, 0.55))
         scene.rootNode.addChildNode(camera)
 
         let key = SCNNode()

@@ -26,6 +26,8 @@ Ensemble is a macOS menu bar app that lets you run Claude desktop's Code session
 
 <p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers fades out and pauses while you dictate, then comes back.</p>
 
+<p align="center"><b>A five-step tour on first launch</b><br>It shows each gesture on a 3D hand, lets you practise them without anything reaching Claude, and replays from the menu bar panel, the panel under Option-Command-K, or Settings.</p>
+
 <p align="center"><b>Private stays private</b><br>Camera frames are analysed in memory and never stored or sent anywhere.</p>
 
 ## Fit
@@ -42,7 +44,7 @@ Look elsewhere when:
 - You use an Intel Mac or a macOS older than 14.2.
 - You use Claude in a browser, since Ensemble drives the desktop app only.
 
-It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, grant Camera and Accessibility, and choose Calibrate from the menu bar icon.
+It needs an Apple Silicon Mac with macOS 14.2 or later, a webcam that sees your face and your hands, and Claude desktop with Code sessions, so Intel is untested and a covered camera pauses every gesture. To install, download the app as a disk image from the [latest release](https://github.com/oficiallyAkshay/ensemble/releases/latest), drag Ensemble to Applications and open it, then choose Open Anyway in System Settings under Privacy and Security because the app is not notarized yet, then follow the five-step tour that opens on first launch: it asks for Camera, calibrates each screen and asks for Accessibility (skip it any time, and replay it from the menu bar panel's Replay tour).
 
 ## How it compares
 

@@ -62,7 +62,7 @@ private struct TabIllustration: View {
             }
             TourSessionMock(tab: tab)
         }
-        .frame(height: 210)
+        .frame(height: 220)
     }
 }
 
@@ -74,11 +74,15 @@ private struct LookIllustration: View {
     private var yawDegrees: Double { reduceMotion ? 0 : (turned ? 26 : -26) }
 
     var body: some View {
-        VStack(spacing: 10) {
+        // scaleEffect does not shrink layout, so the head is wrapped in a frame of its scaled size; otherwise the
+        // monitors were squeezed out of the illustration and only an empty bar showed.
+        VStack(spacing: 8) {
             SessionMonitors(facedIndex: SessionMonitors.facedIndex(forYawDegrees: yawDegrees))
-                .scaleEffect(0.8)
-            OverheadHeadGroup(yawDegrees: yawDegrees).scaleEffect(0.8)
+            OverheadHeadGroup(yawDegrees: yawDegrees)
+                .scaleEffect(0.62)
+                .frame(width: 140, height: 140)
         }
+        .frame(width: 280, height: 210)
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) { turned = true }

@@ -19,26 +19,31 @@ struct TourHandPose {
     var thumb: FingerCurl
     /// Rotation swinging the thumb across the palm (toward a pinch) or up and away from it (thumbs-up).
     var thumbOpposition: Double
+    /// How far the thumb's base swings forward from the palm's edge (a rotation about the palm's side-to-side axis).
+    var thumbSplay: Double = 0.6
     var wristLift: Double
 
     static let openHand = TourHandPose(
         index: .straight, middle: .straight, ring: .straight, pinky: .straight,
-        thumb: .straight, thumbOpposition: 0.35, wristLift: 0)
+        thumb: .straight, thumbOpposition: 0.3, thumbSplay: 1.2, wristLift: 0)
 
+    /// Solved, not eyeballed: with the rig's real geometry, these angles put the thumb tip within 0.14 of the
+    /// index tip (the two tip spheres' radii sum to about 0.16, so they touch). Found by a search over the
+    /// index and thumb angles minimising that distance on the built node tree; `TourHandRig.tipGap` measures it.
     static let pinch = TourHandPose(
-        index: FingerCurl(base: 0.35, mid: 0.75, tip: 0.55),
-        middle: FingerCurl(base: 0.2, mid: 0.45, tip: 0.3),
-        ring: FingerCurl(base: 0.3, mid: 0.6, tip: 0.4),
-        pinky: FingerCurl(base: 0.4, mid: 0.7, tip: 0.45),
-        thumb: FingerCurl(base: 0.25, mid: 0.55, tip: 0.3),
-        thumbOpposition: -0.55, wristLift: 0)
+        index: FingerCurl(base: 0.670, mid: 0.598, tip: 0.720),
+        middle: FingerCurl(base: 0.45, mid: 0.7, tip: 0.5),
+        ring: FingerCurl(base: 0.55, mid: 0.8, tip: 0.55),
+        pinky: FingerCurl(base: 0.65, mid: 0.85, tip: 0.6),
+        thumb: FingerCurl(base: 0.859, mid: 0.421, tip: -0.065),
+        thumbOpposition: 0.223, thumbSplay: 1.011, wristLift: 0)
 
     static let thumbsUp = TourHandPose(
         index: FingerCurl(base: 1.15, mid: 1.3, tip: 1.0),
         middle: FingerCurl(base: 1.2, mid: 1.35, tip: 1.05),
         ring: FingerCurl(base: 1.2, mid: 1.35, tip: 1.05),
         pinky: FingerCurl(base: 1.15, mid: 1.3, tip: 1.0),
-        thumb: .straight, thumbOpposition: 1.45, wristLift: 0)
+        thumb: .straight, thumbOpposition: 0, thumbSplay: 0, wristLift: 0)
 
     func withWristLift(_ lift: Double) -> TourHandPose {
         var p = self
@@ -58,6 +63,9 @@ final class TourHandRig {
     /// [index, middle, ring, pinky], each [base, mid, tip].
     private var fingerJoints: [[SCNNode]] = []
     private var thumbJoints: [SCNNode] = []
+    /// Fingertip markers, used to check (and solve) that a pinch pose really brings the thumb tip to the index tip.
+    private(set) var indexTip = SCNNode()
+    private(set) var thumbTip = SCNNode()
 
     private static let woodMaterial: SCNMaterial = {
         let m = SCNMaterial()
@@ -69,6 +77,12 @@ final class TourHandRig {
     }()
 
     init() { build() }
+
+    /// Distance between the thumb tip and the index tip in the current (unanimated) pose.
+    var tipGap: Double {
+        let a = indexTip.worldPosition, b = thumbTip.worldPosition
+        return Double(((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)).squareRoot())
+    }
 
     /// Sets the pose immediately (`duration` 0) or animates to it; call during Reduce Motion with `duration: 0`.
     func apply(_ pose: TourHandPose, duration: TimeInterval) {
@@ -84,6 +98,7 @@ final class TourHandRig {
         thumbJoints[0].eulerAngles.x = CGFloat(pose.thumb.base)
         thumbJoints[1].eulerAngles.x = CGFloat(pose.thumb.mid)
         thumbJoints[2].eulerAngles.x = CGFloat(pose.thumb.tip)
+        thumbBase.eulerAngles.x = CGFloat(pose.thumbSplay)
         thumbBase.eulerAngles.z = CGFloat(pose.thumbOpposition)
         wrist.position.y = CGFloat(pose.wristLift)
         SCNTransaction.commit()
@@ -110,21 +125,25 @@ final class TourHandRig {
         fingerJoints = fingerX.enumerated().map { i, x in
             let attach = SCNNode()
             attach.position = SCNVector3(x, 0.05, 0.64)
-            attach.eulerAngles.x = -.pi / 2   // local +Y now points along world +Z (forward)
+            attach.eulerAngles.x = .pi / 2   // local +Y now points along +Z (forward); a positive curl bends toward -Y, the palm side
             palm.addChildNode(attach)
-            return makeChain(from: attach, lengths: fingerLengths[i], radius: 0.07)
+            let chain = makeChain(from: attach, lengths: fingerLengths[i], radius: 0.07)
+            if i == 0 { indexTip = chain.tip }
+            return chain.pivots
         }
 
         // Thumb: its own base node controls opposition (swinging across the palm or up, away from it).
-        thumbBase.position = SCNVector3(-0.52, 0.02, 0.1)
-        thumbBase.eulerAngles = SCNVector3(-CGFloat.pi / 3, 0, 0.35)
+        thumbBase.position = SCNVector3(-0.5, -0.02, 0.28)
+        thumbBase.eulerAngles = SCNVector3(CGFloat.pi / 2, 0, 0.35)
         palm.addChildNode(thumbBase)
-        thumbJoints = makeChain(from: thumbBase, lengths: [0.24, 0.18, 0.14], radius: 0.085)
+        let thumb = makeChain(from: thumbBase, lengths: [0.3, 0.24, 0.18], radius: 0.085)
+        thumbJoints = thumb.pivots
+        thumbTip = thumb.tip
     }
 
     /// Builds a chain of pivot nodes under `attach`; rotating pivot `i`'s `eulerAngles.x` bends segment `i`
     /// and everything beyond it, the way a real finger's joints bend one after another.
-    private func makeChain(from attach: SCNNode, lengths: [CGFloat], radius: CGFloat) -> [SCNNode] {
+    private func makeChain(from attach: SCNNode, lengths: [CGFloat], radius: CGFloat) -> (pivots: [SCNNode], tip: SCNNode) {
         var pivots: [SCNNode] = []
         var parent = attach
         for length in lengths {
@@ -148,6 +167,6 @@ final class TourHandRig {
             pivots.append(pivot)
             parent = next
         }
-        return pivots
+        return (pivots, parent)
     }
 }

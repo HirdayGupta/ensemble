@@ -2,6 +2,10 @@
 
 Each release and what changed. Back to the [README](../README.md).
 
+## Unreleased
+
+- A five-step tour opens on first launch (look, calibrate, four gestures practised on a 3D hand, permissions), can be skipped at any step, and replays from the menu bar panel, the Option-Command-K panel or Settings. While its gesture step is open, gestures only drive the tour and nothing reaches Claude.
+
 ## 0.1.1
 
 - The app is 6.9 MB instead of 19 MB, and the download 5.4 MB instead of 10 MB.
