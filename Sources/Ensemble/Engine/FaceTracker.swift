@@ -2,7 +2,8 @@ import AppKit
 import EnsembleCore
 import WebKit
 
-/// MediaPipe Face Landmarker running in a hidden WKWebView. Frames go in as JPEG, head angles come out.
+/// MediaPipe Face Landmarker running in a hidden WKWebView. Frames go in as raw RGBA pixels the page fetches from the
+/// asset scheme, head angles and position come out.
 @MainActor
 final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     var onReady: ((_ delegate: String) -> Void)?
@@ -11,6 +12,8 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     var onDiagnostic: ((String) -> Void)?
 
     nonisolated let gate = FrameGate()
+    /// The frame the page fetches next; the asset scheme handler hands it out.
+    nonisolated let frames = FaceFrameSlot()
 
     private var webView: WKWebView?
     private var window: NSWindow?
@@ -49,7 +52,7 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.userContentController.add(blockList)
-        config.setURLSchemeHandler(AssetSchemeHandler(), forURLScheme: AssetSchemeHandler.scheme)
+        config.setURLSchemeHandler(AssetSchemeHandler(frames: frames), forURLScheme: AssetSchemeHandler.scheme)
         config.userContentController.add(WeakScriptHandler(self), name: "head")
         config.mediaTypesRequiringUserActionForPlayback = []
 
@@ -84,6 +87,7 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         readyTimeout?.cancel()
         readyTimeout = nil
         gate.setOpen(false)
+        frames.clear()
         isReady = false
         consecutiveFrameErrors = 0
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "head")
@@ -95,9 +99,10 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
     }
 
     /// Sends one frame. The caller must already hold the gate; it is released when the page answers.
-    func submit(jpeg: Data, t: TimeInterval) {
+    func submit(rgba: Data, width: Int, height: Int, t: TimeInterval) {
         guard isReady, let webView else { gate.leave(); return }
-        let script = "ensembleFrame('\(jpeg.base64EncodedString())', \(t))"
+        let number = frames.put(rgba)
+        let script = "ensembleFrame(\(number), \(width), \(height), \(t))"
         webView.evaluateJavaScript(script) { [weak self] _, error in
             guard let error else { return }
             MainActor.assumeIsolated {
