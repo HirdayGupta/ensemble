@@ -27,9 +27,11 @@ import Testing
         #expect(abs(yaw + 0.25) < 0.01)
     }
 
-    @Test func headMovedAwayIsRefused() {
+    @Test func aTurnCountsEitherWayBecauseTrackerSignsAreUnverified() {
         let req = Self.rule.requirement(forTarget: Self.leftDot, on: Self.frame, accepted: [Self.centre])
-        #expect(Self.rule.evaluate(Self.hold(yaw: 0.25, pitch: 0), requirement: req) == .wrongWay)
+        guard case .ready = Self.rule.evaluate(Self.hold(yaw: 0.25, pitch: 0), requirement: req) else {
+            Issue.record("a full-size turn must count whichever way the angle grows"); return
+        }
     }
 
     @Test func headNotMovedIsRefused() {
@@ -66,7 +68,7 @@ import Testing
         guard case let .movedToward(_, _, yawSign, pitchSign, _, _) = req else { Issue.record("expected movement"); return }
         #expect(yawSign == 0 && pitchSign == 1)
         #expect(Self.rule.evaluate(Self.hold(yaw: 0, pitch: 0.12), requirement: req) == .ready(yaw: 0, pitch: 0.12))
-        #expect(Self.rule.evaluate(Self.hold(yaw: 0, pitch: -0.25), requirement: req) == .wrongWay)
+        #expect(Self.rule.evaluate(Self.hold(yaw: 0, pitch: -0.09), requirement: req) == .notFarEnough)
     }
 
     @Test func requiredTurnLearnsFromSamplesAlreadyTaken() {
@@ -84,8 +86,7 @@ import Testing
         let req = Self.rule.requirement(forFirstDotOn: portrait, previousScreen: (main, mainCentre))
         guard case let .movedToward(_, _, yawSign, _, _, _) = req else { Issue.record("expected movement"); return }
         #expect(yawSign == -1)
-        #expect(Self.rule.evaluate(Self.hold(yaw: -0.5, pitch: 0), requirement: req) != .wrongWay)
-        #expect(Self.rule.evaluate(Self.hold(yaw: 0.3, pitch: 0), requirement: req) == .wrongWay)
+        #expect(Self.rule.evaluate(Self.hold(yaw: -0.5, pitch: 0), requirement: req) == .ready(yaw: -0.5, pitch: 0))
         #expect(Self.rule.evaluate(Self.hold(yaw: 0, pitch: 0), requirement: req) == .notFarEnough)
     }
 

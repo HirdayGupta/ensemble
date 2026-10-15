@@ -23,8 +23,6 @@ public enum AimRequirement: Equatable, Sendable {
 public enum AimVerdict: Equatable, Sendable {
     /// Not enough readings yet, or the head is still moving.
     case notStill
-    /// Still, but an axis that should have turned toward the dot has turned away from it.
-    case wrongWay
     /// Still and the right way, but not far enough.
     case notFarEnough
     /// Still and moved toward the dot; the head angles to pair with it.
@@ -140,9 +138,9 @@ public struct AimRule: Sendable {
         }
         var short = false
         for (sign, change, minimum) in [(yawSign, mean.yaw - fromYaw, minYaw), (pitchSign, mean.pitch - fromPitch, minPitch)] where sign != 0 {
-            let toward = change * Double(sign)
-            if toward <= -minimum * 0.5 { return .wrongWay }
-            if toward < minimum { short = true }
+            // The tracker's angle signs are not verified against a live head, so only the size of the turn counts:
+            // a head that has not moved enough is refused, whichever way the angles happen to grow.
+            if abs(change) < minimum { short = true }
         }
         return short ? .notFarEnough : .ready(yaw: mean.yaw, pitch: mean.pitch)
     }
