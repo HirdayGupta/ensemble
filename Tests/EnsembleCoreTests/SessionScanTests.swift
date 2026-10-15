@@ -21,45 +21,51 @@ import Testing
 
     // MARK: One empty scan
 
+    /// `#expect` cannot call a mutating method on its operand, so the hold goes through here.
+    private func keep(_ hold: inout SessionListHold, found: Int, walkComplete: Bool, previous: Int,
+                      previousAnswer: Bool) -> Bool {
+        hold.keepPrevious(found: found, walkComplete: walkComplete, previous: previous, previousAnswer: previousAnswer)
+    }
+
     /// Measured: "found 0" between two "found 3" a second apart with Claude in front.
     @Test func oneEmptyScanKeepsTheSessions() {
         var hold = SessionListHold()
-        #expect(hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: true))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: true) == true)
     }
 
     @Test func twoEmptyScansInARowDropThem() {
         var hold = SessionListHold()
-        #expect(hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: true))
-        #expect(!hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: true))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: true) == true)
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: true) == false)
     }
 
     @Test func aGoodScanBetweenResetsTheCount() {
         var hold = SessionListHold()
-        #expect(hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: true))
-        #expect(!hold.keepPrevious(found: 3, walkComplete: true, previous: 3, previousAnswer: true))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: true) == true)
+        #expect(keep(&hold, found: 3, walkComplete: true, previous: 3, previousAnswer: true) == false)
         #expect(hold.doubtfulInARow == 0)
-        #expect(hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: true))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: true) == true)
     }
 
     @Test func sessionsThatNoLongerAnswerAreDroppedAtOnce() {
         var hold = SessionListHold()
-        #expect(!hold.keepPrevious(found: 0, walkComplete: true, previous: 3, previousAnswer: false))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 3, previousAnswer: false) == false)
     }
 
     @Test func aWalkCutShortIsDoubtfulToo() {
         var hold = SessionListHold()
-        #expect(hold.keepPrevious(found: 1, walkComplete: false, previous: 3, previousAnswer: true))
-        #expect(!hold.keepPrevious(found: 1, walkComplete: false, previous: 3, previousAnswer: true))
+        #expect(keep(&hold, found: 1, walkComplete: false, previous: 3, previousAnswer: true) == true)
+        #expect(keep(&hold, found: 1, walkComplete: false, previous: 3, previousAnswer: true) == false)
     }
 
     @Test func nothingBeforeNothingToKeep() {
         var hold = SessionListHold()
-        #expect(!hold.keepPrevious(found: 0, walkComplete: true, previous: 0, previousAnswer: true))
+        #expect(keep(&hold, found: 0, walkComplete: true, previous: 0, previousAnswer: true) == false)
         #expect(hold.doubtfulInARow == 0)
         var reset = SessionListHold()
-        #expect(reset.keepPrevious(found: 0, walkComplete: true, previous: 2, previousAnswer: true))
+        #expect(keep(&reset, found: 0, walkComplete: true, previous: 2, previousAnswer: true) == true)
         reset.reset()
-        #expect(reset.keepPrevious(found: 0, walkComplete: true, previous: 2, previousAnswer: true))
+        #expect(keep(&reset, found: 0, walkComplete: true, previous: 2, previousAnswer: true) == true)
     }
 
     // MARK: Which window
