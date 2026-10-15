@@ -474,7 +474,7 @@ final class Coordinator: AppCoordinating {
         let claudeUp = ctx.bridge.claudeIsRunning()
         dictation.dropIfClaudeGone(running: claudeUp)
         guard claudeUp else {
-            ctx.sessions = []; focus.forgetAll(); send.forget(); scroll.cancel(); health.update(); return
+            health.sessionsScanned = false; ctx.sessions = []; focus.forgetAll(); send.forget(); scroll.cancel(); health.update(); return
         }
         if awayState.isAway { reconcileAway() }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
@@ -490,6 +490,7 @@ final class Coordinator: AppCoordinating {
             let found = await self.ctx.bridge.refreshSessions()
             if found.map(\.id) != self.ctx.sessions.map(\.id) { EnsembleLog.write("Claude sessions found: \(found.count) (named \(found.filter { $0.title != nil }.count)) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.ctx.sessions = found
+            self.health.sessionsScanned = true
             self.health.update()
         }
     }
