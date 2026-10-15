@@ -13,6 +13,9 @@ final class TourWindowController {
     private let state: AppState
     private let settings: SettingsStore
     private let makeModel: (TourStep, Bool, @escaping () -> Void) -> TourModel
+    /// Called as the window opens and after it closes, so Ensemble pauses its actions on Claude meanwhile.
+    var onOpen: () -> Void = {}
+    var onClose: () -> Void = {}
 
     /// `makeModel` builds a fresh `TourModel` each time the tour opens, given the requested start step, whether
     /// this is a single-step replay, and the `close` callback to hand it.
@@ -67,6 +70,7 @@ final class TourWindowController {
             MainActor.assumeIsolated { self?.handleWindowWillClose() }
         }
 
+        onOpen()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -81,5 +85,6 @@ final class TourWindowController {
         closeObserver = nil
         window = nil
         model = nil
+        onClose()
     }
 }

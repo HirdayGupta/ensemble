@@ -13,6 +13,9 @@ protocol AppCoordinating: AnyObject {
     /// instead of acting on Claude. Ends any dictation in progress first, the same as `calibrate()` does.
     func enterGesturePractice(_ sink: TourPracticeSink)
     func exitGesturePractice()
+    /// While the tour window is open the camera keeps running for the tour, but nothing acts on Claude.
+    func enterTour()
+    func exitTour()
 }
 
 /// The integrator replaces the body of this factory (in another file) with the real coordinator.
@@ -62,6 +65,8 @@ final class StubCoordinator: AppCoordinating {
 
     func enterGesturePractice(_ sink: TourPracticeSink) {}
     func exitGesturePractice() {}
+    func enterTour() {}
+    func exitTour() {}
 
     func calibrate() {
         guard !state.calibrating else { return }

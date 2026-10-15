@@ -124,15 +124,13 @@ struct MenuPanelView: View {
                     .disabled(state.calibrating)
                 Button { actions.openSettings() } label: { Label("Settings…", systemImage: "gearshape").frame(maxWidth: .infinity) }
             }
-            HStack {
-                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { actions.checkForUpdates() }
-                    .buttonStyle(.plain).font(.callout).foregroundStyle(updates.availableVersion == nil ? .secondary : .primary)
-                Spacer()
-                Button("Replay tour") { actions.startTour() }
-                    .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button { actions.startTour() } label: { Label("Replay tour", systemImage: "play.circle").frame(maxWidth: .infinity) }
+                Button { actions.checkForUpdates() } label: {
+                    Label(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…",
+                          systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
+                }
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
             HStack {
                 Text("⌥⌘K shows this panel").font(.caption).foregroundStyle(.tertiary)
                 Spacer()

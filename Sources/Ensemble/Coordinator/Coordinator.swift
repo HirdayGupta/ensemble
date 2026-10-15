@@ -31,6 +31,9 @@ final class Coordinator: AppCoordinating {
     private var lastSessionScan: TimeInterval = 0
     /// Set only while the tour's gesture-practice step is open; see `enterGesturePractice`.
     private var practiceSink: TourPracticeSink?
+    /// True while the tour window is open: Ensemble keeps reading the camera (the tour calibrates and practises with
+    /// it) but acts on nothing, so looking at the tour never moves Claude's focus or raises a session behind it.
+    private var tourOpen = false
     private static let staleHeadSeconds = 2.0
     private static let sessionScanFaceWindow = 5.0
     private static let sessionScanIdleInterval = 5.0
@@ -226,11 +229,31 @@ final class Coordinator: AppCoordinating {
         scroll.cancel()
     }
 
+    func enterTour() {
+        tourOpen = true
+        send.afterStop = false
+        gestures.reset()
+        scroll.cancel()
+        if ctx.listening != nil { dictation.endWhenIdle(reason: "tour opened") }
+        focus.forgetTargetAndCandidate()
+        dot.clear()
+        dot.place(target: nil)
+        ctx.overlay.setGesture(nil)
+        pushOverlay()
+    }
+
+    func exitTour() {
+        tourOpen = false
+        gestures.reset()
+        scroll.cancel()
+    }
+
     // MARK: - Inputs
 
     private func handle(head: HeadObservation) {
         ctx.latestHead = head
         if let sink = practiceSink { sink.tourPractice(head: head); return }
+        if tourOpen { return }
         if head.faceCount == 1 {
             let returned = head.t - ctx.lastOneFaceT >= Self.sessionScanFaceWindow
             ctx.lastOneFaceT = head.t
@@ -269,6 +292,7 @@ final class Coordinator: AppCoordinating {
             for intent in intents { sink.tourPractice(intent: intent) }
             return
         }
+        if tourOpen { return }
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
@@ -295,7 +319,7 @@ final class Coordinator: AppCoordinating {
         dropStaleReadings()
         focus.tick()
         for intent in gestures.tick(now: CACurrentMediaTime()) {
-            if let sink = practiceSink { sink.tourPractice(intent: intent) } else { apply(intent) }
+            if let sink = practiceSink { sink.tourPractice(intent: intent) } else if !tourOpen { apply(intent) }
         }
         engine.setForceFullRate(needsFullRate)
         ctx.overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
@@ -375,7 +399,7 @@ final class Coordinator: AppCoordinating {
     /// thumbs-up (the narrow send rules in SendController, unchanged).
     private func apply(headphone action: HeadphoneAction) {
         // Tour practice promises nothing reaches Claude; a stem press is no exception.
-        guard practiceSink == nil else { return }
+        guard practiceSink == nil, !tourOpen else { return }
         ctx.headphoneUntil = CACurrentMediaTime() + 5
         ctx.overlay.clearBanner()
         switch action {
