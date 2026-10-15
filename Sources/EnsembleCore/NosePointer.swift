@@ -97,8 +97,8 @@ public final class NosePointer {
     /// For a screen with several spots, the model in use now (screen id to index).
     private var chosenSpot: [String: Int] = [:]
     private var currentScreen: Int?
-    private var filterX = OneEuroFilter(minCutoff: 0.6, beta: 3, dCutoff: 1)
-    private var filterY = OneEuroFilter(minCutoff: 0.6, beta: 3, dCutoff: 1)
+    private var filterX = PointerSmoothing.level(PointerSmoothing.defaultLevel).filter
+    private var filterY = PointerSmoothing.level(PointerSmoothing.defaultLevel).filter
     private var positionTracker = HeadPositionTracker()
 
     /// When true (the default) a screen with a fitted geometry is aimed by where the head is as well as where
@@ -335,14 +335,12 @@ public final class NosePointer {
         return CGPoint(x: u * m.width + m.minX + s.frame.minX, y: v * m.height + m.minY + s.frame.minY)
     }
 
-    /// Smoothing from 0 (light, quickest) to 1 (heaviest, steadiest). Lower minCutoff = steadier when still;
-    /// lower beta = less eager to follow fast motion.
-    public func setSmoothing(_ level: Double) {
-        let k = min(max(level, 0), 1)
-        let minCutoff = 1.0 - 0.9 * k        // 1.0 Hz ... 0.1 Hz
-        let beta = 4.0 - 3.4 * k             // 4.0 ... 0.6
-        filterX = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: 1)
-        filterY = OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: 1)
+    /// Smoothing from 0 (light, quickest) to 1 (heaviest, steadiest); see `PointerSmoothing.level`.
+    public func setSmoothing(_ level: Double) { setSmoothing(PointerSmoothing.level(level)) }
+
+    public func setSmoothing(_ s: PointerSmoothing) {
+        filterX = OneEuroFilter(minCutoff: s.minCutoff, beta: s.beta, dCutoff: s.dCutoff)
+        filterY = OneEuroFilter(minCutoff: s.minCutoff, beta: s.beta, dCutoff: s.dCutoff)
     }
 
     public func resetFilter() {
@@ -370,4 +368,30 @@ public final class NosePointer {
             }
         }
     }
+}
+
+/// The One Euro settings of the pointer filter, in units of the calibration box per second. `minCutoff` (Hz) is how
+/// hard a still head is smoothed; `beta` is how fast the cutoff rises with speed; `dCutoff` (Hz) smooths the speed
+/// estimate that beta reads, and a low value makes the filter notice a turn late, which is lag.
+public struct PointerSmoothing: Equatable, Sendable {
+    public var minCutoff: Double
+    public var beta: Double
+    public var dCutoff: Double
+    public init(minCutoff: Double, beta: Double, dCutoff: Double) {
+        self.minCutoff = minCutoff; self.beta = beta; self.dCutoff = dCutoff
+    }
+
+    /// The Settings slider's value when the user never moved it.
+    public static let defaultLevel = 0.5
+
+    /// The slider: 0 is light and quickest, 1 heaviest and steadiest. Lower minCutoff is steadier when still; lower
+    /// beta is less eager to follow fast motion. Tuned with `perfbench pointer` (docs/performance.md).
+    public static func level(_ level: Double) -> PointerSmoothing {
+        let k = min(max(level.isFinite ? level : defaultLevel, 0), 1)
+        return PointerSmoothing(minCutoff: 0.35 - 0.3 * k,     // 0.35 Hz ... 0.05 Hz
+                                beta: 6.0 - 4.0 * k,           // 6 ... 2
+                                dCutoff: 0.5)
+    }
+
+    var filter: OneEuroFilter { OneEuroFilter(minCutoff: minCutoff, beta: beta, dCutoff: dCutoff) }
 }

@@ -14,11 +14,13 @@ public struct FrameRatePlanner {
 
     public var handProbeInterval: TimeInterval = 0.125
     public var handHold: TimeInterval = 1.0
-    public var faceInterval: TimeInterval = 1.0 / 15.0
+    /// Every frame of a 30 fps camera: each head reading is a step of the nose dot. The face tracker takes one frame
+    /// at a time (FrameGate), so a slow machine skips frames instead of queueing them.
+    public var faceInterval: TimeInterval = 1.0 / 30.0
     public var idleAfter: TimeInterval = 3.0
     public var idleInterval: TimeInterval = 0.5
     public var lightInterval: TimeInterval = 0.1
-    /// A frame may run this much early, so a 15 Hz target on a 30 fps camera lands on every second frame.
+    /// A frame may run this much early, so a 30 Hz target lands on every frame of a 30 fps camera.
     public var slack: TimeInterval = 0.012
 
     private var startedAt: TimeInterval?

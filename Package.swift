@@ -4,6 +4,8 @@ import PackageDescription
 let package = Package(
     name: "Ensemble",
     platforms: [.macOS(.v14)],
+    // EnsembleCore as a library only so Tools/PerfBench can replay the pointer pipeline; the app links the target.
+    products: [.library(name: "EnsembleCore", targets: ["EnsembleCore"])],
     dependencies: [
         // Auto-updates. Pinned exactly; bump deliberately (see docs/RELEASING.md).
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),

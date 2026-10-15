@@ -1,4 +1,5 @@
 import AppKit
+import EnsembleCore
 import QuartzCore
 
 /// The nose dot as its own tiny borderless window: a glass bead you can see through. AppKit's Liquid Glass view
@@ -39,29 +40,33 @@ final class GlassDot {
     }()
     /// The opacity the dot is heading to; an animation runs only when this changes.
     private var target: CGFloat = 0
-    /// Head readings arrive about 15 times a second (FrameRatePlanner.faceInterval); jumping the window to each one
-    /// reads as a 15 fps dot. The window instead glides toward the latest reading on every screen refresh.
+    /// Head readings arrive 15 to 30 times a second; jumping the window to each one reads as a stepping dot. The
+    /// window instead moves on every screen refresh, as a spring toward the latest reading (DotSpring), so its
+    /// speed carries through from one reading to the next.
     private var goal: CGPoint?
-    private var drawn: CGPoint?
+    private var spring = DotSpring()
     private var lastTick: CFTimeInterval?
     private var link: CADisplayLink?
+    /// The screen the display link was made for. A link stops firing when its screen goes away (unplugged,
+    /// mirrored, asleep), so it is remade when the dot's window moves to another screen.
+    private weak var linkScreen: NSScreen?
     private lazy var ticker = DisplayTicker { [weak self] in self?.tick($0) }
-    /// Time constant of the glide: about one head reading, so the dot never trails more than a frame behind.
-    private let glide: Double = 0.05
+    private var screenObserver: NSObjectProtocol?
 
     /// Shows the dot centred on a global top-left point, or hides it when `point` is nil. `dimmed` (hands on the
     /// keyboard or trackpad) fades it away and back over 0.7 s.
     func show(at point: CGPoint?, dimmed: Bool) {
         guard let point else {
             target = 0
-            goal = nil; drawn = nil
+            goal = nil
+            spring.clear()
             stopLink()
             if panel.isVisible { panel.alphaValue = 0; panel.orderOut(nil) }
             return
         }
         goal = point
-        if drawn == nil || !panel.isVisible {
-            drawn = point
+        if spring.position == nil || !panel.isVisible {
+            spring.reset(to: point)
             place(point)
         } else {
             startLink()
@@ -82,33 +87,48 @@ final class GlassDot {
     }
 
     private func tick(_ now: CFTimeInterval) {
-        guard let goal, let from = drawn else { stopLink(); return }
+        guard let goal, spring.position != nil else { stopLink(); return }
+        // A refresh that comes late (a busy main thread) is stepped by its real gap; the spring is exact for any gap.
         let dt = min(max(now - (lastTick ?? now - 1.0 / 60), 0), 0.1)
         lastTick = now
-        let k = 1 - exp(-dt / glide)
-        let next = CGPoint(x: from.x + (goal.x - from.x) * k, y: from.y + (goal.y - from.y) * k)
-        if hypot(goal.x - next.x, goal.y - next.y) < 0.25 {
-            drawn = goal
+        let next = spring.step(toward: goal, dt: dt)
+        if spring.isResting(at: goal) {
+            spring.reset(to: goal)
             place(goal)
             stopLink()
         } else {
-            drawn = next
             place(next)
         }
     }
 
     private func startLink() {
-        guard link == nil else { return }
-        lastTick = nil
-        let l = (panel.screen ?? NSScreen.main)?.displayLink(target: ticker, selector: #selector(DisplayTicker.fire(_:)))
+        let screen = panel.screen ?? NSScreen.main
+        if link != nil, linkScreen === screen { return }
+        stopLink()
+        observeScreenChanges()
+        let l = screen?.displayLink(target: ticker, selector: #selector(DisplayTicker.fire(_:)))
         l?.add(to: .main, forMode: .common)
         link = l
+        linkScreen = screen
     }
 
     private func stopLink() {
         link?.invalidate()
         link = nil
+        linkScreen = nil
         lastTick = nil
+    }
+
+    /// The dot crossing onto another screen, or the screen under it going away, needs a link for the new screen.
+    private func observeScreenChanges() {
+        guard screenObserver == nil else { return }
+        screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.link != nil else { return }
+                self.stopLink()
+                self.startLink()
+            }
+        }
     }
 }
 

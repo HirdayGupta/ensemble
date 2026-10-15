@@ -1,4 +1,5 @@
 import AVFoundation
+import EnsembleCore
 import Foundation
 
 enum CameraError: Error, Equatable {
@@ -68,6 +69,9 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         do { input = try AVCaptureDeviceInput(device: device) } catch { throw CameraError.failed(error.localizedDescription) }
         guard session.canAddInput(input) else { throw CameraError.failed("Cannot use camera \(device.localizedName)") }
         session.addInput(input)
+        // Held until the session runs: a session that starts with the device unlocked puts its own format back.
+        let locked = lockFormat(of: device)
+        defer { if locked { device.unlockForConfiguration() } }
 
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -101,6 +105,53 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             throw CameraError.failed("Camera \(device.localizedName) did not start")
         }
         return (device.localizedName, device.uniqueID)
+    }
+
+    /// Center Stage crops and pans the picture to follow the face, which moves the head in the frame without the
+    /// head moving and breaks the calibration. Off for Ensemble's own capture; the user can still change it in
+    /// Control Center (cooperative mode).
+    private static func turnOffCenterStage() {
+        guard AVCaptureDevice.isCenterStageEnabled || AVCaptureDevice.centerStageControlMode != .cooperative else { return }
+        AVCaptureDevice.centerStageControlMode = .cooperative
+        AVCaptureDevice.isCenterStageEnabled = false
+    }
+
+    /// Locks the device to the best format for the trackers at 30 fps (CameraFormatChoice). Returns whether the
+    /// device is left locked; the caller unlocks it once the session runs. Leaves the preset in charge when the
+    /// device has no suitable format or cannot be locked.
+    private func lockFormat(of device: AVCaptureDevice) -> Bool {
+        Self.turnOffCenterStage()
+        let formats = device.formats.map { f -> CameraFormatChoice.Format in
+            let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            let codec = CMFormatDescriptionGetMediaSubType(f.formatDescription)
+            let compressed = codec == kCMVideoCodecType_JPEG_OpenDML || codec == kCMVideoCodecType_JPEG || codec == kCMVideoCodecType_H264
+            return .init(width: Int(d.width), height: Int(d.height),
+                         maxRate: f.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0, compressed: compressed)
+        }
+        guard let index = CameraFormatChoice.pick(formats) else {
+            onNote?("camera \(device.localizedName): no format from 640x480 to 1280x720; using the preset")
+            return false
+        }
+        do { try device.lockForConfiguration() } catch {
+            onNote?("camera \(device.localizedName) could not be configured (\(error.localizedDescription)); using the preset")
+            return false
+        }
+        let format = device.formats[index]
+        device.activeFormat = format
+        let rate = CameraFormatChoice.rate(for: formats[index])
+        // A fixed frame duration within a supported range: an unsupported one raises an exception, not an error.
+        let wanted = CMTime(value: 1000, timescale: CMTimeScale((rate * 1000).rounded()))
+        if format.videoSupportedFrameRateRanges.contains(where: {
+            CMTimeCompare($0.minFrameDuration, wanted) <= 0 && CMTimeCompare(wanted, $0.maxFrameDuration) <= 0 }) {
+            device.activeVideoMinFrameDuration = wanted
+            device.activeVideoMaxFrameDuration = wanted
+            onNote?("camera \(device.localizedName): \(formats[index].width)x\(formats[index].height) locked at \(Int(rate.rounded())) fps")
+        } else if let best = format.videoSupportedFrameRateRanges.max(by: { $0.maxFrameRate < $1.maxFrameRate }) {
+            device.activeVideoMinFrameDuration = best.minFrameDuration
+            device.activeVideoMaxFrameDuration = best.minFrameDuration
+            onNote?("camera \(device.localizedName): \(formats[index].width)x\(formats[index].height) locked at \(Int(best.maxFrameRate.rounded())) fps")
+        }
+        return true
     }
 
     /// Stops and releases the session. Queued behind any start in progress, so it never blocks the caller.
