@@ -21,6 +21,8 @@ final class SettingsStore: ObservableObject {
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
         static let lastClaudeVersion = "lastClaudeVersion"
+        static let tourCompleted = "tourCompleted"
+        static let tourSkipped = "tourSkipped"
     }
 
     static let countdownRange: ClosedRange<Double> = 0.5...3
@@ -58,6 +60,10 @@ final class SettingsStore: ObservableObject {
     @Published var calibrationDisplays: String? { didSet { defaults.set(calibrationDisplays, forKey: Key.calibrationDisplays) } }
     /// The Claude version the last confirmed dictation ran on.
     @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
+    /// The first-run tour has played to the end once.
+    @Published var tourCompleted: Bool { didSet { defaults.set(tourCompleted, forKey: Key.tourCompleted) } }
+    /// The owner skipped the first-run tour; the menu bar panel offers it until this or `tourCompleted` is true.
+    @Published var tourSkipped: Bool { didSet { defaults.set(tourSkipped, forKey: Key.tourSkipped) } }
 
     init(defaults: UserDefaults? = nil) {
         // In the packaged app the bundle identifier is "dev.ensemble.app", so the standard domain already is that
@@ -79,6 +85,8 @@ final class SettingsStore: ObservableObject {
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
         calibrationDisplays = store.string(forKey: Key.calibrationDisplays)
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
+        tourCompleted = bool(Key.tourCompleted, false)
+        tourSkipped = bool(Key.tourSkipped, false)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         reverseScroll = store.bool(forKey: Key.reverseScroll)

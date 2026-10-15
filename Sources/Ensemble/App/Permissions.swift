@@ -13,6 +13,12 @@ enum Permissions {
         }
     }
 
+    /// Shows the system's "would like to control this computer" prompt if Accessibility is not already granted.
+    /// Harmless to call again once granted.
+    static func requestAccessibility() {
+        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+    }
+
     static func openSettings(for what: String) {
         let pane = what == "Camera" ? "Privacy_Camera" : "Privacy_Accessibility"
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }

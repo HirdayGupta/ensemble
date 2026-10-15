@@ -28,6 +28,8 @@ final class Coordinator: AppCoordinating {
     private var promptedAccessibility = false
     private var lastAwayCheck: TimeInterval = 0
     private var lastSessionScan: TimeInterval = 0
+    /// Set only while the tour's gesture-practice step is open; see `enterGesturePractice`.
+    private var practiceSink: TourPracticeSink?
     private static let staleHeadSeconds = 2.0
     private static let sessionScanFaceWindow = 5.0
     private static let sessionScanIdleInterval = 5.0
@@ -195,10 +197,28 @@ final class Coordinator: AppCoordinating {
         }
     }
 
+    /// While the tour practices gestures, real intents and head readings go to `sink` instead of acting on
+    /// Claude: nothing is pressed, dictated or sent. Ends any dictation already in progress first, the same
+    /// as `calibrate()` does, so a hold left over from real use cannot fire once the tour reads it.
+    func enterGesturePractice(_ sink: TourPracticeSink) {
+        send.afterStop = false
+        gestures.reset()
+        scroll.cancel()
+        if ctx.listening != nil { dictation.endWhenIdle(reason: "tour practice") }
+        practiceSink = sink
+    }
+
+    func exitGesturePractice() {
+        practiceSink = nil
+        gestures.reset()
+        scroll.cancel()
+    }
+
     // MARK: - Inputs
 
     private func handle(head: HeadObservation) {
         ctx.latestHead = head
+        if let sink = practiceSink { sink.tourPractice(head: head); return }
         if head.faceCount == 1 {
             let returned = head.t - ctx.lastOneFaceT >= Self.sessionScanFaceWindow
             ctx.lastOneFaceT = head.t
@@ -233,6 +253,10 @@ final class Coordinator: AppCoordinating {
         dictation.heartbeat()
         guard !state.calibrating else { return }
         let intents = gestures.push(hand)
+        if let sink = practiceSink {
+            for intent in intents { sink.tourPractice(intent: intent) }
+            return
+        }
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
@@ -258,7 +282,9 @@ final class Coordinator: AppCoordinating {
     private func tick() {
         dropStaleReadings()
         focus.tick()
-        for intent in gestures.tick(now: CACurrentMediaTime()) { apply(intent) }
+        for intent in gestures.tick(now: CACurrentMediaTime()) {
+            if let sink = practiceSink { sink.tourPractice(intent: intent) } else { apply(intent) }
+        }
         engine.setForceFullRate(needsFullRate)
         ctx.overlay.setHandsOnInput(ClaudeBridge.secondsSincePhysicalInput() < 1.2)
         scroll.tick()
@@ -273,7 +299,7 @@ final class Coordinator: AppCoordinating {
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
     private var needsFullRate: Bool {
         ctx.listening != nil || ctx.busy || send.afterStop || state.calibrating || calibrationPending
-            || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil
+            || scroll.isActive || scroll.isCoasting || gestures.pinchHeld || gestures.progress != nil || practiceSink != nil
     }
 
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
