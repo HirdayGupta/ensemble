@@ -9,7 +9,7 @@ struct TourCalibrateStep: View {
     @ObservedObject var settings: SettingsStore
     @StateObject private var scene = TourSceneController(scene: .calibrate)
 
-    private static let blurb = "A dot visits five spots on each screen while you follow it with your head."
+    private static let blurb = "A dot visits five spots on each screen while you follow it with your head, so Ensemble knows which session you are looking at."
 
     var body: some View {
         VStack(spacing: 22) {
@@ -18,7 +18,7 @@ struct TourCalibrateStep: View {
                 .frame(width: 600, height: 280)
             Text(Self.blurb)
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(Color.tourMuted)
             statusLine
             HStack(spacing: 12) {
                 Button("Later") { model.jump(to: .gestures) }
@@ -29,13 +29,13 @@ struct TourCalibrateStep: View {
             }
             Text("Esc cancels. Calibrate asks for Camera access the first time; frames are never saved or sent.")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Color.tourMuted)
         }
     }
 
     @ViewBuilder private var statusLine: some View {
         if state.calibrating {
-            Label("Calibrating on your screen…", systemImage: "scope").foregroundStyle(Color.ensembleBlue)
+            Label("Calibrating on your screen…", systemImage: "scope").foregroundStyle(Color.ensembleBlueInk)
         } else if let date = settings.calibratedAt {
             Label("Last calibrated \(date.formatted(date: .abbreviated, time: .shortened))", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.secondary)

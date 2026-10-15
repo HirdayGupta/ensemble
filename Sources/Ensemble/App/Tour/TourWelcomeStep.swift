@@ -15,7 +15,7 @@ struct TourWelcomeStep: View {
             Text(Self.tagline)
                 .font(.title3.weight(.medium))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Color.tourInk.opacity(0.8))
                 .frame(maxWidth: 480)
         }
         .padding(.top, 10)

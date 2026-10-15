@@ -15,7 +15,8 @@ struct TourView: View {
                 .padding(.top, 28)
             footer
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Color.tourInk)
+        .tint(Color.ensembleBlue)
         .onAppear { model.onAppear() }
     }
 
@@ -36,7 +37,7 @@ struct TourView: View {
                 if !model.isSingleStep, model.step != .done {
                     Button("Skip tour") { model.skipTour() }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Color.tourMuted)
                 }
                 Spacer()
                 if model.canGoBack {
@@ -57,6 +58,13 @@ struct TourView: View {
     }
 }
 
+/// The tour's light palette, the website demo's: near-black ink, grey for secondary text, hairline grey for lines.
+extension Color {
+    static let tourInk = Color(red: 0.039, green: 0.039, blue: 0.039)
+    static let tourMuted = Color(red: 0.451, green: 0.451, blue: 0.451)
+    static let tourLine = Color(red: 0.831, green: 0.831, blue: 0.831)
+}
+
 private struct StepDots: View {
     let current: TourStep
 
@@ -64,7 +72,7 @@ private struct StepDots: View {
         HStack(spacing: 8) {
             ForEach(TourStep.allCases, id: \.self) { step in
                 Circle()
-                    .fill(step == current ? Color.ensembleBlue : Color.white.opacity(0.25))
+                    .fill(step == current ? Color.ensembleBlue : Color.tourLine)
                     .frame(width: step == current ? 8 : 6, height: step == current ? 8 : 6)
             }
         }

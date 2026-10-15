@@ -1,7 +1,7 @@
 import SwiftUI
 import EnsembleCore
 
-/// Step 3: four tabs, one per gesture. While this step is open, real gesture intents and head readings go to
+/// Step 3: three tabs, one per gesture. While this step is open, real gesture intents go to
 /// the tour instead of Claude (`TourModel.tourPractice`), so a tab can mark itself done the moment the owner
 /// performs the real thing, without pressing, dictating or sending anything.
 struct TourGesturesStep: View {
@@ -9,7 +9,7 @@ struct TourGesturesStep: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("Four gestures").font(.largeTitle.weight(.semibold))
+            Text("Three gestures").font(.largeTitle.weight(.semibold))
 
             Picker("Gesture", selection: Binding(get: { model.activeTab }, set: { model.selectTab($0) })) {
                 ForEach(TourGestureTab.allCases, id: \.self) { tab in
@@ -19,39 +19,39 @@ struct TourGesturesStep: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .tint(Color.ensembleBlue)
             .frame(maxWidth: 460)
 
             TabIllustration(model: model)
 
             Text(model.activeTab.explanation)
                 .font(.callout)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Color.tourMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
 
+            // Fixed height: success shows inside the canvas, so nothing here changes size when a gesture is done.
             HStack(spacing: 10) {
-                if model.practiceDone.contains(model.activeTab) {
-                    Label("Done", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                } else {
-                    Label(model.activeTab.practicePrompt, systemImage: "hand.wave")
-                        .foregroundStyle(Color.ensembleBlue)
-                }
+                Label(model.activeTab.practicePrompt, systemImage: "hand.wave")
+                    .foregroundStyle(Color.ensembleBlueInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Spacer()
                 if let next = TourGestureTab(rawValue: model.activeTab.rawValue + 1) {
                     Button("Skip this step") { model.selectTab(next) }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Color.tourMuted)
                 }
             }
-            .frame(maxWidth: 480)
-            .animation(.smooth(duration: 0.3), value: model.practiceDone)
+            .frame(maxWidth: 480, minHeight: 22, maxHeight: 22)
         }
     }
 }
 
-/// One 3D scene that follows the active tab, filling the illustration area at the 16:10 shape the scenes are
-/// composed for, with the live skeleton of the owner's own hand as Vision reads it in a corner. The scene is
-/// created once for the step, so switching tabs changes its animation without reloading the page.
+/// The gestures canvas: a flat Claude window with one focused session (drawn by the web page, which also draws
+/// the 3D hand in the top half of the right-hand column), and the live skeleton of the owner's own hand as Vision
+/// reads it in the bottom half. A gesture's success shows as a small widget at the canvas's bottom left. The
+/// scene is created once for the step, so switching tabs changes its animation without reloading the page.
 private struct TabIllustration: View {
     @ObservedObject var model: TourModel
     @StateObject private var scene: TourSceneController
@@ -65,9 +65,14 @@ private struct TabIllustration: View {
     var body: some View {
         let tab = model.activeTab
         TourSceneStage(controller: scene, symbol: tab.symbolName, caption: tab.explanation) {
-            TourHandInset(model: model.handInset, done: model.practiceDone.contains(tab))
-                .padding(10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            ZStack {
+                TourGestureColumn { TourHandInset(model: model.handInset) }
+                TourSuccessBadge(text: tab.successText)
+                    .opacity(model.practiceDone.contains(tab) ? 1 : 0)
+                    .animation(.smooth(duration: 0.3), value: model.practiceDone.contains(tab))
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
         }
         .aspectRatio(16.0 / 10.0, contentMode: .fit)
         .frame(maxWidth: 560)
@@ -75,10 +80,49 @@ private struct TabIllustration: View {
     }
 }
 
+/// The right-hand column of the canvas: `columnShare` of its width, with two panels of half its height each. The
+/// page draws the top one (the 3D hand); this places the bottom one at exactly the rectangle the page leaves
+/// empty. The margins and radius mirror the page's, in `scene3d.js` (COLUMN and the column's padding).
+struct TourGestureColumn<Panel: View>: View {
+    static var columnShare: CGFloat { 0.18 }
+    static var margin: CGFloat { 8 }
+    private let panel: Panel
+
+    init(@ViewBuilder panel: () -> Panel) { self.panel = panel() }
+
+    var body: some View {
+        GeometryReader { geo in
+            let m = Self.margin
+            panel
+                .frame(width: geo.size.width * Self.columnShare - 2 * m, height: geo.size.height / 2 - 1.5 * m)
+                .position(x: geo.size.width - m - (geo.size.width * Self.columnShare - 2 * m) / 2,
+                          y: geo.size.height / 2 + m / 2 + (geo.size.height / 2 - 1.5 * m) / 2)
+        }
+    }
+}
+
+/// "Pinch detected" and its kin: appears when the open tab's gesture is done.
+private struct TourSuccessBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color(red: 0.13, green: 0.62, blue: 0.33))
+            Text(text).foregroundStyle(Color.tourInk)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.white))
+        .overlay(Capsule().strokeBorder(Color(red: 0.13, green: 0.62, blue: 0.33).opacity(0.55), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+        .accessibilityLabel(text)
+    }
+}
+
 extension TourGestureTab {
     var title: String {
         switch self {
-        case .look: return "Look"
         case .dictate: return "Dictate"
         case .send: return "Send"
         case .scroll: return "Scroll"
@@ -87,7 +131,6 @@ extension TourGestureTab {
 
     var symbolName: String {
         switch self {
-        case .look: return "eye"
         case .dictate: return "hand.pinch"
         case .send: return "hand.thumbsup"
         case .scroll: return "hand.draw"
@@ -96,16 +139,23 @@ extension TourGestureTab {
 
     var explanation: String {
         switch self {
-        case .look: return "Look at a session to highlight it: a blue outline, never filled."
         case .dictate: return "Double pinch (thumb tip to index tip, twice) to start dictating into the session you face. Double pinch again to stop."
         case .send: return "Hold thumbs-up for 0.75 s to send — only within 30 s of speaking, only to that session, and only if you have not typed since."
         case .scroll: return "Pinch and drag your hand up or down to scroll the session you're facing."
         }
     }
 
+    /// What the success widget says once the tab's gesture is done.
+    var successText: String {
+        switch self {
+        case .dictate: return "Double pinch detected"
+        case .send: return "Thumbs-up detected"
+        case .scroll: return "Pinch and drag detected"
+        }
+    }
+
     var practicePrompt: String {
         switch self {
-        case .look: return "Your turn: look away from this window, then back."
         case .dictate: return "Your turn: double pinch to start, double pinch again to stop."
         case .send: return "Your turn: hold thumbs-up for about three quarters of a second."
         case .scroll: return "Your turn: pinch, then drag your hand up or down."

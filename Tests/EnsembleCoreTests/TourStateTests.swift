@@ -60,7 +60,6 @@ import Testing
     @Test func practiceDoneAccumulatesAndCompletesOnce() {
         let m = TourStateMachine(startAt: .gestures)
         #expect(!m.allPracticeDone)
-        m.markPracticeDone(.look)
         m.markPracticeDone(.dictate)
         m.markPracticeDone(.send)
         #expect(!m.allPracticeDone)

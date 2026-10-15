@@ -11,7 +11,7 @@ struct TourDoneStep: View {
             Text("Replay this tour from the menu bar, the ⌥⌘K panel, or Settings, whole or one step at a time.\nIf you plug in a new camera or screen, Ensemble asks to calibrate it.")
                 .font(.title3)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(Color.tourMuted)
                 .frame(maxWidth: 460)
             Spacer(minLength: 0)
         }

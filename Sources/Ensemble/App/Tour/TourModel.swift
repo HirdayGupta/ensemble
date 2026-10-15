@@ -2,13 +2,13 @@ import AppKit
 import EnsembleCore
 
 /// Drives one open tour window: the step machine, the live permission facts for step 4, and (while step 3 is
-/// open) turning real gesture intents and head readings into "this tab is done" checkmarks instead of letting
+/// open) turning real gesture intents into "this tab is done" checkmarks instead of letting
 /// them reach Claude.
 @MainActor
 final class TourModel: ObservableObject, TourPracticeSink {
     @Published private(set) var step: TourStep
     @Published private(set) var practiceDone: Set<TourGestureTab> = []
-    @Published var activeTab: TourGestureTab = .look
+    @Published var activeTab: TourGestureTab = .dictate
     @Published var cameraAccess = Permissions.cameraAccess
     @Published var accessibilityGranted = Permissions.accessibilityTrusted
 
@@ -27,7 +27,6 @@ final class TourModel: ObservableObject, TourPracticeSink {
     let handInset = TourHandInsetModel()
 
     private let detector = TourPracticeDetector()
-    private let lookDetector = TourLookDetector()
     private var practicing = false
     private var permissionsTimer: Timer?
 
@@ -116,14 +115,13 @@ final class TourModel: ObservableObject, TourPracticeSink {
 
     func selectTab(_ tab: TourGestureTab) {
         activeTab = tab
-        if tab == .look { lookDetector.reset() } else { detector.reset() }
+        detector.reset()
     }
 
     private func startPracticing() {
         guard !practicing else { return }
         practicing = true
         detector.reset()
-        lookDetector.reset()
         handInset.reset()
         enterPractice(self)
     }
@@ -141,11 +139,6 @@ final class TourModel: ObservableObject, TourPracticeSink {
 
     func tourPractice(hand: HandObservation) {
         handInset.ingest(hand)
-    }
-
-    func tourPractice(head: HeadObservation) {
-        guard activeTab == .look, lookDetector.observe(yaw: head.yaw) else { return }
-        markDone(.look)
     }
 
     private func markDone(_ tab: TourGestureTab) {

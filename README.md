@@ -26,7 +26,7 @@ Ensemble is a macOS menu bar app that lets you run Claude desktop's Code session
 
 <p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers fades out and pauses while you dictate, then comes back.</p>
 
-<p align="center"><b>A five-step tour on first launch</b><br>It shows each gesture in a 3D scene on a generic hand model, lets you practise them without anything reaching Claude while a small overlay in the corner of the same scene draws your own hand's 21 joints as the camera reads them (the joint points stay in the app; no image is kept or sent), and replays from the menu bar panel, the panel under Option-Command-K, or Settings.</p>
+<p align="center"><b>A five-step tour on first launch</b><br>It shows each gesture on a flat Claude window with one focused session and a 3D hand beside it, lets you practise them without anything reaching Claude while a panel under the 3D hand draws your own hand's 21 joints as the camera reads them (the joint points stay in the app; no image is kept or sent), and replays from the menu bar panel, the panel under Option-Command-K, or Settings.</p>
 
 <p align="center"><b>Private stays private</b><br>Camera frames are analysed in memory and never stored or sent anywhere.</p>
 
