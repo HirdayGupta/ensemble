@@ -3,8 +3,7 @@ import Sparkle
 
 /// Release-channel settings. The owner edits this file and Info.plist (SUPublicEDKey) once; see docs/RELEASING.md.
 enum UpdateConfig {
-    // TODO(owner): replace OWNER/REPO with the GitHub account and repository that publishes the appcast.
-    static let feedURL = "https://OWNER.github.io/REPO/appcast.xml"
+    static let feedURL = "https://oficiallyakshay.github.io/ensemble/appcast.xml"
 
     /// Placeholder shipped in Info.plist until the owner generates a key with Sparkle's generate_keys.
     static let publicKeyPlaceholder = "TODO-REPLACE-WITH-SPARKLE-PUBLIC-ED-KEY"

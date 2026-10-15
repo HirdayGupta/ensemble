@@ -62,6 +62,16 @@ ENSEMBLE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 
 A DMG made with the local identity opens on this Mac only. Gatekeeper rejects it elsewhere.
 
+## Ship from this Mac (current route)
+
+Until a Developer ID exists, releases are built on the owner's Mac right after a merge to `main`, from a clean checkout of `main`:
+
+```
+scripts/ship-release.sh 0.2.0
+```
+
+It tags `main`, builds and signs the DMG with the local identity, publishes the GitHub Release, adds the DMG to the appcast with the update key in this Mac's login keychain, and pushes `appcast.xml` to `gh-pages`, which GitHub Pages serves at the feed address in `UpdateController.swift`. Installed copies then see the version on their next check, or at once with Check for Updates. The update key and feed are set; the private key is also kept outside the keychain by the owner. Copies signed with the local identity update only on this Mac.
+
 ## Cut a release
 
 1. Merge to `main`; the tests pass.

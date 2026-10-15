@@ -60,7 +60,7 @@ No credential. Everything runs on your Mac, and Claude's own dictation does the 
 - Never stores or sends a camera frame.
 - Never records what you dictate or what is on your screen: it presses Claude's buttons and logs events and numbers only.
 - Never reaches the internet from the face tracker page: every web address is blocked.
-- Never updates itself unless you turn on the optional updater, which stays off until the maintainer configures a signing key.
+- Never updates itself unless you turn on automatic checks or press Check for Updates; updates are signed, and the app installs only an update signed with its own key.
 - Never sends telemetry, analytics or crash reports.
 - Never acts on another app: with anything else in front, gestures do nothing. The one exception is the audio pause, which presses the system play/pause key while you dictate, and can be turned off.
 
