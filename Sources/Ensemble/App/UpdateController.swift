@@ -114,6 +114,9 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             return
         }
         userCheckInFlight = true
+        // Ensemble is a menu bar app with no Dock icon, so Sparkle's window opens behind other apps unless Ensemble
+        // is made active first; the press then looks like it did nothing.
+        NSApp.activate(ignoringOtherApps: true)
         controller.checkForUpdates(nil)
     }
 
@@ -180,6 +183,18 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
         let version = update.displayVersionString
-        Task { @MainActor in self.found(version) }
+        Task { @MainActor in
+            self.found(version)
+            // Sparkle's documented pattern for menu bar apps: while its window is up, Ensemble takes a Dock icon and
+            // comes to the front, so the window can't be lost behind other apps and Command-Tab finds it.
+            if handleShowingUpdate {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+    }
+
+    nonisolated func standardUserDriverWillFinishUpdateSession() {
+        Task { @MainActor in NSApp.setActivationPolicy(.accessory) }
     }
 }
