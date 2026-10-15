@@ -133,7 +133,7 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             return false
         }
         do { try device.lockForConfiguration() } catch {
-            onNote?("camera \(device.localizedName) could not be configured (\(error.localizedDescription)); using the preset")
+            onNote?("camera \(device.modelID) could not be configured (\(error.localizedDescription)); using the preset")
             return false
         }
         let format = device.formats[index]
