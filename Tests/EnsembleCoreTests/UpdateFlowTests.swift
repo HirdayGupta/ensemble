@@ -68,6 +68,14 @@ import Testing
         #expect(gate.idle(for: 30, at: t0.addingTimeInterval(70)))
     }
 
+    @Test func theQuestionWaitsForTheKeyboardToRest() {
+        #expect(!UpdatePolicy.offerMayShow(idle: true, secondsSinceKey: 0.5))
+        #expect(!UpdatePolicy.offerMayShow(idle: true, secondsSinceKey: UpdatePolicy.offerTypingQuiet - 0.1))
+        #expect(UpdatePolicy.offerMayShow(idle: true, secondsSinceKey: UpdatePolicy.offerTypingQuiet))
+        #expect(UpdatePolicy.offerMayShow(idle: true, secondsSinceKey: .infinity))
+        #expect(!UpdatePolicy.offerMayShow(idle: false, secondsSinceKey: .infinity))
+    }
+
     // MARK: Text and links
 
     @Test func offerAsksTheOneQuestion() {

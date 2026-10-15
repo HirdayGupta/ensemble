@@ -80,6 +80,16 @@ extension UpdatePolicy {
     /// An automatic install waits for this much unbroken idle time, so it does not land between two dictations.
     public static let automaticIdleSeconds: TimeInterval = 30
 
+    /// The update question waits until no key has been typed for this long, so it never comes up under a sentence
+    /// being typed into Claude and takes the keys meant for it.
+    public static let offerTypingQuiet: TimeInterval = 3
+
+    /// Whether the update question may come up now: Ensemble idle and the keyboard at rest. Clicks do not count, so
+    /// pressing Check for Updates still shows it.
+    public static func offerMayShow(idle: Bool, secondsSinceKey: TimeInterval) -> Bool {
+        idle && !(secondsSinceKey < offerTypingQuiet)
+    }
+
     /// The one alert's question.
     public static func offerMessage(version: String) -> String { "Ensemble \(version) is available. Install now?" }
 

@@ -171,7 +171,7 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             if installingVersion == nil { installingVersion = availableVersion }
             beginInstall()
             install()
-        } else if pendingOffer != nil, idleNow {
+        } else if pendingOffer != nil, UpdatePolicy.offerMayShow(idle: idleNow, secondsSinceKey: ClaudeBridge.secondsSinceOwnerKey()) {
             // Out of the timer's call: the alert runs a modal loop.
             alertShowing = true
             DispatchQueue.main.async { [weak self] in self?.showOffer() }
@@ -231,8 +231,9 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         let alert = NSAlert()
         alert.messageText = UpdatePolicy.offerMessage(version: version)
         alert.informativeText = "Ensemble downloads it, installs it and opens again by itself."
-        alert.addButton(withTitle: "Install")
-        alert.addButton(withTitle: "Later")
+        // No button answers Return: a Return typed for Claude as the alert comes up must never install. Escape is Later.
+        alert.addButton(withTitle: "Install").keyEquivalent = ""
+        alert.addButton(withTitle: "Later").keyEquivalent = "\u{1b}"
         let item = offer.item
         notesLink = UpdatePolicy.releaseNotesLink(fullNotes: item.fullReleaseNotesURL, notes: item.releaseNotesURL,
                                                   info: item.infoURL, download: item.fileURL)
