@@ -1,7 +1,7 @@
 import SwiftUI
 import EnsembleCore
 
-/// Step 3: four tabs, one per gesture. While this step is open, real gesture intents and head readings go to
+/// Step 3: three tabs, one per gesture. While this step is open, real gesture intents go to
 /// the tour instead of Claude (`TourModel.tourPractice`), so a tab can mark itself done the moment the owner
 /// performs the real thing, without pressing, dictating or sending anything.
 struct TourGesturesStep: View {
@@ -9,7 +9,7 @@ struct TourGesturesStep: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("Four gestures").font(.largeTitle.weight(.semibold))
+            Text("Three gestures").font(.largeTitle.weight(.semibold))
 
             Picker("Gesture", selection: Binding(get: { model.activeTab }, set: { model.selectTab($0) })) {
                 ForEach(TourGestureTab.allCases, id: \.self) { tab in
@@ -78,7 +78,6 @@ private struct TabIllustration: View {
 extension TourGestureTab {
     var title: String {
         switch self {
-        case .look: return "Look"
         case .dictate: return "Dictate"
         case .send: return "Send"
         case .scroll: return "Scroll"
@@ -87,7 +86,6 @@ extension TourGestureTab {
 
     var symbolName: String {
         switch self {
-        case .look: return "eye"
         case .dictate: return "hand.pinch"
         case .send: return "hand.thumbsup"
         case .scroll: return "hand.draw"
@@ -96,7 +94,6 @@ extension TourGestureTab {
 
     var explanation: String {
         switch self {
-        case .look: return "Look at a session to highlight it: a blue outline, never filled."
         case .dictate: return "Double pinch (thumb tip to index tip, twice) to start dictating into the session you face. Double pinch again to stop."
         case .send: return "Hold thumbs-up for 0.75 s to send — only within 30 s of speaking, only to that session, and only if you have not typed since."
         case .scroll: return "Pinch and drag your hand up or down to scroll the session you're facing."
@@ -105,7 +102,6 @@ extension TourGestureTab {
 
     var practicePrompt: String {
         switch self {
-        case .look: return "Your turn: look away from this window, then back."
         case .dictate: return "Your turn: double pinch to start, double pinch again to stop."
         case .send: return "Your turn: hold thumbs-up for about three quarters of a second."
         case .scroll: return "Your turn: pinch, then drag your hand up or down."

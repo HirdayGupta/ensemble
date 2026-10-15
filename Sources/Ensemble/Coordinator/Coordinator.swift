@@ -265,8 +265,8 @@ final class Coordinator: AppCoordinating {
 
     private func handle(head: HeadObservation) {
         ctx.latestHead = head
-        if let sink = practiceSink { sink.tourPractice(head: head); return }
-        if tourOpen { return }
+        // Head readings are not practised in the tour, but they must not act on Claude while it is open.
+        if practiceSink != nil || tourOpen { return }
         if head.faceCount == 1 {
             let returned = head.t - ctx.lastOneFaceT >= Self.sessionScanFaceWindow
             ctx.lastOneFaceT = head.t
