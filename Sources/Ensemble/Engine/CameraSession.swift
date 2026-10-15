@@ -129,7 +129,7 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                          maxRate: f.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0, compressed: compressed)
         }
         guard let index = CameraFormatChoice.pick(formats) else {
-            onNote?("camera \(device.localizedName): no format from 640x480 to 1280x720; using the preset")
+            onNote?("camera \(device.modelID): no format from 640x480 to 1280x720; using the preset")
             return false
         }
         do { try device.lockForConfiguration() } catch {
@@ -145,11 +145,11 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             CMTimeCompare($0.minFrameDuration, wanted) <= 0 && CMTimeCompare(wanted, $0.maxFrameDuration) <= 0 }) {
             device.activeVideoMinFrameDuration = wanted
             device.activeVideoMaxFrameDuration = wanted
-            onNote?("camera \(device.localizedName): \(formats[index].width)x\(formats[index].height) locked at \(Int(rate.rounded())) fps")
+            onNote?("camera \(device.modelID): \(formats[index].width)x\(formats[index].height) locked at \(Int(rate.rounded())) fps")
         } else if let best = format.videoSupportedFrameRateRanges.max(by: { $0.maxFrameRate < $1.maxFrameRate }) {
             device.activeVideoMinFrameDuration = best.minFrameDuration
             device.activeVideoMaxFrameDuration = best.minFrameDuration
-            onNote?("camera \(device.localizedName): \(formats[index].width)x\(formats[index].height) locked at \(Int(best.maxFrameRate.rounded())) fps")
+            onNote?("camera \(device.modelID): \(formats[index].width)x\(formats[index].height) locked at \(Int(best.maxFrameRate.rounded())) fps")
         }
         return true
     }
