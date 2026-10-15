@@ -25,15 +25,26 @@ public struct HandObservation: Sendable {
     }
 }
 
+/// Where the head is, in centimetres, in the face tracker's camera space (MediaPipe's facial transformation
+/// matrix translation: x along the image, y up, and z negative in front of the camera). Also used as a plain 3-vector by the position correction.
+public struct HeadPosition: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var z: Double
+    public init(x: Double, y: Double, z: Double) { self.x = x; self.y = y; self.z = z }
+    public var isFinite: Bool { x.isFinite && y.isFinite && z.isFinite }
+}
+
 /// One camera frame's head reading from MediaPipe. Angles in radians; sign conventions don't matter
-/// because the pointer calibration fits them.
+/// because the pointer calibration fits them. `position` is nil when the tracker did not report one.
 public struct HeadObservation: Sendable {
     public var t: TimeInterval
     public var yaw: Double
     public var pitch: Double
     public var faceCount: Int
-    public init(t: TimeInterval, yaw: Double, pitch: Double, faceCount: Int) {
-        self.t = t; self.yaw = yaw; self.pitch = pitch; self.faceCount = faceCount
+    public var position: HeadPosition?
+    public init(t: TimeInterval, yaw: Double, pitch: Double, faceCount: Int, position: HeadPosition? = nil) {
+        self.t = t; self.yaw = yaw; self.pitch = pitch; self.faceCount = faceCount; self.position = position
     }
 }
 
@@ -118,7 +129,11 @@ public struct CalibrationSample: Codable, Equatable, Sendable {
     public var yaw: Double
     public var pitch: Double
     public var target: CGPoint
-    public init(yaw: Double, pitch: Double, target: CGPoint) { self.yaw = yaw; self.pitch = pitch; self.target = target }
+    /// Where the head was while this sample was taken; nil in calibrations saved before head position existed.
+    public var position: HeadPosition?
+    public init(yaw: Double, pitch: Double, target: CGPoint, position: HeadPosition? = nil) {
+        self.yaw = yaw; self.pitch = pitch; self.target = target; self.position = position
+    }
 }
 
 /// The result of asking Claude to do something.
