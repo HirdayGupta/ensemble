@@ -51,6 +51,13 @@ final class OverlayModel: ObservableObject {
     @Published var edge: OverlayEdge?
     /// A send is on its way: the session's name, from the end of the thumbs-up hold until "Sent" or "Not sent".
     @Published var sending: String?
+    /// A pane resize is moving the highlighted session: the outline keeps this identity (the key of the frame it had
+    /// when the resize began) and springs to each new frame instead of fading out and in. Cleared by the first frame
+    /// change after the resize has ended, which fades as usual.
+    @Published var glide: String?
+
+    /// One identity per session frame: a new frame is a new outline that fades in, never a moving one.
+    static func highlightKey(_ r: CGRect) -> String { "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))" }
 
     var hasContent: Bool {
         (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil || sending != nil
@@ -76,6 +83,10 @@ final class OverlayController {
     }
 
     func update(target: CGRect?, nose: CGPoint?, listening: Bool, showNoseDot: Bool, showHighlight: Bool) {
+        if model.glide != nil, let settled = glideSettled, target != settled {
+            model.glide = nil
+            glideSettled = nil
+        }
         setIfChanged(&model.target, target)
         latestNose = nose
         model.hasNose = nose != nil
@@ -88,6 +99,19 @@ final class OverlayController {
     }
 
     private var latestNose: CGPoint?
+    /// The frame the highlight had when the last resize ended; nil while one runs or none has.
+    private var glideSettled: CGRect??
+
+    /// A pane resize starts (`true`) or has ended (`false`): while it runs, and until the highlighted frame next
+    /// changes for another reason, the outline springs to the session's new frame instead of fading to it.
+    func glide(_ on: Bool) {
+        if on {
+            if model.glide == nil, let t = model.target { model.glide = OverlayModel.highlightKey(t) }
+            glideSettled = nil
+        } else if model.glide != nil {
+            glideSettled = .some(model.target)
+        }
+    }
 
     /// The refresh rate of the screen the dot is on (where the nose last was, else the main screen). Read once a
     /// second with the camera's rate report, never per frame.

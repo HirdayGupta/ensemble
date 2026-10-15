@@ -8,8 +8,9 @@ import Foundation
 /// on a pane narrower than the column, the pane is widened to the column and the other panes in its row each give
 /// an equal share of the width it takes, none going below `PaneWidths.narrowWidth`.
 public enum SessionFit {
-    /// How long focus must rest on one session before it is fitted, so a nose passing over a pane never resizes it.
-    public static let settle: Double = 0.6
+    /// How long the nose must rest inside one session, with focus on it the whole time, before it is fitted, so a
+    /// nose passing over a pane never resizes it. 0.6 s fitted panes the nose only crossed (owner, 0.2.18).
+    public static let settle: Double = 0.8
     /// Claude's chat column, used until one is measured: a 768 pt text measure plus a 32 pt gutter each side, read
     /// from the stylesheet of the Claude desktop app installed on the owner's Mac on 2026-10-15 (the default
     /// transcript width; Claude's wider settings use 960 and 1280).
@@ -49,25 +50,32 @@ public enum SessionFit {
         return out
     }
 
-    /// Keeps fits from undoing each other. Four panes side by side cannot all reach the column, so without this every
-    /// glance refitted the row and narrowed the pane fitted a moment before (four fits in 78 s, 2026-10-15). A pane a
-    /// fit narrowed is not refitted for `window`; a pane fitted within `window` keeps its fitted width as a floor
-    /// (`floors`), and a fit those floors keep from reaching the column is skipped (`allows`). Nothing is fitted in
-    /// the first `afterCalibration` seconds after a calibration, while the nose is still settling.
+    /// The widths for fitting pane `focus`, the one the nose rests on: panes fitted within `Hold.window` keep their
+    /// fit (`floors`) while the others can give the width, so fits do not undo each other; when they cannot, the pane
+    /// you rest on wins and every other pane gives its equal share. nil when there is nothing to do.
+    public static func restingFit(current: [Double], focus k: Int, width: Double,
+                                  minimum: Double = PaneWidths.narrowWidth, floors: [Double]) -> [Double]? {
+        if let kept = widths(current: current, focus: k, width: width, minimum: minimum, floors: floors),
+           kept[k] >= width - PaneWidths.tolerance { return kept }
+        return widths(current: current, focus: k, width: width, minimum: minimum)
+    }
+
+    /// What earlier fits leave in force. A pane fitted within `window` keeps its fitted width as a floor while
+    /// another pane is fitted (`restingFit`), and nothing is fitted in the first `afterCalibration` seconds after a
+    /// calibration, while the nose is still settling. A pane a fit narrowed is fitted again as soon as you rest on
+    /// it: every fit now waits for a rest (`Trigger`), and a rule that kept those panes narrow for three minutes
+    /// refused the session the owner was working in (0.2.18).
     public struct Hold: Sendable {
         public static let window: TimeInterval = 180
         public static let afterCalibration: TimeInterval = 5
 
         private var fitted: [String: (width: Double, at: TimeInterval)] = [:]
-        private var narrowed: [String: TimeInterval] = [:]
 
         public init() {}
 
-        /// Why `id` must not be fitted now, or nil. `calibratedAt`: when a calibration last ran (-infinity if never).
-        public func refusal(_ id: String, now: TimeInterval, calibratedAt: TimeInterval) -> String? {
-            if now - calibratedAt < Self.afterCalibration { return "calibration just ended" }
-            if let t = narrowed[id], now - t < Self.window { return "a fit narrowed it \(Int(now - t)) s ago" }
-            return nil
+        /// Why no pane may be fitted now, or nil. `calibratedAt`: when a calibration last ran (-infinity if never).
+        public func refusal(now: TimeInterval, calibratedAt: TimeInterval) -> String? {
+            now - calibratedAt < Self.afterCalibration ? "calibration just ended" : nil
         }
 
         /// The width each pane of the row keeps: its fitted width when it was fitted within `window`, else 0. The
@@ -79,24 +87,17 @@ public enum SessionFit {
             }
         }
 
-        /// Whether a planned fit is worth making: it reaches `width`, or no recently fitted pane held it back.
-        public static func allows(planned: [Double], focus k: Int, width: Double, floors: [Double]) -> Bool {
-            guard planned.indices.contains(k) else { return false }
-            return planned[k] >= width - PaneWidths.tolerance || !floors.contains { $0 > 0 }
-        }
-
-        /// A fit of `id` to `width` ran; `narrowed` are the panes it took width from.
+        /// A fit of `id` to `width` ran; `narrowed` are the panes it took width from, which no longer keep a fit.
         public mutating func noteFit(_ id: String, width: Double, narrowed ids: [String], at now: TimeInterval) {
             fitted[id] = (width, now)
-            narrowed[id] = nil
-            for n in ids { narrowed[n] = now; fitted[n] = nil }
+            for n in ids { fitted[n] = nil }
         }
 
         /// The owner asked for a layout (maximize, even out): earlier fits no longer hold anything.
-        public mutating func reset() { fitted = [:]; narrowed = [:] }
+        public mutating func reset() { fitted = [:] }
     }
 
-    /// Once per focus change, after focus has rested on one session for `settle`.
+    /// Once per focus change, after the nose has rested inside the focused session for `settle`.
     public struct Trigger: Sendable {
         private var session: String?
         private var since: TimeInterval = 0
@@ -104,14 +105,20 @@ public enum SessionFit {
 
         public init() {}
 
-        /// The session to fit now, or nil. Feed it the focused session on every tick; it answers once per focus
-        /// change, and only after that session has been the focus for `settle` seconds.
-        public mutating func observe(_ focused: String?, at t: TimeInterval) -> String? {
+        /// The session to fit now, or nil. Feed it the focused session and whether the nose is inside its frame on
+        /// every tick; it answers once per focus change, and only after that session has been the focus with the
+        /// nose inside it for `settle` seconds without a break. A focus change starts the wait again.
+        public mutating func observe(_ focused: String?, inside: Bool, at t: TimeInterval) -> String? {
             if focused != session { session = focused; since = t; fired = false }
+            if !inside { since = t }
             guard let id = session, !fired, t - since >= SessionFit.settle else { return nil }
             fired = true
             return id
         }
+
+        /// The fit it answered could not run yet (hands on the keyboard, another resize running): it answers again
+        /// on the next tick while the nose still rests there, and never once focus has moved on.
+        public mutating func retry() { fired = false }
 
         /// True while `observe` may still answer for `focused`: a focus it has not seen yet, or one still settling.
         /// The tick runs on a timer only while this or another time-based step waits.

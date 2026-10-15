@@ -275,6 +275,19 @@ private final class SpreadSim {
         #expect(d == [640, 1280, 1920])
     }
 
+    @Test func plannedWidthsGiveThePanesTheirNewFrames() throws {
+        let panes = [9.0, 649, 1289, 1929].map { CGRect(x: $0, y: 39, width: 630, height: 1309) }
+        let frames = try #require(PaneWidths.frames(panes: panes, dividers: [640, 1280, 1920], widths: [316, 1572, 316, 316]))
+        #expect(frames.map(\.minX) == [9, 335, 1917, 2243])
+        #expect(frames.map(\.width) == [316, 1572, 316, 316])
+        #expect(frames[3].maxX == panes[3].maxX)
+        #expect(frames.allSatisfy { $0.minY == 39 && $0.height == 1309 })
+        // Read back the way `layout` reads a row, the same widths come out.
+        let dividers = (0..<3).map { Double(frames[$0].maxX + frames[$0 + 1].minX) / 2 }
+        #expect(PaneWidths.layout(panes: frames, dividers: dividers).widths == [316, 1572, 316, 316])
+        #expect(PaneWidths.frames(panes: panes, dividers: [640], widths: [630, 630, 630, 630]) == nil)
+    }
+
     @Test func aMissingSplitterIsNoPlan() {
         let panes = [0.0, 853, 1706].map { CGRect(x: $0, y: 30, width: 854, height: 1327) }
         #expect(PaneWidths.dividers(between: panes, splitters: [CGRect(x: 847, y: 30, width: 12, height: 1327)]) == nil)

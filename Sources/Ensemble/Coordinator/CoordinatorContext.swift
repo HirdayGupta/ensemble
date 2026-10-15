@@ -24,6 +24,9 @@ final class CoordinatorContext {
     /// The overlay gets them through `OverlayController.update`.
     var nosePoint: CGPoint?
     var targetFrame: CGRect?
+    /// While a pane resize runs: where the resized session will end up, from the plan. The highlight goes there at
+    /// once instead of trailing Claude's frames, and the read-back corrects it when the resize ends.
+    var resizeFrame: (id: String, frame: CGRect)?
     /// Whether the person is speaking, from the level meter; never active while the meter is not running.
     var speech = SpeechLock()
     var sessions: [ClaudeSession] = []

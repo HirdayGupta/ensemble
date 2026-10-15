@@ -71,12 +71,103 @@ import Testing
         for x in w.prefix(3) { #expect(abs(x - claudeMin) < 0.001) }
     }
 
-    @Test func aSmallMoveGlidesInSteps() {
-        // A 104 pt fit: three Shift steps and one arrow, inside the budget.
-        let presses = PaneKeys.plan(from: [728, 896], to: [832, 792], minimum: claudeMin)
+    @Test func aSmallMoveIsShiftStepsAndAFewArrows() {
+        // A 104 pt fit: three Shift steps and one arrow, sent as one burst.
+        let presses = PaneKeys.plan(from: [728, 896], to: [832, 792], minimum: claudeMin, jumps: false)
         #expect(presses.map(\.key) == [.shiftRight, .shiftRight, .shiftRight, .right])
-        #expect(PaneKeys.duration(presses) <= PaneKeys.animateBudget)
+        #expect(PaneKeys.duration(presses) <= 0.05)
         #expect(abs(PaneKeys.simulate([728, 896], minimum: claudeMin, presses: presses)[0] - 832) <= PaneKeys.arrow / 2)
+    }
+
+    /// Runs maximize sweeps the way the controller does, against a Claude whose Home and End stop where its limits
+    /// put them while they still describe the row as it was when the sweep began. Returns the row and each sweep.
+    private func maximize(_ start: [Double], focus k: Int, estimate: Double) -> (widths: [Double], sweeps: [[PaneKeys.Press]]) {
+        var w = start
+        var sweeps: [[PaneKeys.Press]] = []
+        for _ in 0..<PaneKeys.maximizeSweeps {
+            let others = w.indices.filter { $0 != k }.map { w[$0] }
+            let sweep = PaneKeys.maximizeSweep(w, focus: k, floor: min(estimate, others.min() ?? estimate))
+            if sweep.isEmpty { break }
+            sweeps.append(sweep)
+            w = PaneKeys.simulate(w, minimum: claudeMin, presses: sweep, limitsFrom: w)
+        }
+        return (w, sweeps)
+    }
+
+    @Test(arguments: [2, 3, 4, 5, 6])
+    func maximizeSweepsLeaveEveryOtherPaneAtTheMinimum(_ n: Int) {
+        let total = Double(n) * 640
+        let piled = total - Double(n - 1) * claudeMin
+        let mins = Array(repeating: claudeMin, count: n - 1)
+        let uneven: [Double] = (0..<n).map { i -> Double in i % 2 == 0 ? 740 : 540 }
+        // Even, width piled up at either end, and an uneven row, each scaled to the same total.
+        let raw: [[Double]] = [Array(repeating: 640, count: n), [piled] + mins, mins + [piled], uneven]
+        let rows = raw.map { row -> [Double] in
+            let sum = row.reduce(0, +)
+            return row.map { $0 * total / sum }
+        }
+        for row in rows {
+            for k in 0..<n {
+                for estimate in [claudeMin - 6, claudeMin, claudeMin + 10] {
+                    let (w, sweeps) = maximize(row, focus: k, estimate: estimate)
+                    for i in w.indices where i != k { #expect(w[i] - claudeMin <= PaneKeys.arrow, "n \(n) k \(k) row \(row)") }
+                    #expect(abs(w[k] - piled) <= Double(n - 1) * PaneKeys.arrow)
+                    // Even against limits that lag a whole sweep behind, the sweeps allowed are enough.
+                    #expect(sweeps.count <= PaneKeys.maximizeSweeps)
+                    for sweep in sweeps {
+                        // Each divider once per sweep, and only Home or End.
+                        #expect(Set(sweep.map(\.divider)).count == sweep.count)
+                        #expect(sweep.allSatisfy { $0.key == .home || $0.key == .end })
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func aSweepGoesOutsideIn() {
+        let sweep = PaneKeys.maximizeSweep([640, 640, 640, 640, 640], focus: 2, floor: claudeMin)
+        #expect(sweep == [.init(0, .home), .init(1, .home), .init(3, .end), .init(2, .end)])
+        // A pane at the minimum outside the first wide one is left alone; inside it, it gets width to pass on.
+        #expect(PaneKeys.maximizeSweep([316, 900, 316, 1000], focus: 3, floor: claudeMin) == [.init(1, .home), .init(2, .home)])
+        #expect(PaneKeys.maximizeSweep([900, 316, 1300], focus: 2, floor: claudeMin) == [.init(0, .home), .init(1, .home)])
+        // Already maximized: nothing to press.
+        #expect(PaneKeys.maximizeSweep([316, 1572, 320, 316], focus: 1, floor: claudeMin).isEmpty)
+        #expect(PaneKeys.maximizeSweep([316, 1572], focus: 3, floor: claudeMin).isEmpty)
+    }
+
+    @Test func aClaudeWithStaleLimitsStopsShortOnTheFirstSweep() {
+        // Why one sweep is not enough: the inner pair grew before its End, and Claude's limit was still a share of
+        // the pair as it was.
+        let start = [630.0, 630, 630, 630]
+        let once = PaneKeys.simulate(start, minimum: claudeMin, presses: PaneKeys.maximizeSweep(start, focus: 1, floor: claudeMin),
+                                     limitsFrom: start)
+        #expect(once[2] > claudeMin + PaneKeys.arrow)
+        #expect(maximize(start, focus: 1, estimate: claudeMin).sweeps.count == 2)
+    }
+
+    @Test func everyPlanVisitsEachDividerOnceWithFewArrows() throws {
+        let rows: [[Double]] = [[316, 1572, 316, 316], [630, 630, 630, 630], [1000, 400, 700, 420], [316, 316, 316, 316, 1256]]
+        for row in rows {
+            let targets = [try #require(PaneKeys.evenWidths(row))]
+                + row.indices.compactMap { SessionFit.widths(current: row, focus: $0, width: 832, minimum: claudeMin) }
+            for target in targets {
+                for jumps in [true, false] {
+                    let presses = PaneKeys.plan(from: row, to: target, minimum: claudeMin, jumps: jumps)
+                    // One burst per divider: its keys are contiguous.
+                    var seen: [Int] = []
+                    for p in presses where seen.last != p.divider {
+                        #expect(!seen.contains(p.divider))
+                        seen.append(p.divider)
+                    }
+                    for d in seen {
+                        let keys = presses.filter { $0.divider == d }.map(\.key)
+                        #expect(keys.filter { $0 == .left || $0 == .right }.count <= 3)
+                    }
+                    let w = PaneKeys.simulate(row, minimum: claudeMin, presses: presses)
+                    for i in w.indices { #expect(abs(w[i] - target[i]) <= PaneKeys.arrow + 0.001, "\(row) to \(target)") }
+                }
+            }
+        }
     }
 
     @Test func aLongMoveJumpsThenSteps() {
