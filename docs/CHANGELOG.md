@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- The menu bar panel says "Claude isn't on screen" instead of "Watching" while Claude runs but none of its windows is on screen (another Space, minimized, behind a full-screen app), and goes back to "Watching" when a session is found.
 - Return twice while talking sends again when the stop takes longer than half a second: Ensemble switching its own key watch off after the stop came back from macOS as a pause, counted as typing, and refused the send with "You just typed or clicked". The watch now also stays on until a send asked for with Return is done, so a key typed meanwhile still refuses it.
 - The session list no longer empties for a second when Claude's tree reads empty while it re-renders: one empty scan keeps the sessions while their dictation checkboxes still answer, and two in a row drop them.
 - Ensemble costs Claude far less: the once-a-second session check re-reads only the known dictation checkboxes and pane frames, and walks Claude's whole accessibility tree only when its windows change, something stops answering, or every 10 seconds. A walk stops after 2 seconds, so a hung Claude cannot stall Ensemble's own Claude work.

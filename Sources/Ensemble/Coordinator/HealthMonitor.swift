@@ -15,6 +15,8 @@ final class HealthMonitor {
     private(set) var trackerReady = false
     private(set) var accessibilityTrusted = true
     private(set) var cameraAllowed = true
+    /// A session scan has finished since Claude started running; until then an empty list means "not looked yet".
+    var sessionsScanned = false
     private var lastCameraRestart = Date.distantPast
     private var claudeRunningCache: (value: Bool, at: TimeInterval)?
 
@@ -116,6 +118,7 @@ final class HealthMonitor {
         if ctx.cover.covered { return .cameraCovered }
         if !ctx.calibratedHere { return .needsCalibration }
         if !claudeRunning { return .claudeNotRunning }
+        if sessionsScanned, ctx.sessions.isEmpty { return .claudeNotOnScreen }
         return ctx.state.listening ? .listening : .watching
     }
 }

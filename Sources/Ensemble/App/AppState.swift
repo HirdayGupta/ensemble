@@ -9,6 +9,7 @@ enum AppStatus: Equatable {
     case needsCalibration
     case needsPermission(String)
     case claudeNotRunning
+    case claudeNotOnScreen
     case error(String)
 }
 
@@ -71,6 +72,7 @@ extension AppStatus {
         case .needsCalibration: return "Needs calibration"
         case .needsPermission(let what): return "Needs permission: \(what)"
         case .claudeNotRunning: return "Claude is not running"
+        case .claudeNotOnScreen: return "Claude isn't on screen"
         case .error(let message): return message
         }
     }
