@@ -116,6 +116,7 @@ final class HealthMonitor {
         if ctx.cover.covered { return .cameraCovered }
         if !ctx.calibratedHere { return .needsCalibration }
         if !claudeRunning { return .claudeNotRunning }
+        if ctx.sessions.isEmpty { return .claudeNotOnScreen }
         return ctx.state.listening ? .listening : .watching
     }
 }
