@@ -501,9 +501,10 @@ final class Coordinator: AppCoordinating {
     }
 
     /// Any key, click, scroll or pointer movement of yours pauses Ensemble until the hardware has rested for the
-    /// quiet time: no focus moves, no highlight moves, no gesture acted on, the dot and highlight faded out. The camera
-    /// and tracking keep running so resuming is instant, and the dictation safety checks never pause. Keys the Return
-    /// watch held back, keys Ensemble posts and the pointer moves of its own scrolls are not yours.
+    /// quiet time: keyboard focus and the highlight hold, nothing is resized, the dot and highlight fade out. Gestures
+    /// still work, on the session the nose is on. The camera and tracking keep running so resuming is instant, and the
+    /// dictation safety checks never pause. Keys the Return watch held back, keys Ensemble posts and the pointer moves
+    /// of its own scrolls are not yours.
     private func updateHandsBusy(now: TimeInterval) {
         handsBusy.quiet = settings.pauseAfterInputSeconds
         let input = ClaudeBridge.lastHardwareInput(now: now)
