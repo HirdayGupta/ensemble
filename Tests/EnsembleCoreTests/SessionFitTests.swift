@@ -102,19 +102,95 @@ import Testing
         #expect(ChatColumn.paneWidth(column: 832, pane: pane, transcript: CGRect(x: 0, y: 40, width: 900, height: 10)) == 832)
     }
 
-    @Test func memoryKeepsTheLatestReadingAndFallsBack() {
+    @Test func memoryTakesClaudesOwnColumnsAndFallsBack() {
         var m = ChatColumn.Memory()
         #expect(m.width == SessionFit.fallbackColumn)
-        m.note([nil, nil])
+        m.note([nil, nil], panes: [600, 600])
         #expect(m.measured == nil)
-        m.note([nil, 1024, 832])
+        m.note([nil, 1024, 832], panes: [600, 1300, 1000])
         #expect(m.width == 1024)
-        m.note([832])
+        // The widest reliable reading is kept, never simply the latest.
+        m.note([832], panes: [1000])
+        #expect(m.width == 1024)
+    }
+
+    @Test func aReadingThatFollowsThePaneWidthIsNotTheColumn() {
+        // Measured 2026-10-15: panes of 864 and 774 pt read 736 and 646, their own width less 128.
+        var m = ChatColumn.Memory()
+        m.note([736], panes: [864])
+        m.note([646], panes: [774])
+        m.note([700], panes: [828])
+        #expect(m.measured == nil)
         #expect(m.width == 832)
     }
 
-    @Test func explicitWidthsAreAGoalTheRowSettlesOn() {
-        #expect(PaneWidths.targets(count: 3, available: 1800, goal: .widths([840, 480, 480])) == [840, 480, 480])
-        #expect(PaneWidths.targets(count: 2, available: 1800, goal: .widths([840, 480, 480])) == [])
+    @Test func anUnknownColumnCountsOnceTwoPaneWidthsAgree() {
+        var m = ChatColumn.Memory()
+        m.note([900], panes: [1100])
+        #expect(m.measured == nil)
+        // Same width read from a pane only 20 pt different: still not proof.
+        m.note([900], panes: [1120])
+        #expect(m.measured == nil)
+        m.note([901], panes: [1300])
+        #expect(m.measured == 901)
+    }
+}
+
+@Suite struct SessionFitHoldTests {
+    private let never = -Double.infinity
+
+    @Test func perPaneFloorsKeepAFittedPane() throws {
+        // Pane 0 was fitted to 832; fitting pane 2 may take from panes 1 and 3 only.
+        let w = try #require(SessionFit.widths(current: [832, 600, 500, 588], focus: 2, width: 832, floors: [832, 0, 0, 0]))
+        #expect(w[0] == 832)
+        #expect(abs(w[2] - 832) < 0.001)
+        #expect(abs(w[1] - 434) < 0.001 && abs(w[3] - 422) < 0.001)
+    }
+
+    @Test func fitsNoLongerUndoEachOtherOnARowTooNarrowForAll() throws {
+        // Four 630 pt panes in 2520 pt cannot all reach 832.
+        var hold = SessionFit.Hold()
+        let ids = ["a", "b", "c", "d"]
+        var row = [630.0, 630, 630, 630]
+        let first = try #require(SessionFit.widths(current: row, focus: 0, width: 832,
+                                                   floors: hold.floors(ids, focus: 0, now: 10)))
+        #expect(SessionFit.Hold.allows(planned: first, focus: 0, width: 832, floors: hold.floors(ids, focus: 0, now: 10)))
+        hold.noteFit("a", width: 832, narrowed: ["b", "c", "d"], at: 10)
+        row = first
+        // A glance at b, c or d a moment later: each was narrowed by that fit, so it is left alone.
+        for id in ["b", "c", "d"] { #expect(hold.refusal(id, now: 20, calibratedAt: never) != nil) }
+        // After the hold, fitting d keeps a at its fit; the others can give enough, so it goes ahead.
+        let floors = hold.floors(ids, focus: 3, now: 200)
+        #expect(floors == [0, 0, 0, 0])
+        hold.noteFit("b", width: 832, narrowed: ["c", "d"], at: 200)
+        // c, freshly narrowed, waits; a fit of a now keeps b's fit as a floor and cannot reach 832: skipped.
+        let f = hold.floors(ids, focus: 0, now: 210)
+        #expect(f == [0, 832, 0, 0])
+        let plan = try #require(SessionFit.widths(current: [600, 832, 300, 500], focus: 0, width: 832, floors: f))
+        #expect(!SessionFit.Hold.allows(planned: plan, focus: 0, width: 832, floors: f))
+    }
+
+    @Test func nothingIsFittedJustAfterCalibration() {
+        let hold = SessionFit.Hold()
+        #expect(hold.refusal("a", now: 103, calibratedAt: 100) != nil)
+        #expect(hold.refusal("a", now: 106, calibratedAt: 100) == nil)
+        #expect(hold.refusal("a", now: 106, calibratedAt: -.infinity) == nil)
+    }
+
+    @Test func anAskedForLayoutClearsTheHold() {
+        var hold = SessionFit.Hold()
+        hold.noteFit("a", width: 832, narrowed: ["b"], at: 10)
+        hold.reset()
+        #expect(hold.refusal("b", now: 11, calibratedAt: -.infinity) == nil)
+        #expect(hold.floors(["a", "b"], focus: 1, now: 11) == [0, 0])
+    }
+
+    @Test func aPaneFittedAgainIsNoLongerHeldNarrow() {
+        var hold = SessionFit.Hold()
+        hold.noteFit("a", width: 832, narrowed: ["b"], at: 10)
+        hold.noteFit("b", width: 832, narrowed: ["a"], at: 300)
+        #expect(hold.refusal("b", now: 301, calibratedAt: -.infinity) == nil)
+        #expect(hold.refusal("a", now: 301, calibratedAt: -.infinity) != nil)
+        #expect(hold.floors(["a", "b"], focus: 0, now: 301) == [0, 832])
     }
 }
