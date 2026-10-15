@@ -18,7 +18,9 @@ LOG=build/ship.log
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG"; }
 
 # Only a clean main that matches GitHub ships: the release must be exactly what was merged.
-git fetch --quiet origin main gh-pages
+# Explicit refspecs: a clone made for one branch (the production Mac's job service clone) has no fetch refspec, so a
+# plain fetch would leave origin/gh-pages and the remote tags missing.
+git fetch --quiet --tags origin +refs/heads/main:refs/remotes/origin/main +refs/heads/gh-pages:refs/remotes/origin/gh-pages
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { log "error: HEAD is not origin/main; check out main and pull first"; exit 1; }
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { log "error: uncommitted changes; this must be a clean main"; exit 1; }
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { log "error: $TAG already exists; versions are never reused"; exit 1; }
