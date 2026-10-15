@@ -53,7 +53,7 @@ private struct GeneralSettings: View {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
                 Toggle("Play sounds", isOn: $settings.playSounds)
-                Toggle("Fade out and pause other audio while dictating", isOn: $settings.pauseMediaWhileDictating)
+                Toggle("Pause other audio while dictating", isOn: $settings.pauseMediaWhileDictating)
                 Text("Only when the sound comes from speakers the microphone can hear; headphones are left alone.")
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Pause after typing or mouse use") {
@@ -81,7 +81,7 @@ private struct GeneralSettings: View {
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Checks soon after launch and then every hour; the button shows a new version as soon as one is found. A new version installs only while you are not dictating, calibrating or in the tour, and Ensemble then restarts on its own. Off: nothing is checked until you press Check for Updates.")
+                Text("On: checks soon after launch and then every hour, and installs a new version by itself once you have been idle for 30 seconds (not dictating, sending, calibrating or in the tour); Ensemble reopens on its own. Off: nothing is checked until you press Check for Updates, which asks once before installing. \"Update to\" installs in one press.")
             }
             Section("Tour") {
                 Button("Replay tour") { replayTour(nil) }

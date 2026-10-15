@@ -30,6 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .contains(where: { $0.processIdentifier != me.processIdentifier }) {
             exit(0)
         }
+        // The copy Sparkle opened after an update, with open at login on: quit before the camera starts and let
+        // launchd start its own job, so crash restarts keep working.
+        if MainActor.assumeIsolated({ UpdateController.afterLaunch() }) {
+            Permissions.reopenAfterExit()
+            EnsembleLog.flush()
+            exit(0)
+        }
         NSApp.setActivationPolicy(.accessory)
         MainActor.assumeIsolated { AppEnvironment.shared.start() }
     }

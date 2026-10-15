@@ -3,15 +3,23 @@ import CoreGraphics
 import EnsembleCore
 import Foundation
 
-/// Pane widths. Claude's side-by-side panes are resized only by dragging the divider between two of them; its
-/// accessibility tree names each divider (`ClaudeLabels.paneResize`), which is how Ensemble finds where to grab.
+/// Pane widths. Claude resizes its side-by-side panes only through the divider between two of them, an `AXSplitter`
+/// labelled `ClaudeLabels.paneResize`. Setting its value through Accessibility is accepted and ignored; once the
+/// divider holds keyboard focus, the arrows, Home and End move it (`PaneKeys`, docs/gotchas.md, 2).
 extension ClaudeBridge {
-    /// The frames of the pane-column dividers in the window holding `s`. Empty when none answer. The transcript is
-    /// not entered: it holds most of the nodes and never holds a divider.
-    func paneDividers(in s: ClaudeSession) async -> [CGRect] {
+    struct PaneDivider {
+        let element: AXUIElement
+        let frame: CGRect
+        /// The lower limit of the pair's split, in percent of the pair, as Claude reports it.
+        let minPercent: Double?
+    }
+
+    /// The pane-column dividers in the window holding `s`. Empty when none answer. The transcript is not entered:
+    /// it holds most of the nodes and never holds a divider.
+    func paneDividers(in s: ClaudeSession) async -> [PaneDivider] {
         await run {
             guard let entry = self.liveEntry(s) else { return [] }
-            var found: [CGRect] = []
+            var found: [PaneDivider] = []
             var count = 0
             let deadline = Date().addingTimeInterval(1)
             func go(_ el: AXUIElement, _ depth: Int) {
@@ -20,7 +28,7 @@ extension ClaudeBridge {
                 let v = AX.multi(el, [kAXRoleAttribute, kAXDescriptionAttribute, kAXChildrenAttribute])
                 let desc = v[1] as? String
                 if (v[0] as? String) == "AXSplitter", desc == ClaudeLabels.paneResize {
-                    if let f = AX.frame(el) { found.append(f) }
+                    if let f = AX.frame(el) { found.append(PaneDivider(element: el, frame: f, minPercent: AX.number(el, kAXMinValueAttribute))) }
                     return
                 }
                 if desc == ClaudeLabels.transcript { return }
@@ -28,6 +36,46 @@ extension ClaudeBridge {
             }
             go(entry.elements.window, 0)
             return found
+        }
+    }
+
+    /// Gives `divider` keyboard focus, so the keys Ensemble posts next move it, and confirms that it holds it. Only
+    /// with Claude in front; never raises Claude or moves it in front. With several Claude windows the session's own
+    /// is made main if the focus does not land. False when it has not landed yet: right after a burst of keys on
+    /// another divider it took up to 1.6 s (measured 2026-10-15), so the caller keeps checking `dividerHoldsKeyboard`.
+    func focusDivider(_ divider: AXUIElement, in s: ClaudeSession) async -> Bool {
+        await run {
+            guard self.claudeIsFrontmost(), let pid = self.claudePID else { return false }
+            if self.holdsKeyboard(divider, pid: pid) { return true }
+            AX.set(divider, kAXFocusedAttribute, kCFBooleanTrue)
+            if self.waitForKeyboard(divider, pid: pid) { return true }
+            guard let entry = self.liveEntry(s) else { return false }
+            AX.set(entry.elements.window, kAXMainAttribute, kCFBooleanTrue)
+            AX.set(divider, kAXFocusedAttribute, kCFBooleanTrue)
+            return self.waitForKeyboard(divider, pid: pid)
+        }
+    }
+
+    /// True while Claude is in front and `divider` still holds its keyboard focus: a key posted now moves it.
+    func dividerHoldsKeyboard(_ divider: AXUIElement) async -> Bool {
+        await run {
+            guard self.claudeIsFrontmost(), let pid = self.claudePID else { return false }
+            return self.holdsKeyboard(divider, pid: pid)
+        }
+    }
+
+    private func holdsKeyboard(_ el: AXUIElement, pid: pid_t) -> Bool {
+        AX.element(AX.application(pid: pid), kAXFocusedUIElementAttribute).map { CFEqual($0, el) } ?? false
+    }
+
+    /// Focus lands a moment after it is set (about 20 ms from the message box); polls for up to 0.2 s. Longer waits
+    /// are the caller's, between short reads, so the bridge queue is never held.
+    private func waitForKeyboard(_ el: AXUIElement, pid: pid_t) -> Bool {
+        let deadline = Date().addingTimeInterval(0.2)
+        while true {
+            if holdsKeyboard(el, pid: pid) { return true }
+            if Date() >= deadline { return false }
+            Thread.sleep(forTimeInterval: 0.01)
         }
     }
 
@@ -59,11 +107,22 @@ extension ClaudeBridge {
         }
     }
 
-    /// One synthetic left-button event at `point`, through the session event tap: the path Claude's web content
-    /// receives, as scrolling found (docs/gotchas.md, 3). The caller puts the pointer back when the drag ends.
-    static func postMouse(_ type: CGEventType, at point: CGPoint) {
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
-        event.setIntegerValueField(.mouseEventClickState, value: 1)
-        event.post(tap: .cgSessionEventTap)
+    /// One press and release of `key`, through the session event tap to the app in front, with exactly the Shift
+    /// flag the key needs and no other. The caller has confirmed a divider holds Claude's keyboard focus and marks
+    /// the keys as its own (`ownKeys(began:)`), so they never count as the owner typing.
+    static func postKey(_ key: PaneKeys.Key) {
+        let code: CGKeyCode
+        switch key {
+        case .left, .shiftLeft: code = 123
+        case .right, .shiftRight: code = 124
+        case .home: code = 115
+        case .end: code = 119
+        }
+        let flags: CGEventFlags = key == .shiftLeft || key == .shiftRight ? .maskShift : []
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { continue }
+            event.flags = flags
+            event.post(tap: .cgSessionEventTap)
+        }
     }
 }

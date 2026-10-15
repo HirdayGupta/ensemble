@@ -265,100 +265,7 @@ private final class SpreadSim {
     }
 }
 
-/// A stand-in for Claude's pane row: each divider drag moves only the pair beside it and stops at `minimum`.
-private struct FakeRow {
-    var widths: [Double]
-    let gap: Double
-    let left: Double
-    let minimum: Double
-
-    var panes: [CGRect] {
-        var x = left
-        return widths.map { w in defer { x += w + gap }; return CGRect(x: x, y: 30, width: w, height: 1300) }
-    }
-    var dividers: [Double] { (0..<(widths.count - 1)).map { Double(panes[$0].maxX) + gap / 2 } }
-
-    mutating func drag(_ j: Int, to x: Double) {
-        let pair = widths[j] + widths[j + 1]
-        let wanted = x - gap / 2 - Double(panes[j].minX)
-        widths[j] = min(max(wanted, minimum), pair - minimum)
-        widths[j + 1] = pair - widths[j]
-    }
-
-    /// Runs the planner to the end, as the controller does, and returns how many drags it took.
-    @discardableResult
-    mutating func settle(_ goal: PaneWidths.Goal) -> Int {
-        var stuck = Set<Int>()
-        for n in 0..<20 {
-            guard let m = PaneWidths.nextMove(panes: panes, dividers: dividers, goal: goal, stuck: stuck) else { return n }
-            let before = dividers[m.divider]
-            drag(m.divider, to: m.toX)
-            if abs(dividers[m.divider] - before) < 2 { stuck.insert(m.divider) }
-        }
-        return 20
-    }
-}
-
 @Suite struct PaneWidthsTests {
-    @Test func maximizeLeavesTheOthersNarrow() {
-        let t = PaneWidths.targets(count: 4, available: 2520, goal: .maximize(2))
-        #expect(t == [300, 300, 1620, 300])
-    }
-
-    @Test func evenOutSplitsEqually() {
-        #expect(PaneWidths.targets(count: 3, available: 2400, goal: .evenOut) == [800, 800, 800])
-    }
-
-    @Test func aWindowTooNarrowToMaximizeStaysEven() {
-        #expect(PaneWidths.targets(count: 4, available: 1200, goal: .maximize(0)) == [300, 300, 300, 300])
-    }
-
-    @Test(arguments: [0, 1, 2, 3])
-    func maximizeThenEvenOutRoundTrips(_ k: Int) {
-        var row = FakeRow(widths: [630, 630, 630, 630], gap: 10, left: 0, minimum: 200)
-        let drags = row.settle(.maximize(k))
-        #expect(drags <= 3)
-        for (i, w) in row.widths.enumerated() {
-            if i == k { #expect(w > 1500) } else { #expect(abs(w - 300) <= PaneWidths.tolerance) }
-        }
-        row.settle(.evenOut)
-        for w in row.widths { #expect(abs(w - 630) <= PaneWidths.tolerance + 1) }
-    }
-
-    @Test func maximizingAnotherSessionMovesTheWidthAcross() {
-        var row = FakeRow(widths: [630, 630, 630, 630], gap: 10, left: 0, minimum: 200)
-        row.settle(.maximize(0))
-        row.settle(.maximize(3))
-        #expect(row.widths[3] > 1500)
-        for w in row.widths.prefix(3) { #expect(abs(w - 300) <= PaneWidths.tolerance + 1) }
-    }
-
-    @Test func claudesOwnLargerMinimumEndsTheDragsWithoutLooping() {
-        var row = FakeRow(widths: [630, 630, 630, 630], gap: 10, left: 0, minimum: 400)
-        #expect(row.settle(.maximize(1)) < 20)
-        #expect(row.widths[1] > 1100)
-        for (i, w) in row.widths.enumerated() where i != 1 { #expect(abs(w - 400) < 1) }
-    }
-
-    @Test func twoPanes() {
-        var row = FakeRow(widths: [1275, 1275], gap: 10, left: 0, minimum: 200)
-        #expect(row.settle(.maximize(1)) == 1)
-        #expect(abs(row.widths[0] - 300) <= PaneWidths.tolerance)
-        #expect(row.settle(.evenOut) == 1)
-    }
-
-    @Test func anEvenRowNeedsNoDrag() {
-        let row = FakeRow(widths: [850, 850, 850], gap: 0, left: 0, minimum: 200)
-        #expect(PaneWidths.nextMove(panes: row.panes, dividers: row.dividers, goal: .evenOut) == nil)
-    }
-
-    @Test func badInputPlansNothing() {
-        let row = FakeRow(widths: [850, 850, 850], gap: 0, left: 0, minimum: 200)
-        #expect(PaneWidths.nextMove(panes: row.panes, dividers: [850], goal: .evenOut) == nil)
-        #expect(PaneWidths.nextMove(panes: row.panes, dividers: [.nan, 1700], goal: .evenOut) == nil)
-        #expect(PaneWidths.nextMove(panes: [row.panes[0]], dividers: [], goal: .evenOut) == nil)
-    }
-
     @Test func dividersPairWithTheSplitterAtEachGap() throws {
         // Measured on Claude: four 630 pt panels 10 pt apart, each divider a 12 pt splitter over the gap.
         let panes = [9.0, 649, 1289, 1929].map { CGRect(x: $0, y: 39, width: 630, height: 1309) }
@@ -379,32 +286,5 @@ private struct FakeRow {
         let other = ClaudeSession(id: "c", frame: CGRect(x: 1706, y: 30, width: 854, height: 1327), windowNumber: 2)
         let below = ClaudeSession(id: "d", frame: CGRect(x: 0, y: 1400, width: 854, height: 300), windowNumber: 1)
         #expect(PaneWidths.row(of: a, in: [a, other, below, b]).map(\.id) == ["b", "a"])
-    }
-}
-
-@Suite struct SmoothCurveTests {
-    @Test func startsAtRestEndsOnTimeAndNeverOvershoots() {
-        let d = PaneWidths.dragDuration
-        #expect(SmoothCurve.progress(t: 0, duration: d) == 0)
-        #expect(SmoothCurve.progress(t: d, duration: d) == 1)
-        var last = 0.0
-        for i in 1...300 {
-            let p = SmoothCurve.progress(t: d * Double(i) / 300, duration: d)
-            #expect(p >= last && p <= 1)
-            last = p
-        }
-    }
-
-    @Test func noFrameJumps() {
-        // At 60 frames a second no step covers more than a sixth of the move, and the last one is tiny.
-        let d = PaneWidths.dragDuration
-        let steps = (1...18).map { SmoothCurve.progress(t: Double($0) / 60, duration: d) - SmoothCurve.progress(t: Double($0 - 1) / 60, duration: d) }
-        #expect(steps.allSatisfy { $0 < 1.0 / 6 })
-        #expect(steps.last! < 0.01)
-    }
-
-    @Test func badInputFinishes() {
-        #expect(SmoothCurve.progress(t: .nan, duration: 0.3) == 1)
-        #expect(SmoothCurve.progress(t: 0.1, duration: 0) == 1)
     }
 }

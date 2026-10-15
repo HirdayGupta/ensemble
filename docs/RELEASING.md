@@ -11,7 +11,7 @@ How a release is built, signed, notarized, published, and delivered to installed
 | `scripts/appcast.sh` | Adds a DMG to the Sparkle appcast with Sparkle's `generate_appcast`; refuses to write an appcast whose items lack an EdDSA signature. |
 | `.github/workflows/release.yml` | On tag `v*`: build, test, import the certificate, run `release.sh`, create the GitHub Release with `gh release create`, update the appcast on the `gh-pages` branch. Hardened like the other workflows (no default permissions, actions pinned to commit SHAs, no stored checkout credentials). Stays disabled on the repository until Developer ID signing exists. |
 | `.github/workflows/ci.yml` | On every pull request and push to `main`: `ci` builds in release mode, runs the tests and the repository's network and size checks; `hygiene` runs zizmor, pinact and a secrets scan over the whole history; `coverage`, `periphery` and `website-tests` check EnsembleCore coverage, unused code and the website logic; `gate` passes only when all of them did. It never signs or publishes. |
-| `Sources/Ensemble/App/UpdateController.swift` | The Sparkle wrapper: feed URL constant, update policy. |
+| `Sources/Ensemble/App/UpdateController.swift` | The Sparkle wrapper and Ensemble's own update interface: feed URL constant, the one alert, the idle gate, the relaunch record. |
 
 Log of the last `release.sh` run: `build/release.log`.
 
@@ -97,7 +97,21 @@ GitHub Pages serves the `gh-pages` branch: `appcast.xml` (written by `release.ym
 ## How updates reach users
 
 - Each installed copy reads the appcast at `UpdateConfig.feedURL` (GitHub Pages, HTTPS), compares the build number, downloads the DMG from the GitHub Release, verifies the EdDSA signature against `SUPublicEDKey` and the Apple code signature, then replaces the app and relaunches.
-- Policy in `UpdateController.swift`: no network until the user turns on "Update automatically" in Settings, General (or presses Check for Updates). With it on, Ensemble checks 15 seconds after launch and Sparkle then checks every hour (`SUScheduledCheckInterval` = 3600, `UpdatePolicy.checkInterval`), downloads in the background, and installs only while Ensemble is idle (not dictating, calibrating or in the tour), then relaunches. Any check that finds a version, background ones included, turns the update button into "Update to x.y.z", and pressing it installs a version already downloaded at once. Sparkle's own "check automatically?" prompt is suppressed. With it off, a manual check is the only check.
+- Policy in `UpdateController.swift`: no network until the user turns on "Update automatically" in Settings, General (or presses Check for Updates). With it on, Ensemble checks 15 seconds after launch and Sparkle then checks every hour (`SUScheduledCheckInterval` = 3600, `UpdatePolicy.checkInterval`), downloads in the background, and installs after 30 seconds of unbroken idle time (not dictating, sending, calibrating or in the tour), then relaunches. Sparkle's own "check automatically?" prompt is suppressed. With it off, a manual check is the only check.
+- What the user sees. Ensemble draws its own update interface (`UpdateController` is Sparkle's `SPUUserDriver`); none of Sparkle's windows appear. Decisions are in `Sources/EnsembleCore/UpdateFlow.swift`.
+
+  | The user | Before (Sparkle's windows) | Now |
+  |---|---|---|
+  | Update automatically on | button showed the version; install on idle | installs by itself after 30 s idle, no question; the island says "Installing Ensemble x.y.z", then "Updated to x.y.z" after the reopen |
+  | Presses Check for Updates and a version exists | Check, "Update", "Install Update", restart, open by hand: six clicks | one alert, "Ensemble x.y.z is available. Install now?" with Install, Later and a "What's new" link; Install downloads, installs and reopens: two clicks |
+  | Button already says "Update to x.y.z" | press, then Sparkle's windows | one press does everything |
+  | Presses while dictating, sending, calibrating or in the tour | could restart Ensemble at once if the update was already downloaded | the button says "Installs x.y.z when you finish"; the install starts at the first idle moment |
+  | A background check finds a version with automatic install off (only if Sparkle's checks are on without downloads) | Sparkle's window | the alert once per version; Later stops it until the next launch or a press |
+  | The download or install fails | Sparkle's error window | one alert, "Ensemble could not update", with Retry |
+
+  The button reads "Checking..." during a check and "Installing x.y.z..." while it downloads and installs. "What's new" opens the release page in the browser; its address comes from the signed feed (the release notes link, or the GitHub release the download comes from), and Ensemble itself fetches nothing for it.
+- Relaunch. Sparkle's installer quits Ensemble, installs and opens the new copy. Three things back it up: (1) before quitting, Ensemble starts a detached shell in its own session (so launchd does not kill it with the login agent's job) that looks for a running Ensemble 30 and 60 seconds after the old copy exits and opens it if none is there; (2) with open at login on, the copy Sparkle opened is outside launchd's job, so it quits at once and asks launchd to start the job (`launchctl kickstart`), once only, which keeps crash restarts working; (3) the clean quit for the install exits with status 0, so the login agent's `KeepAlive` (restart on failure only) never starts a second copy, and a second copy would exit at launch anyway. The new copy logs "update: relaunched after update to x.y.z" with who started it, or "did not install" if the version did not change.
+- The new flow ships in a release, so it takes effect from the update after the one that carries it: installing that release still goes through the old windows.
 - To check for updates by default (Sparkle's standard behavior is a prompt on the second launch), remove the `updaterShouldPromptForPermissionToCheck` override and let Sparkle ask, or set `SUEnableAutomaticChecks` to true in `Info.plist` (no consent step).
 - A build whose `SUPublicEDKey` is still the placeholder, or whose feed URL still says `OWNER`, has updates off: the menu entry explains it and Sparkle never starts.
 
@@ -114,6 +128,16 @@ These need a notarized build on a real Mac and could not be run from the develop
 - Accessibility control of Claude and the pinch gestures work.
 - Settings, About, Check for Updates reaches the appcast and the button reads "Up to date" for a few seconds.
 - Install version N, publish N+1, confirm the update installs and the app relaunches (the login agent has `KeepAlive` only on failure exit, so Sparkle's clean quit should not fight it).
+
+## Check by hand on the first release after the one-click flow
+
+The first release that carries the flow is installed through the old windows; these checks need the release after it.
+
+1. Update automatically off, open at login on: Check for Updates shows one alert; Install; Ensemble quits and reopens with no other window, and the island says "Updated to x.y.z". `~/Library/Logs/Ensemble` has "relaunched as ... handing over to launchd", then "relaunched after update to x.y.z (started by the login agent)".
+2. Same with open at login off: the log says "(opened by Sparkle)".
+3. Press Later, then "Update to x.y.z": one press installs and reopens.
+4. Start a dictation, then press "Update to x.y.z": the button says "Installs x.y.z when you finish" and nothing installs until the dictation ends.
+5. Update automatically on: the update installs about 30 seconds after you stop using Ensemble, with no alert.
 
 ## Homebrew
 
