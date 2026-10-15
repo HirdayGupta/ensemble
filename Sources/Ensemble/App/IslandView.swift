@@ -45,6 +45,17 @@ struct IslandView: View {
         }
     }
 
+    /// How far toward the neighbour's column the lit column leans when the nose is at its session's edge. It
+    /// stays short of arriving: arriving is the switch itself.
+    private static let maxLean = 0.4
+
+    /// The columns toward the neighbouring session, while the nose nears (or is just across) its edge.
+    private var approach: SessionSwitch? {
+        guard model.listening, model.sessionSwitch == nil, let e = model.edge, e.warning.neighbourId != nil,
+              let ap = e.approach, ap.sessionCount > 1 else { return nil }
+        return ap
+    }
+
     private var name: String { model.sessionName ?? "this session" }
 
     var body: some View {
@@ -124,15 +135,25 @@ struct IslandView: View {
             EmptyView()
         case .dictating:
             HStack(spacing: 11) {
-                if model.liveSoundBars {
+                if let ap = approach {
+                    SessionColumnsGlyph(count: ap.sessionCount, groupBreaks: ap.groupBreaks, from: ap.fromIndex, to: ap.toIndex,
+                                        progress: Self.maxLean * (model.edge?.warning.proximity ?? 0))
+                        .frame(width: 56, height: 16)
+                        .transition(.opacity)
+                } else if model.liveSoundBars {
                     SoundWaves(color: .ensembleBlue, level: model.audioLevel).frame(width: 26, height: 16)
                 } else {
                     BlinkingMic()
                 }
-                lines(Text("Claude dictation on"), Text("in ") + session(name))
+                if let ap = approach {
+                    lines(Text("Dictation on, looking toward ") + session(ap.name ?? "another session"), Text("in ") + session(name))
+                } else {
+                    lines(Text("Claude dictation on"), Text("in ") + session(name))
+                }
                 Spacer(minLength: 8)
                 hint("double pinch to stop")
             }
+            .animation(.smooth(duration: 0.3), value: approach != nil)
         case .switching:
             HStack(spacing: 11) {
                 switchGlyph.frame(width: switchGlyphWidth, height: 16)

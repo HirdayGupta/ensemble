@@ -17,6 +17,8 @@ final class CoordinatorContext {
     let pointer = NosePointer()
 
     var latestHead: HeadObservation?
+    /// Whether the person is speaking, from the level meter; never active while the meter is not running.
+    var speech = SpeechLock()
     var sessions: [ClaudeSession] = []
     /// The session being dictated into, from the press until the stop is confirmed.
     var listening: ClaudeSession?

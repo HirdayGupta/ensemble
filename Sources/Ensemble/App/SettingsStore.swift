@@ -15,6 +15,7 @@ final class SettingsStore: ObservableObject {
         static let pointerSmoothing = "pointerSmoothing"
         static let reverseScroll = "reverseScroll"
         static let liveSoundBars = "liveSoundBars"
+        static let warnWhenLeavingClaude = "warnWhenLeavingClaude"
         static let playSounds = "playSounds"
         static let pauseMediaWhileDictating = "pauseMediaWhileDictating"
         static let calibration = "calibration"
@@ -39,6 +40,9 @@ final class SettingsStore: ObservableObject {
     /// Off by default: the listening sign is a blinking microphone dot and Ensemble never asks for the microphone.
     /// On: sound bars follow the voice level, which needs microphone permission.
     @Published var liveSoundBars: Bool { didSet { defaults.set(liveSoundBars, forKey: Key.liveSoundBars) } }
+    /// While dictating, an amber glow on the edge of the session you face when your look is heading somewhere
+    /// that is not Claude. On by default; the warning about another Claude session is always on.
+    @Published var warnWhenLeavingClaude: Bool { didSet { defaults.set(warnWhenLeavingClaude, forKey: Key.warnWhenLeavingClaude) } }
     @Published var sendCountdownSeconds: Double {
         didSet {
             let clamped = min(max(sendCountdownSeconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
@@ -83,6 +87,7 @@ final class SettingsStore: ObservableObject {
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
         reverseScroll = store.bool(forKey: Key.reverseScroll)
         liveSoundBars = store.bool(forKey: Key.liveSoundBars)
+        warnWhenLeavingClaude = bool(Key.warnWhenLeavingClaude, true)
         let seconds = store.object(forKey: Key.sendCountdownSeconds) as? Double ?? 0.75
         sendCountdownSeconds = min(max(seconds, Self.countdownRange.lowerBound), Self.countdownRange.upperBound)
 

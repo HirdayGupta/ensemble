@@ -279,7 +279,7 @@ final class Coordinator: AppCoordinating {
     /// When head readings stop (camera lost, face tracker stalled) the highlight and dot go away instead of freezing.
     private func dropStaleReadings() {
         guard let head = ctx.latestHead, CACurrentMediaTime() - head.t > Self.staleHeadSeconds else { return }
-        guard focus.hasTargetOrCandidate || dot.hasDot || state.nosePoint != nil else { return }
+        guard focus.hasTargetOrCandidate || dot.hasDot || dot.hasEdgeWarning || state.nosePoint != nil else { return }
         EnsembleLog.write("head readings stopped; clearing the highlight")
         focus.forgetTargetAndCandidate(); dot.clear()
         dot.place(target: nil)
@@ -360,6 +360,7 @@ final class Coordinator: AppCoordinating {
         dictation.restoreAudioIfIdle()
         let acting = ctx.listening ?? (gestures.progress?.action == .send ? send.lastSpoken?.session : nil) ?? focus.target
         ctx.overlay.setSession(name: acting.map(ctx.name(of:)), switching: focus.switching())
+        ctx.overlay.setEdge(dot.overlayEdge(focus: focus))
         ctx.overlay.update(target: state.targetFrame, nose: state.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()

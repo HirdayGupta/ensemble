@@ -11,6 +11,9 @@ final class AudioLevelMeter {
     /// False once `stop()` ran: a permission answer that arrives late must not switch the microphone on.
     private var wanted = false
 
+    /// True while the microphone tap is delivering levels (only with the microphone permission).
+    var isRunning: Bool { engine != nil }
+
     func start() {
         wanted = true
         guard engine == nil else { return }
