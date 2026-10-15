@@ -130,6 +130,8 @@ public final class NosePointer {
     @discardableResult
     public func fit(_ samples: [CalibrationSample]) -> Bool {
         guard let fitted = Self.fitAffine(samples, origin: .zero) else { return false }
+        // The same map again keeps the filter: a reset lets the next reading through unsmoothed and the dot jumps.
+        if fitted == model, screenModels.isEmpty { return true }
         model = fitted
         screenModels = []
         currentScreen = nil
@@ -162,6 +164,10 @@ public final class NosePointer {
                                    region: AngleRegion(samples: s.samples, expand: Self.regionExpansion),
                                    geometry: geometry, spotID: s.spotID, spotPosition: spotPosition))
         }
+        // Refitting the samples already in use (a camera report, a screen notification that changed nothing)
+        // keeps the filter, the head-position tracker and the screen in use: a reset lets the next reading
+        // through unsmoothed, which shows as a hitch in the dot.
+        if out == screenModels, model == nil { return true }
         screenModels = out
         model = nil
         currentScreen = nil

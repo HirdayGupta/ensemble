@@ -27,6 +27,8 @@ final class SettingsStore: ObservableObject {
         static let tourCompleted = "tourCompleted"
         static let tourSkipped = "tourSkipped"
         static let setupProfiles = "setupProfiles"
+        static let lastCameraID = "lastCameraID"
+        static let lastRestoreSignature = "lastRestoreSignature"
     }
 
     static let countdownRange: ClosedRange<Double> = 0.5...3
@@ -80,6 +82,11 @@ final class SettingsStore: ObservableObject {
     /// tagged per screen. `calibration`/`calibrationDisplays` above are the single setup this replaces;
     /// they stay for the one-time migration into this on first launch after the upgrade.
     @Published var setupProfiles: Data? { didSet { defaults.set(setupProfiles, forKey: Key.setupProfiles) } }
+    /// The camera the engine last reported, so a launch can point with that camera's calibration before the camera
+    /// starts. Not published: no view shows it.
+    var lastCameraID: String? { didSet { defaults.set(lastCameraID, forKey: Key.lastCameraID) } }
+    /// The setup the "Desk setup recognised" banner last announced, so a relaunch on the same setup stays quiet.
+    var lastRestoreSignature: String? { didSet { defaults.set(lastRestoreSignature, forKey: Key.lastRestoreSignature) } }
 
     init(defaults: UserDefaults? = nil) {
         // In the packaged app the bundle identifier is "dev.ensemble.app", so the standard domain already is that
@@ -105,6 +112,8 @@ final class SettingsStore: ObservableObject {
         tourCompleted = bool(Key.tourCompleted, false)
         tourSkipped = bool(Key.tourSkipped, false)
         setupProfiles = store.data(forKey: Key.setupProfiles)
+        lastCameraID = store.string(forKey: Key.lastCameraID)
+        lastRestoreSignature = store.string(forKey: Key.lastRestoreSignature)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? PointerSmoothing.defaultLevel
         correctForPosition = bool(Key.correctForPosition, true)
