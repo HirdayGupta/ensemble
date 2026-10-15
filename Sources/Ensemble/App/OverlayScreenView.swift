@@ -26,10 +26,11 @@ struct OverlayScreenView: View {
                         insertion: .opacity.combined(with: .scale(scale: 1.008)).animation(.smooth(duration: 0.5).delay(0.06)),
                         removal: .opacity.combined(with: .scale(scale: 0.996)).animation(.smooth(duration: 0.4))))
             }
-            // While listening there is no dot: a red marker on the session's edge points at where the nose went.
-            if model.listening, let nose = model.nose, let target = model.target, let local = local(target) {
-                EdgeIndicator(frame: local, toward: CGPoint(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY))
-                    .animation(.linear(duration: 0.1), value: nose)
+            // While listening there is no dot: the edge warning shows where the look is heading.
+            if model.listening, let edge = model.edge {
+                EdgeWarningOverlay(edge: edge, screenFrame: screenFrame, switchProgress: model.sessionSwitch?.progress ?? 0)
+                    .id(edgeKey(edge.warning))
+                    .transition(.opacity)
             }
             if showsIsland {
                 IslandView(model: model, notch: notch)
@@ -41,6 +42,7 @@ struct OverlayScreenView: View {
         .animation(.smooth(duration: 0.5), value: model.target.map(highlightKey))
         .animation(.smooth(duration: 0.5), value: model.showHighlight)
         .animation(.smooth(duration: 0.2), value: model.listening)
+        .animation(.smooth(duration: 0.3), value: model.edge.map { edgeKey($0.warning) })
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
     }
@@ -53,6 +55,9 @@ struct OverlayScreenView: View {
 
     /// One identity per session frame: a new frame is a new outline that fades in, never a moving one.
     private func highlightKey(_ r: CGRect) -> String { "\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))" }
+
+    /// A warning for another side or another neighbour is a new warning that fades in, not a moving one.
+    private func edgeKey(_ w: EdgeWarning) -> String { "\(w.side)-\(w.neighbourId ?? "none")" }
 
     private func local(_ global: CGRect) -> CGRect? {
         guard global.intersects(screenFrame) else { return nil }
