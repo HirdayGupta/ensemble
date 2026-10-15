@@ -22,8 +22,13 @@ public struct HandObservation: Sendable {
     public var pinch: Double?
     /// The 21 joint coordinates, for the tour's skeleton inset. Points only, never pixels.
     public var skeleton: HandSkeletonFrame?
-    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil, skeleton: HandSkeletonFrame? = nil) {
+    /// Index tip to middle tip distance in palm lengths: how far apart a two-fingers pose holds its fingers
+    /// (peace sign apart, scissors closed). nil when either tip is unseen.
+    public var fingerSpread: Double?
+    public init(t: TimeInterval, present: Bool, pose: Pose?, palmCenter: CGPoint?, pinch: Double? = nil, skeleton: HandSkeletonFrame? = nil,
+                fingerSpread: Double? = nil) {
         self.t = t; self.present = present; self.pose = pose; self.palmCenter = palmCenter; self.pinch = pinch; self.skeleton = skeleton
+        self.fingerSpread = fingerSpread
     }
 }
 
@@ -89,6 +94,10 @@ public struct GestureMapping: Codable, Equatable, Sendable {
         }
     }
 
+    /// Two fingers is the pose of send, cancel or a scroll direction. The peace sign and the scissors are that same
+    /// hand shape, so they stand aside meanwhile instead of both acting on one hand. (`talk` is unused: see above.)
+    public var usesTwoFingers: Bool { [send, scrollUp, scrollDown, cancel].contains(.twoFingers) }
+
     /// Writes nil as an explicit null so "off" survives a round trip.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -109,6 +118,8 @@ public enum GestureIntent: Equatable, Sendable {
     case scroll(dy: Double)                 // points for this frame; negative = up the transcript, positive = down
     case dragScroll(handDy: Double)         // pinch and drag: points of hand travel this frame, positive = hand moved up
     case dragScrollEnded                    // the pinch opened or the hand left: scrolling stops now
+    case maximizeSession                    // peace sign held: the session under the nose takes most of the window width
+    case evenOutSessions                    // scissors: every session in that row gets an equal share again
 }
 
 public enum TalkEndReason: String, Sendable { case released, stale }

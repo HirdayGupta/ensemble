@@ -86,6 +86,13 @@ public final class GestureMachine {
     private var lastPushT: TimeInterval?
     private var lastTalkEndT: TimeInterval?
 
+    /// Peace sign to maximize the session under the nose, scissors to even the sessions out. Both on by default.
+    public var maximizeByPeace = true
+    public var evenOutByScissors = true
+    private var widths = WidthGestures()
+    /// A peace sign is up and counting: the coordinator reads every hand frame meanwhile, so the timing holds.
+    public var peaceOpen: Bool { widths.peaceOpen }
+
     public init(mapping: GestureMapping = .init()) { self.mapping = mapping }
 
     /// The pose currently held and how far its hold has progressed toward acting, for on-screen feedback.
@@ -117,6 +124,7 @@ public final class GestureMachine {
         run = nil
         lastPushT = nil
         lastTalkEndT = nil
+        widths.reset()
     }
 
     /// The coordinator refused or failed to start the dictation this machine just announced: forget it
@@ -139,12 +147,17 @@ public final class GestureMachine {
         var h = observation
         if let d = h.pinch, !d.isFinite { h.pinch = nil }
         if let c = h.palmCenter, !(c.x.isFinite && c.y.isFinite) { h.palmCenter = nil }
+        if let s = h.fingerSpread, !s.isFinite { h.fingerSpread = nil }
         guard h.t.isFinite else { return [] }
         lastPushT = h.t
         var intents: [GestureIntent] = []
         if h.present, let send = mapping.send, h.pose == send { lastSendPoseT = h.t }
         if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
         trackTaps(h, into: &intents)
+        if let width = widths.push(t: h.t, pose: h.present ? h.pose : nil, spread: h.fingerSpread, maximize: maximizeByPeace,
+                                   evenOut: evenOutByScissors, allowed: !talking && !pinchIsClosed && !mapping.usesTwoFingers) {
+            intents.append(width)
+        }
 
         guard h.present, let pose = h.pose else {
             run = nil
