@@ -41,8 +41,18 @@ final class VisionEngine {
     private let handNote = OSAllocatedUnfairLock<(present: Bool, t: TimeInterval)?>(initialState: nil)
     /// Owned by the camera queue. Decides which analyses run on each frame.
     nonisolated(unsafe) private var planner = FrameRatePlanner()
-    private struct RateHints { var forceFull = false; var slowFace = false; var lastFaceSeenAt: TimeInterval? }
+    /// `lastReadingAt`: the frame time of the tracker's last real answer in this run, for `StillFace`.
+    private struct RateHints { var forceFull = false; var slowFace = false; var lastFaceSeenAt: TimeInterval?; var lastReadingAt: TimeInterval? }
     private let hints = OSAllocatedUnfairLock(initialState: RateHints())
+    /// Owned by the camera queue: skips the tracker while the picture is still (`StillFace`). `stillReference` is the
+    /// luma grid of the frame last sent, `lastSubmittedT` its time, `stillRun` the run they belong to.
+    nonisolated(unsafe) private var still = StillFace()
+    nonisolated(unsafe) private var stillReference: [Float]?
+    nonisolated(unsafe) private var lastSubmittedT = -TimeInterval.infinity
+    nonisolated(unsafe) private var stillRun = -1
+    nonisolated(unsafe) private var stillCounts = (since: 0.0, sent: 0, reused: 0)
+    /// The tracker's last real reading in this run, handed on again while the picture is still.
+    private var lastHead: HeadObservation?
     nonisolated(unsafe) private var generation = 0
     nonisolated(unsafe) private var cameraLabel = ""
     nonisolated(unsafe) private var cameraID = ""
@@ -76,8 +86,9 @@ final class VisionEngine {
         face.onHead = { [weak self] head in
             guard let self else { return }
             self.trackerRetry.reset()
-            if head.faceCount >= 1 { self.hints.withLock { $0.lastFaceSeenAt = CACurrentMediaTime() } }
-            self.onHead?(head)
+            self.lastHead = head
+            self.hints.withLock { $0.lastReadingAt = max($0.lastReadingAt ?? -.infinity, head.t) }
+            self.deliver(head)
         }
         face.onDiagnostic = { [weak self] note in self?.onDiagnostic?(note) }
         camera.onFrame = { [weak self] buffer in self?.process(buffer) }
@@ -87,6 +98,11 @@ final class VisionEngine {
         camera.onInterrupted = { [weak self] message, token in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(message, token: token) } }
         }
+    }
+
+    private func deliver(_ head: HeadObservation) {
+        if head.faceCount >= 1 { hints.withLock { $0.lastFaceSeenAt = CACurrentMediaTime() } }
+        onHead?(head)
     }
 
     private func trackerFailed(_ message: String) {
@@ -145,6 +161,8 @@ final class VisionEngine {
         requestedCamera = cameraName
         trackerRetry.reset()
         generation += 1
+        lastHead = nil
+        hints.withLock { $0.lastReadingAt = nil }
         fpsWindowStart = 0
         fpsFrames = 0
         let mine = generation
@@ -234,18 +252,7 @@ final class VisionEngine {
         let plan = planner.plan(now: t, forceFull: hint.forceFull, lastFaceSeenAt: hint.lastFaceSeenAt, slowFace: hint.slowFace)
 
         // The face frame goes out first: the nose dot waits on the face tracker.
-        if plan.runFace, face.gate.tryEnter(now: t) {
-            if let jpeg = analyzer.jpeg(from: pixels) {
-                DispatchQueue.main.async { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self, self.isRunning, self.generation == mine else { self?.face.gate.leave(); return }
-                        self.face.submit(jpeg: jpeg, t: t)
-                    }
-                }
-            } else {
-                face.gate.leave()
-            }
-        }
+        if plan.runFace { submitFace(pixels, at: t, generation: mine, forceFull: hint.forceFull, lastReadingAt: hint.lastReadingAt) }
 
         if plan.runHand { analyzeHand(buffer, at: t, generation: mine) }
         let light = plan.runLight ? analyzer.light(from: pixels, at: t) : nil
@@ -270,6 +277,58 @@ final class VisionEngine {
                 if let fps { self.onStatus?(.running(fps: fps, camera: label, cameraID: id)) }
             }
         }
+    }
+
+    /// Sends the frame to the face tracker, unless the picture has been still (`StillFace`): then the last reading is
+    /// handed on again instead, and the JPEG encode, the page's decode and its landmark pass are all skipped.
+    nonisolated private func submitFace(_ pixels: CVPixelBuffer, at t: TimeInterval, generation mine: Int, forceFull: Bool,
+                                        lastReadingAt: TimeInterval?) {
+        if stillRun != mine { stillRun = mine; still.reset(); stillReference = nil; lastSubmittedT = -.infinity }
+        let grid = analyzer.lumaGrid(from: pixels)
+        let change = stillReference.flatMap { StillFace.change(grid, $0) }
+        let decision = still.decide(change: change, now: t, forceFull: forceFull, lastReadingAt: lastReadingAt)
+        if EnsembleTrace.enabled {
+            EnsembleTrace.write(t, "face frame change \(change.map { String(format: "%.1f", $0) } ?? "-") \(decision == .send ? "sent" : "still")")
+        }
+        if case .reuse(let emit) = decision {
+            noteStill(sent: false, at: t)
+            // Only once the frame last sent has been answered: an answer still on its way must not arrive after a
+            // reused reading with a later time.
+            guard emit, let answered = lastReadingAt, answered >= lastSubmittedT else { return }
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning, self.generation == mine, var head = self.lastHead, head.t < t else { return }
+                    head.t = t
+                    self.deliver(head)
+                }
+            }
+            return
+        }
+        guard face.gate.tryEnter(now: t) else { return }
+        still.sent(at: t)
+        noteStill(sent: true, at: t)
+        stillReference = grid.isEmpty ? nil : grid
+        lastSubmittedT = t
+        if let jpeg = analyzer.jpeg(from: pixels) {
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning, self.generation == mine else { self?.face.gate.leave(); return }
+                    self.face.submit(jpeg: jpeg, t: t)
+                }
+            }
+        } else {
+            face.gate.leave()
+        }
+    }
+
+    /// Every 30 s, how many face frames went to the tracker and how many were skipped as still.
+    nonisolated private func noteStill(sent: Bool, at t: TimeInterval) {
+        if stillCounts.since == 0 { stillCounts.since = t }
+        if sent { stillCounts.sent += 1 } else { stillCounts.reused += 1 }
+        guard t - stillCounts.since >= 30 else { return }
+        let note = "face frames in 30 s: \(stillCounts.sent) to the tracker, \(stillCounts.reused) skipped while still"
+        stillCounts = (t, 0, 0)
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.onDiagnostic?(note) } }
     }
 
     /// Hand pose for one frame on its own queue, latest frame only: while one runs, others skip it. The result
