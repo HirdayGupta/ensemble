@@ -48,13 +48,13 @@ final class MediaDucker {
         if stopped { paused = dev }
     }
 
-    /// Dictation ended: after the stop cue, resume the media.
+    /// Dictation ended: after the stop sound (up to 0.35 s late and about 1 s long), resume the media.
     func restore() {
         guard let p = paused else { return }
         paused = nil
         resumePending = p
         resumeTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
             guard !Task.isCancelled, self.resumePending != nil else { return }
             self.resumePending = nil
             self.resumeTask = nil

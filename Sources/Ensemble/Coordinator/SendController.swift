@@ -134,7 +134,7 @@ final class SendController {
 
     private func showKept(_ session: ClaudeSession) {
         ctx.overlay.showBanner(title: "Kept, not sent", body: ctx.name(of: session), style: .stopped, seconds: 2.5)
-        Notifier.shared.playCue(.listenEnd)
+        Notifier.shared.playDictationSound(.stop)
     }
 
     /// Every send rule again, right before the press: the gesture send setting, Claude in front, nothing else started,

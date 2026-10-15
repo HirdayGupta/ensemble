@@ -8,6 +8,15 @@ enum SoundCue: String {
     case refused = "Basso"
 }
 
+/// The sounds Claude plays when its dictation starts and stops, by their file names in Claude's bundle. Claude
+/// plays them only after a real user gesture, so after Ensemble's press Ensemble plays them (docs/gotchas.md, 6).
+enum ClaudeDictationSound: String {
+    case start = "enter_voice_mode"
+    case stop = "exit_voice_mode"
+
+    var fallback: SoundCue { self == .start ? .listenStart : .listenEnd }
+}
+
 /// System notification with an in-overlay banner as the fallback (permission denied, or not running as an app bundle).
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
@@ -67,6 +76,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func playCue(_ cue: SoundCue) {
         guard settings?.playSounds ?? true else { return }
         NSSound(named: NSSound.Name(cue.rawValue))?.play()
+    }
+
+    /// Claude's own dictation sound, read from the installed Claude at run time (Anthropic's file is never copied
+    /// into Ensemble), or Ensemble's cue when that file is missing.
+    func playDictationSound(_ sound: ClaudeDictationSound) {
+        guard settings?.playSounds ?? true else { return }
+        if let s = claudeSound(sound) { s.stop(); s.play(); return }
+        NSSound(named: NSSound.Name(sound.fallback.rawValue))?.play()
+    }
+
+    private var claudeSounds: [ClaudeDictationSound: NSSound] = [:]
+
+    private func claudeSound(_ sound: ClaudeDictationSound) -> NSSound? {
+        if let s = claudeSounds[sound] { return s }
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: ClaudeLabels.bundleID).first?.bundleURL
+        guard let app = running ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeLabels.bundleID) else { return nil }
+        let url = app.appendingPathComponent("Contents/Resources/ion-dist/audio/voice/sfx/\(sound.rawValue).mp3")
+        guard FileManager.default.fileExists(atPath: url.path), let s = NSSound(contentsOf: url, byReference: true) else { return nil }
+        claudeSounds[sound] = s
+        return s
     }
 
     private func post(title: String, body: String, style: OverlayBanner.Style) {
