@@ -116,7 +116,7 @@ final class SetupController {
             let signature = "newCamera:\(cameraID ?? "")"
             guard signature != dismissedSignature else { pendingDecision = nil; promptWindow.hide(); return }
             pendingDecision = decision
-            promptWindow.show(newCameraPrompt(name: name, previous: previous, count: count), on: targetScreen())
+            if let screen = targetScreen() { promptWindow.show(newCameraPrompt(name: name, previous: previous, count: count), on: screen) }
 
         case .ready(let name, let valid, let newScreens, let recent):
             let previousValid = validScreenIDs
@@ -134,7 +134,7 @@ final class SetupController {
             let signature = "ready:\(cameraID ?? ""):\(Set(newScreens.map(\.id)).sorted().joined(separator: ","))"
             guard signature != dismissedSignature else { pendingDecision = nil; promptWindow.hide(); return }
             pendingDecision = decision
-            promptWindow.show(newScreensPrompt(cameraName: name, valid: valid, newScreens: newScreens), on: targetScreen())
+            if let screen = targetScreen() { promptWindow.show(newScreensPrompt(cameraName: name, valid: valid, newScreens: newScreens), on: screen) }
         }
     }
 
@@ -329,11 +329,12 @@ final class SetupController {
     }
 
     /// The screen the owner is facing (wherever the nose is currently resting), or the main screen.
-    private func targetScreen() -> NSScreen {
+    /// Nil when no screen is attached (a closed lid with no display): the prompt is skipped and shows on the next change.
+    private func targetScreen() -> NSScreen? {
         if let frame = ctx.state.targetFrame, let screen = ScreenGeometry.screen(containing: CGPoint(x: frame.midX, y: frame.midY)) {
             return screen
         }
-        return NSScreen.main ?? NSScreen.screens[0]
+        return NSScreen.main ?? NSScreen.screens.first
     }
 
     /// What Settings lists: the camera's saved positions and the connected screens.

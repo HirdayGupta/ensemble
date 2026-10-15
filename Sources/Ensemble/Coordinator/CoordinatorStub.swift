@@ -99,7 +99,8 @@ final class StubCoordinator: AppCoordinating {
         }
         let t = Date().timeIntervalSince(started)
         let phase = t.truncatingRemainder(dividingBy: cycle)
-        let screen = ScreenGeometry.topLeftFrame(of: NSScreen.main ?? NSScreen.screens[0])
+        guard let mainScreen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let screen = ScreenGeometry.topLeftFrame(of: mainScreen)
 
         let pane = CGRect(x: screen.minX + screen.width * 0.08, y: screen.minY + screen.height * 0.16,
                           width: screen.width * 0.42, height: screen.height * 0.66)

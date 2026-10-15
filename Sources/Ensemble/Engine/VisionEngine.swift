@@ -76,8 +76,8 @@ final class VisionEngine {
         camera.onNote = { [weak self] note in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.onDiagnostic?(note) } }
         }
-        camera.onInterrupted = { [weak self] message in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(message) } }
+        camera.onInterrupted = { [weak self] message, token in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(message, token: token) } }
         }
     }
 
@@ -156,8 +156,10 @@ final class VisionEngine {
         onStatus?(.stopped)
     }
 
-    private func fail(_ message: String) {
-        guard isRunning else { return }
+    /// A report from a replaced session (the camera in use was unplugged and the engine already restarted on
+    /// another) carries an older token and must not stop the new run.
+    private func fail(_ message: String, token: Int) {
+        guard isRunning, token == generation else { return }
         halt()
         onStatus?(.error(message))
     }
