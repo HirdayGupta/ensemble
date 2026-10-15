@@ -29,17 +29,14 @@ final class TourHandInsetModel: ObservableObject {
     }
 }
 
-/// A small overlay of the owner's hand as Vision sees it: 21 joints as dots and bones as lines, in the app's blue,
-/// on a translucent dark backing. Under the skeleton, the gesture the system reads, and a check mark once the
-/// open tab's gesture is done.
+/// The bottom half of the gestures canvas's right-hand column: the owner's hand as Vision sees it, 21 joints as
+/// dots and bones as lines, in the app's blue, on a translucent dark backing, with the gesture the system reads
+/// under it. It fills whatever rectangle it is given (`TourGestureColumn` gives it the page's empty half).
 struct TourHandInset: View {
     @ObservedObject var model: TourHandInsetModel
-    let done: Bool
-
-    static let size = CGSize(width: 160, height: 120)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 4) {
             TimelineView(.animation) { _ in
                 let points = model.points(at: CACurrentMediaTime())
                 ZStack {
@@ -48,36 +45,37 @@ struct TourHandInset: View {
                         Text("Raise a hand to the camera")
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.5))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 6)
                     }
                 }
             }
-            .frame(width: Self.size.width, height: Self.size.height - 22)
+            .clipped()
 
-            HStack(spacing: 6) {
-                Text(model.readout)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if done {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        .transition(.opacity)
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(width: Self.size.width, height: 18)
-            .animation(.smooth(duration: 0.3), value: done)
+            Text(model.readout)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.55)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Your hand as the camera sees it: \(model.readout)\(done ? ", done" : "")")
+        .accessibilityLabel("Your hand as the camera sees it: \(model.readout)")
     }
 
     private func draw(_ points: [CGPoint?], in context: inout GraphicsContext, size: CGSize) {
-        func place(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x * size.width, y: p.y * size.height) }
+        // The joints are in the camera picture's unit square. The panel is a tall slice of it: draw the picture at
+        // its true shape, a little larger than the panel is high, centred, so the hand is not squashed.
+        let side = size.height * 1.15
+        func place(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: size.width / 2 + (p.x - 0.5) * side, y: size.height / 2 + (p.y - 0.5) * side)
+        }
         var bones = Path()
         for (a, b) in HandSkeleton.segments(of: points) {
             bones.move(to: place(a))

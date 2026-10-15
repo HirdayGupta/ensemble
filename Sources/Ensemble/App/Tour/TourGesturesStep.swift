@@ -29,13 +29,12 @@ struct TourGesturesStep: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
 
+            // Fixed height: success shows inside the canvas, so nothing here changes size when a gesture is done.
             HStack(spacing: 10) {
-                if model.practiceDone.contains(model.activeTab) {
-                    Label("Done", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                } else {
-                    Label(model.activeTab.practicePrompt, systemImage: "hand.wave")
-                        .foregroundStyle(Color.ensembleBlue)
-                }
+                Label(model.activeTab.practicePrompt, systemImage: "hand.wave")
+                    .foregroundStyle(Color.ensembleBlue)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Spacer()
                 if let next = TourGestureTab(rawValue: model.activeTab.rawValue + 1) {
                     Button("Skip this step") { model.selectTab(next) }
@@ -43,15 +42,15 @@ struct TourGesturesStep: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .frame(maxWidth: 480)
-            .animation(.smooth(duration: 0.3), value: model.practiceDone)
+            .frame(maxWidth: 480, minHeight: 22, maxHeight: 22)
         }
     }
 }
 
-/// One 3D scene that follows the active tab, filling the illustration area at the 16:10 shape the scenes are
-/// composed for, with the live skeleton of the owner's own hand as Vision reads it in a corner. The scene is
-/// created once for the step, so switching tabs changes its animation without reloading the page.
+/// The gestures canvas: a flat Claude window with one focused session (drawn by the web page, which also draws
+/// the 3D hand in the top half of the right-hand column), and the live skeleton of the owner's own hand as Vision
+/// reads it in the bottom half. A gesture's success shows as a small widget at the canvas's bottom left. The
+/// scene is created once for the step, so switching tabs changes its animation without reloading the page.
 private struct TabIllustration: View {
     @ObservedObject var model: TourModel
     @StateObject private var scene: TourSceneController
@@ -65,13 +64,57 @@ private struct TabIllustration: View {
     var body: some View {
         let tab = model.activeTab
         TourSceneStage(controller: scene, symbol: tab.symbolName, caption: tab.explanation) {
-            TourHandInset(model: model.handInset, done: model.practiceDone.contains(tab))
-                .padding(10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            ZStack {
+                TourGestureColumn { TourHandInset(model: model.handInset) }
+                TourSuccessBadge(text: tab.successText)
+                    .opacity(model.practiceDone.contains(tab) ? 1 : 0)
+                    .animation(.smooth(duration: 0.3), value: model.practiceDone.contains(tab))
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
         }
         .aspectRatio(16.0 / 10.0, contentMode: .fit)
         .frame(maxWidth: 560)
         .onChange(of: tab) { _, new in scene.setScene(TourScene(new)) }
+    }
+}
+
+/// The right-hand column of the canvas: `columnShare` of its width, with two panels of half its height each. The
+/// page draws the top one (the 3D hand); this places the bottom one at exactly the rectangle the page leaves
+/// empty. The margins and radius mirror the page's, in `scene3d.js` (COLUMN and the column's padding).
+struct TourGestureColumn<Panel: View>: View {
+    static var columnShare: CGFloat { 0.18 }
+    static var margin: CGFloat { 8 }
+    private let panel: Panel
+
+    init(@ViewBuilder panel: () -> Panel) { self.panel = panel() }
+
+    var body: some View {
+        GeometryReader { geo in
+            let m = Self.margin
+            panel
+                .frame(width: geo.size.width * Self.columnShare - 2 * m, height: geo.size.height / 2 - 1.5 * m)
+                .position(x: geo.size.width - m - (geo.size.width * Self.columnShare - 2 * m) / 2,
+                          y: geo.size.height / 2 + m / 2 + (geo.size.height / 2 - 1.5 * m) / 2)
+        }
+    }
+}
+
+/// "Pinch detected" and its kin: appears when the open tab's gesture is done.
+private struct TourSuccessBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text(text).foregroundStyle(.white)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.black.opacity(0.7)))
+        .overlay(Capsule().strokeBorder(Color.green.opacity(0.6), lineWidth: 1))
+        .accessibilityLabel(text)
     }
 }
 
@@ -97,6 +140,15 @@ extension TourGestureTab {
         case .dictate: return "Double pinch (thumb tip to index tip, twice) to start dictating into the session you face. Double pinch again to stop."
         case .send: return "Hold thumbs-up for 0.75 s to send — only within 30 s of speaking, only to that session, and only if you have not typed since."
         case .scroll: return "Pinch and drag your hand up or down to scroll the session you're facing."
+        }
+    }
+
+    /// What the success widget says once the tab's gesture is done.
+    var successText: String {
+        switch self {
+        case .dictate: return "Double pinch detected"
+        case .send: return "Thumbs-up detected"
+        case .scroll: return "Pinch and drag detected"
         }
     }
 
