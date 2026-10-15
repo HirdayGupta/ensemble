@@ -135,7 +135,7 @@ final class Coordinator: AppCoordinating {
     // MARK: - AppCoordinating
 
     func start() {
-        EnsembleLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName ?? "automatic"), calibrated=\(ctx.pointer.isCalibrated), accessibility=\(AXIsProcessTrusted()), screens=\(ScreenFacts.displayFingerprint()))")
+        EnsembleLog.write("start (enabled=\(settings.enabled), camera=\(settings.cameraName == nil ? "automatic" : "chosen"), calibrated=\(ctx.pointer.isCalibrated), accessibility=\(AXIsProcessTrusted()), screens=\(ScreenFacts.displayFingerprint()))")
         state.cameraNames = cameraNames
         if recoveredAtLaunch { recoveredAtLaunch = false } else { recoverAtLaunch() }
         guard settings.enabled else { state.status = .off; return }

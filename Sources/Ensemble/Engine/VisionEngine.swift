@@ -118,7 +118,7 @@ final class VisionEngine {
     /// (an external camera just plugged in, say) restarts the session onto it.
     private func deviceConnected() {
         guard isRunning, requestedCamera == nil, let preferred = CameraSession.pick(named: nil), preferred.uniqueID != cameraID else { return }
-        onDiagnostic?("a camera connected; switching to \(preferred.localizedName)")
+        onDiagnostic?("a camera connected; switching to \(preferred.modelID)")
         start(cameraName: nil)
     }
 
