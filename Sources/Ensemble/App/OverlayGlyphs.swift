@@ -121,20 +121,3 @@ struct SoundWaves: View {
         }
     }
 }
-
-/// The nose dot: a flat, clear patch of Liquid Glass (macOS 26), with a thin rim; a light material before that.
-struct GlassSphere: View {
-    var body: some View {
-        if #available(macOS 26.0, *) {
-            Circle()
-                .fill(Color.white.opacity(0.001))     // gives the glass a shape to fill without adding colour
-                .glassEffect(.regular, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.45), lineWidth: 0.75))
-        } else {
-            Circle()
-                .fill(Color.white.opacity(0.16))
-                .background(Circle().fill(.ultraThinMaterial))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1))
-        }
-    }
-}

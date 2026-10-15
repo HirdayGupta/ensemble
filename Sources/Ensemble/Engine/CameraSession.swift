@@ -42,8 +42,9 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
 
-    /// Builds and starts the session on the camera queue. Returns the camera's name.
-    func start(named name: String?, token: Int) async throws -> String {
+    /// Builds and starts the session on the camera queue. Returns the camera's name and its stable unique id
+    /// (used to tell cameras apart across reconnects, where the name alone is ambiguous for identical models).
+    func start(named name: String?, token: Int) async throws -> (name: String, id: String) {
         guard await Self.requestAccess() else { throw CameraError.permissionDenied }
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
@@ -53,7 +54,7 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
 
-    private func startOnQueue(named name: String?, token: Int) throws -> String {
+    private func startOnQueue(named name: String?, token: Int) throws -> (name: String, id: String) {
         teardownOnQueue()
         activeToken = token
         guard let device = Self.pick(named: name) else { throw CameraError.noCamera }
@@ -97,7 +98,7 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             teardownOnQueue()
             throw CameraError.failed("Camera \(device.localizedName) did not start")
         }
-        return device.localizedName
+        return (device.localizedName, device.uniqueID)
     }
 
     /// Stops and releases the session. Queued behind any start in progress, so it never blocks the caller.

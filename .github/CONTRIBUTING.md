@@ -130,7 +130,7 @@ SwiftPM package with two targets plus a separate benchmark package.
 
 | Path | What it is |
 |---|---|
-| `Sources/EnsembleCore` | The `EnsembleCore` target. Pure logic with no UI and no camera: gesture state machine, nose pointer (calibration fit plus a One Euro filter), covered-camera and multi-face detectors, the size-capped log file, dictation safety records, the frame-rate planner, and the hand-pose classifier adapted from Sleight (`Vendor/`). Unit-tested. |
+| `Sources/EnsembleCore` | The `EnsembleCore` target. Pure logic with no UI and no camera: gesture state machine, setup profiles and matching (`SetupProfile.swift`), nose pointer (calibration fit plus a One Euro filter), covered-camera and multi-face detectors, the size-capped log file, dictation safety records, the frame-rate planner, and the hand-pose classifier adapted from Sleight (`Vendor/`). Unit-tested. |
 | `Sources/Ensemble` | The `Ensemble` executable target, the menu bar app. |
 | `Sources/Ensemble/Engine` | Camera capture, Apple Vision hand pose, MediaPipe Face Landmarker in a hidden `WKWebView`, and frame scheduling. |
 | `Sources/Ensemble/Claude` | The Accessibility bridge: finds Claude's session panes, reads and presses its dictation and Send controls, runs the dictation safety checks, mutes the input device as a last resort. |

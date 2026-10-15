@@ -31,7 +31,7 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 | General | Turn Ensemble on or off, open at login (restarts after a crash), play sounds, fade out and pause other audio while dictating. |
 | Gestures | Remap gestures, including turning the thumbs-up send off, and the hold time. Warn when my look leaves Claude (on by default). |
 | Display | Show the nose dot, highlight the session you face, pointer smoothing, live sound bars (asks for microphone access), reverse the pinch-and-drag direction, the send countdown. |
-| Calibration | Recalibrate the nose pointer after you move your seat or change monitors. |
+| Calibration | Recalibrate the nose pointer after you move your seat. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
 | About | Check for updates automatically, once a day. Off until the updater is configured. |
 
 ## Audio pause

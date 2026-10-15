@@ -75,7 +75,7 @@ final class OverlayController {
         latestNose = nose
         model.hasNose = nose != nil
         setIfChanged(&model.listening, listening)
-        setIfChanged(&model.nose, !OverlayScreenView.systemGlassDot ? nose : nil)
+        setIfChanged(&model.nose, listening ? nose : nil)
         setIfChanged(&model.showNoseDot, showNoseDot)
         setIfChanged(&model.showHighlight, showHighlight)
         syncPanels()
@@ -84,13 +84,12 @@ final class OverlayController {
 
     private var latestNose: CGPoint?
     private var glassDotStore: AnyObject?
-    /// On macOS 26 the dot is a separate glass window; the SwiftUI overlay skips drawing it there.
+    /// The dot is its own small window (GlassDot); the SwiftUI overlay never draws it.
     private func syncGlassDot() {
-        guard #available(macOS 26.0, *) else { return }
         let dot = (glassDotStore as? GlassDot) ?? GlassDot()
         glassDotStore = dot
         let visible = !model.listening && (model.showNoseDot || model.gesture != nil)
-        dot.show(at: visible ? latestNose : nil)
+        dot.show(at: visible ? latestNose : nil, dimmed: model.handsOnInput && model.gesture == nil)
     }
 
     /// Re-applies visibility toggles between coordinator updates.
@@ -120,7 +119,9 @@ final class OverlayController {
     }
 
     func setHandsOnInput(_ on: Bool) {
-        setIfChanged(&model.handsOnInput, on)
+        guard model.handsOnInput != on else { return }
+        model.handsOnInput = on
+        syncGlassDot()
     }
 
     func showBanner(title: String, body: String, style: OverlayBanner.Style = .info, seconds: Double = 5) {

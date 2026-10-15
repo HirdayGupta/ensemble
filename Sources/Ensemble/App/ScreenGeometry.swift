@@ -25,4 +25,12 @@ enum ScreenGeometry {
     static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
+
+    /// A screen id stable across sleep, wake and reconnection (unlike `CGDirectDisplayID`, which can change).
+    /// Falls back to the display id itself for the rare display that has no UUID (some virtual displays).
+    static func stableID(of screen: NSScreen) -> String? {
+        guard let id = displayID(of: screen) else { return nil }
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(id) else { return "\(id)" }
+        return CFUUIDCreateString(nil, uuid.takeRetainedValue()) as String
+    }
 }

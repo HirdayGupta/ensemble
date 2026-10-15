@@ -27,18 +27,10 @@ struct OverlayScreenView: View {
                         removal: .opacity.combined(with: .scale(scale: 0.996)).animation(.smooth(duration: 0.4))))
             }
             // While listening there is no dot: the edge warning shows where the look is heading.
-            if model.listening {
-                if let edge = model.edge {
-                    EdgeWarningOverlay(edge: edge, screenFrame: screenFrame, switchProgress: model.sessionSwitch?.progress ?? 0)
-                        .id(edgeKey(edge.warning))
-                        .transition(.opacity)
-                }
-            } else if !Self.systemGlassDot, model.showNoseDot || model.gesture != nil, let nose = model.nose, screenFrame.contains(nose) {
-                GlassSphere()
-                    .frame(width: 18, height: 18)
-                    .shadow(color: .black.opacity(0.15), radius: 1.5, y: 0.5)
-                    .position(x: nose.x - screenFrame.minX, y: nose.y - screenFrame.minY)
-                    .animation(.linear(duration: 0.08), value: nose)
+            if model.listening, let edge = model.edge {
+                EdgeWarningOverlay(edge: edge, screenFrame: screenFrame, switchProgress: model.sessionSwitch?.progress ?? 0)
+                    .id(edgeKey(edge.warning))
+                    .transition(.opacity)
             }
             if showsIsland {
                 IslandView(model: model, notch: notch)
@@ -54,9 +46,6 @@ struct OverlayScreenView: View {
         .animation(.smooth(duration: 0.25), value: model.banner)
         .allowsHitTesting(false)
     }
-
-    /// On macOS 26 the dot is a separate Liquid Glass window (GlassDot), not drawn here.
-    static var systemGlassDot: Bool { if #available(macOS 26.0, *) { return true } else { return false } }
 
     /// The island sits on the screen holding the session in play, else on the primary screen.
     private var showsIsland: Bool {
