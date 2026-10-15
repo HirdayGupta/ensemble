@@ -17,28 +17,59 @@ enum UpdateConfig {
     }
 }
 
-/// Sparkle 2 wrapper. Policy, in order of what matters for a tool that drives dictation:
-/// - No network until the user turns on automatic updates (Settings > General) or presses Check for Updates.
-/// - Sparkle's own "check automatically?" prompt is suppressed, so no window appears at login or mid-dictation.
+/// Sparkle 2 with Ensemble's own user interface instead of Sparkle's windows (it is the `SPUUserDriver`). The owner
+/// asked for at most one decision per update:
+/// - No network until the user turns on automatic updates (Settings > General) or presses the update button.
 /// - Automatic updates (opt-in) check 15 s after launch and then every hour (`UpdatePolicy`), download in the
-///   background, and install only while Ensemble is idle: never while Claude is listening, calibrating or the tour is open.
-/// - Whatever check finds a new version, the one update button turns into "Update to x.y.z"; no window opens by itself.
+///   background and install after 30 s of unbroken idle time, with no question.
+/// - Otherwise a found version asks once, "Ensemble x.y.z is available. Install now?", with Install and Later.
+///   Install downloads, installs and relaunches with no further window; a press of "Update to x.y.z" is the
+///   go-ahead itself and asks nothing.
+/// - Nothing is shown and nothing installs while Ensemble is busy (dictating, sending, calibrating, the tour): the
+///   alert waits and the button says "Installs x.y.z when you finish".
+/// - The copy that opens after an update says "Updated to x.y.z" and logs it; with open at login on, it hands itself
+///   to launchd so crash restarts keep working (`UpdateRelaunch`).
 @MainActor
-final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
+final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUUserDriver {
     /// The newer version the last check found, from a check the user started or the automatic checks they turned on.
     @Published private(set) var availableVersion: String?
     /// True for a few seconds after a check the user started found nothing.
     @Published private(set) var showingUpToDate = false
     @Published private(set) var autoInstall = false
-    /// True while installing would interrupt the user (dictating, calibrating, tour open); set by the app.
+    /// The version being downloaded or installed, once the owner said Install (or automatic updates decided to).
+    @Published private(set) var installingVersion: String?
+    /// True while an install is waiting for Ensemble to be idle.
+    @Published private(set) var waitingForIdle = false
+    @Published private(set) var checking = false
+    /// True while installing would interrupt the user (dictating, sending, calibrating, tour open); set by the app.
     var isBusy: () -> Bool = { false }
-    private var pendingInstall: (() -> Void)?
-    private var installTimer: Timer?
+    /// A short island notice (title, body); set by the app.
+    var notice: (String, String) -> Void = { _, _ in }
+
+    /// A found version waiting for the one alert, held until Ensemble is idle.
+    private var pendingOffer: (item: SUAppcastItem, stage: SPUUserUpdateStage, reply: (SPUUserUpdateChoice) -> Void)?
+    /// Sparkle waiting for the go to install and relaunch.
+    private var pendingInstallReply: ((SPUUserUpdateChoice) -> Void)?
+    /// An update downloaded in the background by automatic updates, installed by calling this block.
+    private var pendingAutoInstall: (() -> Void)?
+    /// An error from a flow the owner started, shown once with Retry.
+    private var pendingError: Error?
+    /// The owner pressed "Update to x.y.z", Install or Retry: no idle grace period and no further question.
+    private var installRequested = false
     private var userCheckInFlight = false
+    private var alertShowing = false
+    /// Versions answered Later since launch; a background find of one stays quiet until the next launch or a press.
+    private var declined: Set<String> = []
+    private var gate = IdleGate()
+    private var tickTimer: Timer?
     private var upToDateTask: Task<Void, Never>?
+    private var notesLink: URL?
 
     /// What the one update button says.
-    var buttonTitle: String { UpdatePolicy.buttonTitle(available: availableVersion, showingUpToDate: showingUpToDate) }
+    var buttonTitle: String {
+        UpdatePolicy.buttonTitle(available: availableVersion, showingUpToDate: showingUpToDate, installing: installingVersion,
+                                 waitingForIdle: waitingForIdle, checking: checking)
+    }
 
     /// The installed version, read from the bundle (no network): "Version 0.4.2 (42)".
     static var installedVersion: String {
@@ -48,28 +79,28 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         return "Version \(short) (\(build))"
     }
 
-    private var controller: SPUStandardUpdaterController!
+    private var updater: SPUUpdater!
     let isConfigured = UpdateConfig.isConfigured
 
     override init() {
         super.init()
-        controller = SPUStandardUpdaterController(startingUpdater: isConfigured, updaterDelegate: self, userDriverDelegate: self)
-        let updater = controller.updater
-        autoInstall = isConfigured && updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
+        updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
+        guard isConfigured else { return }
+        do { try updater.start() } catch { EnsembleLog.write("update: Sparkle did not start (\(error.localizedDescription))") }
+        autoInstall = updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
         if autoInstall { updater.updateCheckInterval = UpdatePolicy.checkInterval }
         if UpdatePolicy.checksAtLaunch(configured: isConfigured, automatic: autoInstall) {
-            // Sparkle's own schedule counts a full interval from the last check; this shows a new version soon after launch.
+            // Sparkle's own schedule counts a full interval from the last check; this finds a new version soon after launch.
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(UpdatePolicy.launchDelay * 1_000_000_000))
                 guard let self, self.autoInstall else { return }
-                self.controller.updater.checkForUpdatesInBackground()
+                self.updater.checkForUpdatesInBackground()
             }
         }
     }
 
     func setAutoInstall(_ on: Bool) {
         guard isConfigured else { return }
-        let updater = controller.updater
         updater.updateCheckInterval = UpdatePolicy.checkInterval
         updater.automaticallyChecksForUpdates = on
         updater.automaticallyDownloadsUpdates = on
@@ -77,28 +108,9 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         if on { updater.checkForUpdatesInBackground() }
     }
 
-    /// A downloaded update installs at the first idle moment, checked every 30 s; Sparkle then relaunches Ensemble.
-    private func installWhenIdle() {
-        installTimer?.invalidate()
-        installTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.pendingInstall != nil, !self.isBusy() else { return }
-                EnsembleLog.write("installing a downloaded update while idle")
-                self.installPending()
-            }
-        }
-    }
-
-    private func installPending() {
-        installTimer?.invalidate()
-        installTimer = nil
-        let install = pendingInstall
-        pendingInstall = nil
-        install?()
-    }
-
-    /// The update button: installs a version already downloaded in the background, or checks (which offers a found
-    /// version in Sparkle's window).
+    /// The update button. "Update to x.y.z" installs end to end in one press; "Check for Updates" checks and, if a
+    /// version is found, shows the one alert. A press while Ensemble is busy never installs at once: the install
+    /// waits for the first idle moment and the button says so.
     func checkForUpdates() {
         guard isConfigured else {
             NSApp.activate(ignoringOtherApps: true)
@@ -108,26 +120,174 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             alert.runModal()
             return
         }
-        if pendingInstall != nil, !isBusy() {
-            EnsembleLog.write("installing a downloaded update on the user's press")
-            installPending()
+        guard installingVersion == nil else { return }
+        declined.removeAll()
+        if let offer = pendingOffer {
+            // A found version waiting for its alert: the press is the answer.
+            pendingOffer = nil
+            accept(offer.item.displayVersionString, stage: offer.stage, reply: offer.reply)
             return
         }
+        if pendingAutoInstall != nil, let version = availableVersion {
+            EnsembleLog.write("update: install of downloaded \(version) requested by the user")
+            installRequested = true
+            installingVersion = version
+            tick()
+            return
+        }
+        installRequested = availableVersion != nil
+        if let version = availableVersion { installingVersion = version } else { checking = true }
         userCheckInFlight = true
-        // Ensemble is a menu bar app with no Dock icon, so Sparkle's window opens behind other apps unless Ensemble
-        // is made active first; the press then looks like it did nothing.
-        NSApp.activate(ignoringOtherApps: true)
-        controller.checkForUpdates(nil)
+        EnsembleLog.write(installRequested ? "update: install of \(availableVersion ?? "") requested by the user" : "update: check requested by the user")
+        updater.checkForUpdates()
     }
+
+    // MARK: The idle gate
+
+    /// Runs every second while anything waits: shows the alert, gives Sparkle the go, or starts a background
+    /// install, each only while Ensemble is idle.
+    private func tick() {
+        let now = Date()
+        gate.observe(busy: isBusy(), at: now)
+        let idleNow = gate.idle(for: 0, at: now)
+        let installNeeds = installRequested ? 0 : UpdatePolicy.automaticIdleSeconds
+        waitingForIdle = installingVersion != nil && !idleNow
+        let waiting = pendingOffer != nil || pendingInstallReply != nil || pendingAutoInstall != nil || pendingError != nil
+        if waiting, tickTimer == nil {
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
+            RunLoop.main.add(timer, forMode: .common)
+            tickTimer = timer
+        } else if !waiting {
+            tickTimer?.invalidate()
+            tickTimer = nil
+        }
+        guard !alertShowing else { return }
+        if let reply = pendingInstallReply, gate.idle(for: installNeeds, at: now) {
+            pendingInstallReply = nil
+            beginInstall()
+            reply(.install)
+        } else if let install = pendingAutoInstall, installingVersion != nil || autoInstall, gate.idle(for: installNeeds, at: now) {
+            pendingAutoInstall = nil
+            if installingVersion == nil { installingVersion = availableVersion }
+            beginInstall()
+            install()
+        } else if pendingOffer != nil, idleNow {
+            // Out of the timer's call: the alert runs a modal loop.
+            alertShowing = true
+            DispatchQueue.main.async { [weak self] in self?.showOffer() }
+        } else if pendingError != nil, idleNow {
+            alertShowing = true
+            DispatchQueue.main.async { [weak self] in self?.showError() }
+        }
+    }
+
+    /// Ensemble quits for the installer next; the copy that opens reads this record (`afterLaunch`).
+    private func beginInstall() {
+        guard let version = installingVersion else { return }
+        waitingForIdle = false
+        let defaults = UserDefaults.standard
+        defaults.set(version, forKey: Self.pendingVersionKey)
+        defaults.set(false, forKey: Self.handedOverKey)
+        EnsembleLog.write("update: installing \(version); Ensemble quits and Sparkle opens the new version")
+        notice("Installing Ensemble \(version)", "Ensemble opens again by itself in a moment.")
+        Self.reopenIfRelaunchMissing()
+    }
+
+    /// The safety net under Sparkle's relaunch: once this copy has quit, a detached shell looks for a running
+    /// Ensemble 30 and 60 seconds later and opens it if none is there (a copy started twice exits at launch, so a
+    /// late open cannot make two). It gives up if this copy never quits, which means the install did not start.
+    private static func reopenIfRelaunchMissing() {
+        DetachedShell.run("""
+        i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.5; i=$((i+1)); done
+        kill -0 "$1" 2>/dev/null && exit 0
+        for pause in 30 30; do sleep "$pause"; /usr/bin/pgrep -qx Ensemble && exit 0; reopen; done
+        """)
+    }
+
+    /// - byOwner: the owner said Install or pressed the button; an automatic install keeps its idle grace period.
+    private func accept(_ version: String, stage: SPUUserUpdateStage, byOwner: Bool = true,
+                        reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        if byOwner { installRequested = true }
+        installingVersion = version
+        checking = false
+        if stage == .notDownloaded {
+            // Downloading is harmless while busy; Sparkle then asks `showReady(toInstallAndRelaunch:)`, which waits.
+            reply(.install)
+        } else {
+            // Already downloaded or installing: Sparkle would quit Ensemble at once, so the go waits for idle.
+            pendingInstallReply = reply
+        }
+        tick()
+    }
+
+    // MARK: Alerts
+
+    private func showOffer() {
+        defer { alertShowing = false; tick() }
+        guard let offer = pendingOffer else { return }
+        pendingOffer = nil
+        let version = offer.item.displayVersionString
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = UpdatePolicy.offerMessage(version: version)
+        alert.informativeText = "Ensemble downloads it, installs it and opens again by itself."
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Later")
+        let item = offer.item
+        notesLink = UpdatePolicy.releaseNotesLink(fullNotes: item.fullReleaseNotesURL, notes: item.releaseNotesURL,
+                                                  info: item.infoURL, download: item.fileURL)
+        if notesLink != nil {
+            let link = NSButton(title: "What's new in \(version)", target: self, action: #selector(openReleaseNotes))
+            link.isBordered = false
+            link.contentTintColor = .linkColor
+            link.sizeToFit()
+            alert.accessoryView = link
+        }
+        alert.window.level = .floating
+        if alert.runModal() == .alertFirstButtonReturn {
+            EnsembleLog.write("update: Install pressed for \(version)")
+            accept(version, stage: offer.stage, reply: offer.reply)
+        } else {
+            EnsembleLog.write("update: Later pressed for \(version)")
+            declined.insert(version)
+            offer.reply(.dismiss)
+        }
+    }
+
+    @objc private func openReleaseNotes() {
+        // The browser fetches the page; Ensemble itself never does.
+        if let notesLink { NSWorkspace.shared.open(notesLink) }
+    }
+
+    private func showError() {
+        defer { alertShowing = false; tick() }
+        guard let error = pendingError else { return }
+        pendingError = nil
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Ensemble could not update"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "Retry")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.level = .floating
+        if alert.runModal() == .alertFirstButtonReturn { checkForUpdates() }
+    }
+
+    // MARK: State
 
     private func found(_ version: String) {
         upToDateTask?.cancel()
         showingUpToDate = false
+        checking = false
         availableVersion = version
     }
 
     private func foundNothing() {
         availableVersion = nil
+        checking = false
+        installingVersion = nil
+        installRequested = false
         guard userCheckInFlight else { return }
         userCheckInFlight = false
         showingUpToDate = true
@@ -139,62 +299,163 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         }
     }
 
+    /// The update session ended without installing (Later, an error, or nothing found).
+    private func endSession() {
+        installingVersion = nil
+        installRequested = false
+        waitingForIdle = false
+        checking = false
+        pendingInstallReply = nil
+        tick()
+    }
+
+    // MARK: SPUUserDriver (all on the main thread)
+
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        // Never asked (`updaterShouldPromptForPermissionToCheck` is false); answer with the current setting.
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: autoInstall, sendSystemProfile: false))
+    }
+
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {}
+
+    func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        let version = appcastItem.displayVersionString
+        found(version)
+        let userInitiated = state.userInitiated
+        if userInitiated { userCheckInFlight = false }
+        guard !appcastItem.isInformationOnlyUpdate else {
+            EnsembleLog.write("update: \(version) is information only; nothing to install")
+            availableVersion = nil
+            installingVersion = nil
+            reply(.dismiss)
+            return
+        }
+        let offer = UpdateOffer.decide(version: version, installRequested: installRequested, userInitiated: userInitiated,
+                                       automatic: autoInstall, declined: declined)
+        EnsembleLog.write("update: found \(version) (\(userInitiated ? "user check" : "background check")), \(offer)")
+        switch offer {
+        case .install: accept(version, stage: state.stage, byOwner: installRequested || userInitiated, reply: reply)
+        case .quiet: reply(.dismiss)
+        case .ask:
+            pendingOffer = (appcastItem, state.stage, reply)
+            tick()
+        }
+    }
+
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: any Error) {}
+
+    func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+    }
+
+    func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+        let ownersFlow = userCheckInFlight || installRequested
+        EnsembleLog.write("update: error (\(error.localizedDescription))\(ownersFlow ? "" : ", background check, not shown")")
+        userCheckInFlight = false
+        endSession()
+        guard ownersFlow else { return }
+        pendingError = error
+        tick()
+    }
+
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {}
+
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {}
+
+    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+
+    func showDownloadDidStartExtractingUpdate() {}
+
+    func showExtractionReceivedProgress(_ progress: Double) {}
+
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        pendingInstallReply = reply
+        tick()
+    }
+
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {}
+
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        acknowledgement()
+    }
+
+    func showUpdateInFocus() {}
+
+    func dismissUpdateInstallation() {
+        // Sparkle ends every session here; an install already handed to the installer quits Ensemble regardless.
+        guard pendingOffer == nil else { return }
+        endSession()
+    }
+
     // MARK: SPUUpdaterDelegate
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? { UpdateConfig.feedURL }
 
     nonisolated func updaterShouldPromptForPermissionToCheck(forUpdates updater: SPUUpdater) -> Bool { false }
 
-    /// Every check reports here, background ones included, so the button changes without the user pressing it.
-    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        let version = item.displayVersionString
-        Task { @MainActor in self.found(version) }
-    }
-
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         Task { @MainActor in self.foundNothing() }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
-        Task { @MainActor in self.userCheckInFlight = false }
+        Task { @MainActor in self.userCheckInFlight = false; self.checking = false }
     }
 
-    /// Skipping the version takes it off the button; "Later" keeps it there.
-    nonisolated func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
-        guard choice == .skip else { return }
-        Task { @MainActor in self.availableVersion = nil }
-    }
-
+    /// Automatic updates downloaded a version in the background: Ensemble installs it itself at the first idle
+    /// moment (`tick`), never Sparkle on its own schedule.
     nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock: @escaping () -> Void) -> Bool {
         let version = item.displayVersionString
         Task { @MainActor in
             self.found(version)
-            self.pendingInstall = immediateInstallationBlock
-            self.installWhenIdle()
+            EnsembleLog.write("update: \(version) downloaded in the background; installs at the first idle moment")
+            self.pendingAutoInstall = immediateInstallationBlock
+            self.tick()
         }
         return true
     }
 
-    // MARK: SPUStandardUserDriverDelegate
-
-    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
-
-    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool { false }
-
-    nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
-        let version = update.displayVersionString
-        Task { @MainActor in
-            self.found(version)
-            // Sparkle's documented pattern for menu bar apps: while its window is up, Ensemble takes a Dock icon and
-            // comes to the front, so the window can't be lost behind other apps and Command-Tab finds it.
-            if handleShowingUpdate {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
+    nonisolated func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        Task { @MainActor in EnsembleLog.write("update: Sparkle relaunching Ensemble") }
     }
 
-    nonisolated func standardUserDriverWillFinishUpdateSession() {
-        Task { @MainActor in NSApp.setActivationPolicy(.accessory) }
+    // MARK: After the relaunch
+
+    private static let pendingVersionKey = "updateInstallingVersion"
+    private static let handedOverKey = "updateHandedOverToLoginAgent"
+    /// The version this copy was just updated to, for the "Updated to x.y.z" notice once the overlay is up.
+    private(set) static var justUpdatedTo: String?
+
+    /// Runs first thing at launch. Returns true when this copy must quit so launchd's own job starts Ensemble
+    /// (open at login on, and this copy was opened by Sparkle outside the job): `Permissions.reopenAfterExit`
+    /// waits for this process to end, then kickstarts the job, or opens the app if the job is not loaded.
+    static func afterLaunch() -> Bool {
+        let defaults = UserDefaults.standard
+        let pending = defaults.string(forKey: pendingVersionKey).map {
+            PendingUpdate(version: $0, handedOver: defaults.bool(forKey: handedOverKey))
+        }
+        let installed = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        let byAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == LoginAgent.label
+        switch UpdateRelaunch.decide(pending: pending, installedVersion: installed, loginAgentOn: LoginAgent.isEnabled,
+                                     startedByLoginAgent: byAgent) {
+        case .nothing:
+            return false
+        case .notInstalled(let version):
+            EnsembleLog.write("update: \(version) did not install; still running \(installed)")
+        case .announce(let version):
+            EnsembleLog.write("update: relaunched after update to \(version) (\(byAgent ? "started by the login agent" : "opened by Sparkle"))")
+            justUpdatedTo = version
+        case .handOverToLoginAgent:
+            EnsembleLog.write("update: relaunched as \(installed) outside the login agent; handing over to launchd")
+            defaults.set(true, forKey: handedOverKey)
+            // This copy exits at once; the mark must be on disk or a failed hand-over could loop.
+            defaults.synchronize()
+            return true
+        }
+        defaults.removeObject(forKey: pendingVersionKey)
+        defaults.removeObject(forKey: handedOverKey)
+        return false
     }
 }
