@@ -6,11 +6,9 @@ import { createPreview } from './capture3d/preview.js';
 import { pinchRatio, PINCH_IS_OPEN } from './capture3d/events.js';
 
 const TAKES = [
-  { id: 'rest', title: 'Rest', seconds: 4, optional: true, text: 'Raise your hand, relaxed and still.' },
   { id: 'dictate', title: 'Dictate', seconds: 6, optional: false, text: 'Double pinch (thumb and index, two quick taps), pause 1 second, double pinch again.' },
   { id: 'send', title: 'Send', seconds: 5, optional: false, text: 'From relaxed, make a thumbs-up, hold it 1.5 seconds, then relax.' },
   { id: 'scroll', title: 'Scroll', seconds: 6, optional: false, text: 'Pinch and hold, move your hand up about 10 cm, then down, then release.' },
-  { id: 'look', title: 'Look', seconds: 2, optional: true, text: 'Put your hand down, out of view.' },
 ];
 const COUNTDOWN = 3;
 const $ = (id) => document.getElementById(id);
