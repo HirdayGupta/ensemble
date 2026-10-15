@@ -232,11 +232,11 @@ final class VisionEngine {
 
         // The face frame goes out first: the nose dot waits on the face tracker.
         if plan.runFace, face.gate.tryEnter(now: t) {
-            if let jpeg = analyzer.jpeg(from: pixels) {
+            if let frame = analyzer.facePixels(from: pixels) {
                 DispatchQueue.main.async { [weak self] in
                     MainActor.assumeIsolated {
                         guard let self, self.isRunning, self.generation == mine else { self?.face.gate.leave(); return }
-                        self.face.submit(jpeg: jpeg, t: t)
+                        self.face.submit(rgba: frame.bytes, width: frame.width, height: frame.height, t: t)
                     }
                 }
             } else {

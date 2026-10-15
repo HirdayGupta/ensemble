@@ -1,13 +1,22 @@
 import Compression
+import EnsembleCore
 import Foundation
 import WebKit
 
 /// Serves the bundled `web` folder under `ensemble-asset://local/...` so the face tracker page, the
 /// MediaPipe script, its wasm and the model never touch the network. A packaged build ships large files as
 /// `<name>.lzma` (scripts/pack-web.swift: an 8-byte little-endian size, then LZMA data); the page still asks for `<name>`.
+/// The face tracker's handler also serves its camera frames, from memory only, at `/frame/<number>`.
 final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "ensemble-asset"
     static let root: URL? = EnsembleResources.web
+
+    private let frames: FaceFrameSlot?
+
+    init(frames: FaceFrameSlot? = nil) {
+        self.frames = frames
+        super.init()
+    }
 
     static func mimeType(forExtension ext: String) -> String {
         switch ext.lowercased() {
@@ -65,6 +74,22 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         let url = urlSchemeTask.request.url ?? URL(string: "\(Self.scheme)://local/")!
+        if let number = FaceFrameSlot.number(inPath: url.path) {
+            guard let bytes = frames?.take(number),
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [
+                      "Content-Type": "application/octet-stream",
+                      "Content-Length": String(bytes.count),
+                      "Cache-Control": "no-store",
+                  ])
+            else {
+                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                return
+            }
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(bytes)
+            urlSchemeTask.didFinish()
+            return
+        }
         guard let (response, data) = Self.response(for: url) else {
             urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
             return

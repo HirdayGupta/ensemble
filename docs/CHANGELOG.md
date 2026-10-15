@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- The face tracker uses about 13% less CPU per camera frame and answers about 3 ms sooner: frames reach it as raw pixels from memory instead of being compressed to JPEG, turned into text and decoded again.
 - Calibration dots sit 4% in from each screen edge instead of 8%, so sessions at a screen's edge are measured rather than guessed, and every dot stays whole and clear of the menu bar and the notch. Recalibrate after updating (menu panel, Calibrate) to get the wider reach; calibrations from before keep working as they were.
 - Recalibrating one screen after moving or rotating monitors no longer saves the wrong screen. The first dot of a one-screen run now waits for your head to turn away from the screen you were looking at, and a run whose points repeat another calibrated screen's is not saved: Ensemble says "Not saved: the points on ... matched where you look at ..." instead of leaving the nose unable to reach that screen. The log says when a calibration is saved, for which screens and position, and which screens point with it.
 - The log names a camera by its model id, never its device name (which can carry the owner's name, such as "Akshay's iPhone Camera").
