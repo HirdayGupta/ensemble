@@ -33,7 +33,7 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 | General | Update automatically (off by default: checks every 6 hours, installs only while idle). Turn Ensemble on or off, open at login (restarts after a crash), play sounds, fade out and pause other audio while dictating. |
 | Gestures | Remap gestures, including turning the thumbs-up send off, and the hold time. Warn when my look leaves Claude (on by default). Headphone presses on or off (on by default). |
 | Display | Show the nose dot, highlight the session you face, pointer smoothing, correct for where I sit (on by default), live sound bars (asks for microphone access), reverse the pinch-and-drag direction, the send countdown. |
-| Calibration | Calibrate from where you usually sit. Sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display); recalibrate after changing chairs, camera or monitor tilt, or when that switch is off and you move your seat. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
+| Calibration | Calibrate from where you usually sit; sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display). Recalibrate after changing chairs, camera or monitor tilt. Each dot is captured only once your head has turned toward it and holds still. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
 | About | Version, credits and Check for Updates. Update automatically lives under General. |
 
 ## Audio pause

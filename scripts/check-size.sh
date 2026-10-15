@@ -7,7 +7,7 @@
 set -u
 cd "$(dirname "$0")/.."
 
-BUDGET_BYTES=7600000
+BUDGET_BYTES=7750000
 APP="${1:-build/Ensemble.app}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }

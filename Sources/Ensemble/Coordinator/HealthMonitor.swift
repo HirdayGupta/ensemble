@@ -60,6 +60,9 @@ final class HealthMonitor {
 
     func update() {
         ctx.state.set(\.status, current())
+        let connected = NSScreen.screens.compactMap(ScreenGeometry.stableID(of:))
+        let valid = connected.filter { ctx.setup.validScreenIDs.contains($0) }.count
+        ctx.state.set(\.calibratedLine, ctx.pointer.isCalibrated ? ScreenLayout.calibratedLine(valid: valid, connected: connected.count) : nil)
     }
 
     /// The camera is refused, missing or its face tracker has failed.

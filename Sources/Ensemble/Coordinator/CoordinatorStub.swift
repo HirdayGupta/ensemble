@@ -72,10 +72,11 @@ final class StubCoordinator: AppCoordinating {
         guard !state.calibrating else { return }
         state.calibrating = true
         var tick = 0.0
-        CalibrationController.shared.run(headSource: {
+        let feed = CalibrationFeed(head: {
             tick += 1
-            return HeadObservation(t: tick, yaw: 0, pitch: 0, faceCount: 1)
-        }, completion: { [weak self] results in
+            return HeadObservation(t: CACurrentMediaTime(), yaw: tick * 1e-6, pitch: 0, faceCount: 1)
+        })
+        CalibrationController.shared.run(feed: feed, verifyAim: false, completion: { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
             guard !results.isEmpty, let data = try? JSONEncoder().encode(results.flatMap(\.samples)) else { return }
