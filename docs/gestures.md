@@ -17,7 +17,7 @@ What each gesture does and what Settings can change. The overview is in the [REA
 
 When Ensemble starts a dictation, it also puts the keyboard in that session's message box, so a key you type while dictating lands there. It does this only while Claude is the app in front, and leaves focus alone otherwise.
 
-Ensemble does no speech recognition of its own. The status capsule at the top of the screen, a floating one on screens without a notch, names the state and the session. Option-Command-K opens the control panel from anywhere.
+Ensemble does no speech recognition of its own. The status capsule at the top of the screen, a floating one on screens without a notch, names the state and the session. Option-Command-K opens the control panel from anywhere. The panel, top to bottom: the on/off switch with the live status, the camera and how many screens are calibrated (click it to recalibrate one screen), the nose dot and highlight switches, then Replay tour, the update button, Calibrate and Settings, and a footer with the installed version and a power button that quits. A refused gesture adds a short note under the camera that clears after a few seconds, or sooner once what it described no longer holds.
 
 ## Warnings while you dictate
 
@@ -34,11 +34,11 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 
 | Group | What you can change |
 |---|---|
-| General | Update automatically (off by default: checks every 6 hours, installs only while idle). Turn Ensemble on or off, open at login (restarts after a crash), play sounds, fade out and pause other audio while dictating. |
+| General | Update automatically (off by default: checks soon after launch and then every hour, installs only while idle). Turn Ensemble on or off, open at login (restarts after a crash), play sounds, fade out and pause other audio while dictating. |
 | Gestures | Remap gestures, including turning the thumbs-up send off, and the hold time. Warn when my look leaves Claude (on by default). Headphone presses on or off (on by default). |
 | Display | Show the nose dot, highlight the session you face, pointer smoothing, correct for where I sit (on by default), live sound bars (asks for microphone access), reverse the pinch-and-drag direction, the send countdown. |
-| Calibration | Calibrate from where you usually sit; sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display). Recalibrate after changing chairs, camera or monitor tilt. Settings, Calibration can redo one screen only, and Add position keeps a second calibration (standing, leaning back) beside the first; the one nearest your head is used, and Calibrate redoes that one. Each dot is captured only once your head has turned toward it and holds still. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
-| About | Version, credits and Check for Updates. Update automatically lives under General. The installed version shows beside every Check for Updates button, and after a check the result: "Ensemble x.y.z is available" or "Up to date". |
+| Calibration | Calibrate from where you usually sit; sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display). Recalibrate after changing chairs, camera or monitor tilt. Settings, Calibration lists your screens, each with a Recalibrate button that redoes that screen only (the menu panel's "Calibrated for" row opens it), and Add position keeps a second calibration (standing, leaning back) beside the first; the one nearest your head is used, and Calibrate redoes that one. Each dot is captured only once your head has turned toward it and holds still. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
+| About | Version, credits and the update button. Update automatically lives under General. The update button says "Check for Updates", "Update to x.y.z" once any check finds a new version (pressing it installs), or "Up to date" for a few seconds after a check you started finds nothing. |
 
 ## Audio pause
 

@@ -4,6 +4,11 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- The menu panel's status line is always the live state, and a refused gesture's note no longer sticks: it clears after 6 seconds, when a dictation starts, when you type or click, and for "Your nose is not on a Claude session" or "Claude isn't on screen" as soon as your nose is back on a session. Switching Ensemble off clears it too.
+- With Update automatically on, Ensemble checks 15 seconds after launch and then every hour instead of every 6 hours, and a new version found by any check, background ones included, shows on the update button without you pressing it.
+- One update button everywhere (menu bar panel, Option-Command-K panel, Settings): "Check for Updates", "Update to x.y.z" when one is found (pressing it installs), or "Up to date" for a few seconds after your check finds nothing. The separate "is available" and "Up to date" lines are gone; the installed version is a small caption in the panel's footer and beside the button in Settings.
+- The menu panel reads top to bottom: on/off, the camera and "Calibrated for N screens", the nose dot and highlight switches, then Replay tour, the update button, Calibrate and Settings. Quit is a power button in the footer, and the "⌥⌘K shows this panel" caption is gone (the shortcut still works). Clicking the calibration row opens Settings at Calibration, which now lists each screen with its own Recalibrate button.
+
 - The menu bar panel says "Claude isn't on screen" instead of "Watching" while Claude runs but none of its windows is on screen (another Space, minimized, behind a full-screen app), and goes back to "Watching" when a session is found.
 - Return twice while talking sends again when the stop takes longer than half a second: Ensemble switching its own key watch off after the stop came back from macOS as a pause, counted as typing, and refused the send with "You just typed or clicked". The watch now also stays on until a send asked for with Return is done, so a key typed meanwhile still refuses it.
 - The session list no longer empties for a second when Claude's tree reads empty while it re-renders: one empty scan keeps the sessions while their dictation checkboxes still answer, and two in a row drop them.
