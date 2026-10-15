@@ -109,6 +109,8 @@ public final class GestureMachine {
     public var maximizeByPeace = true
     public var evenOutByScissors = true
     private var widths = WidthGestures()
+    private var twoFingersHold = TwoFingersHold()
+    private var diagnostics: [String] = []
     /// A peace sign is up and counting: the coordinator reads every hand frame meanwhile, so the timing holds.
     public var peaceOpen: Bool { widths.peaceOpen }
 
@@ -142,6 +144,13 @@ public final class GestureMachine {
         lastPushT = nil
         lastTalkEndT = nil
         widths.reset()
+        twoFingersHold.reset()
+    }
+
+    /// Log lines gathered since the last call (one per two-fingers hold, see `TwoFingersHold`), oldest first.
+    public func takeDiagnostics() -> [String] {
+        defer { diagnostics.removeAll() }
+        return diagnostics
     }
 
     /// The coordinator refused or failed to start the dictation this machine just announced: forget it
@@ -171,10 +180,11 @@ public final class GestureMachine {
         if h.present, let send = mapping.send, h.pose == send { lastSendPoseT = h.t }
         if let end = lastTapEnd, h.t - end > Self.tapGap, !pinchIsClosed { lastTapEnd = nil }   // first tap expired
         trackTaps(h, into: &intents)
-        if let width = widths.push(t: h.t, pose: h.present ? h.pose : nil, spread: h.fingerSpread, maximize: maximizeByPeace,
-                                   evenOut: evenOutByScissors, allowed: !talking && !pinchIsClosed && !mapping.usesTwoFingers) {
-            intents.append(width)
-        }
+        let widthsAllowed = !talking && !pinchIsClosed && !mapping.usesTwoFingers
+        let width = widths.push(t: h.t, pose: h.present ? h.pose : nil, spread: h.fingerSpread, maximize: maximizeByPeace,
+                                evenOut: evenOutByScissors, allowed: widthsAllowed)
+        if let width { intents.append(width) }
+        if let line = twoFingersHold.push(h, allowed: widthsAllowed, fired: width) { diagnostics.append(line) }
 
         guard h.present, let pose = h.pose else {
             noteSendRunEnding()

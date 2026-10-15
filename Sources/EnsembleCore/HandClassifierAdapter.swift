@@ -11,7 +11,9 @@ public enum HandClassifierAdapter {
         }
         let features = classifier.features(hand)
         return HandObservation(t: t, present: true, pose: pose(for: features?.gesture), palmCenter: hand.palmCenter, pinch: pinch,
-                                skeleton: HandSkeletonFrame(hand: hand), fingerSpread: features?.fingerSpread)
+                                skeleton: HandSkeletonFrame(hand: hand), fingerSpread: features?.fingerSpread,
+                                twoUp: features?.twoUp ?? false,
+                                gate: features?.tooSmall == true ? .tooFar : features?.angled == true ? .angled : nil)
     }
 
     static func pose(for gesture: Gesture?) -> Pose? {

@@ -21,6 +21,9 @@ public struct HandFeatures {
     public var angled: Bool             // pose rejected because the palm does not face the camera or points down
     public var indexRise: CGFloat = 0   // Ensemble change: index tip above its MCP, in palm lengths (negative = pointing down)
     public var fingerSpread: Double?    // Ensemble change: index tip to middle tip, in palm lengths; see `WidthGestures`
+    /// Ensemble change: index and middle out, ring and little folded, before the distance and angle gates. Only the
+    /// two-fingers diagnostics read it, so a peace sign the gates refuse still shows up in the log.
+    public var twoUp = false
     public var thumb: Bool { thumbStraight && thumbClear }
     public var extendedCount: Int { [index, middle, ring, little].filter { $0 }.count }
     /// Enough fingers extended to count as an open hand; swipes only track open hands.
@@ -41,6 +44,11 @@ public struct GestureClassifier {
     /// Closed poses (fist, thumbs up) need this much. A fist is compact, about 0.6 of an open
     /// palm's extent at the same distance: 0.19 at arm's length, 0.12 one step back.
     public var minClosedExtent: CGFloat = 0.11
+    /// Ensemble change: two fingers (the peace sign) needs this much. A V is as tall as an open palm but about half as
+    /// wide, so the same hand reads roughly 0.9 of an open palm's extent: an open palm one step back measures 0.21, a
+    /// V there about 0.19, right on the open floor. The recorded idle and desk hands add 18 two-fingers frames
+    /// between 0.15 and 0.19 and none of them holds a spread that acts (see `WidthGestures`).
+    public var minTwoFingersExtent: CGFloat = 0.15
 
     /// Knuckle width over palm length, at most, for open palm, fist and two fingers. A palm facing
     /// the camera keeps its full wrist-to-knuckle length and measures 0.37–0.58 in every fixture at
@@ -95,6 +103,13 @@ public struct GestureClassifier {
     /// down is not upright), but not from the extent floor or the span gate.
     static let pointMinRise: CGFloat = 0.5
 
+    /// Ensemble change: two fingers needs ring and little folded at least this far (tip inside this many PIP
+    /// distances from the wrist), not fully curled. With the thumb holding them down they curl to 0.34-0.56 (the
+    /// recorded two-fingers hold); with the thumb out they only fold loosely, often past `curlRatio` (0.85), which
+    /// refused every V made with the thumb out. Requiring 1.0, short of `extendRatio`, keeps a nearly straight ring
+    /// or little finger out. No recorded open palm, fist, thumbs-up or idle hand gains a two-fingers frame from it.
+    static let twoFingersFoldRatio: CGFloat = 1.0
+
     public func classify(_ hand: Hand) -> Gesture? { features(hand)?.gesture }
 
     public func features(_ hand: Hand) -> HandFeatures? {
@@ -119,6 +134,7 @@ public struct GestureClassifier {
         let reaches = [index, middle, ring, little]
         let ext = reaches.map { $0 > Self.extendRatio }
         let curl = reaches.map { $0 < Self.curlRatio }
+        let folded = reaches.map { $0 < Self.twoFingersFoldRatio }
         let tipReach = [Joint.indexTip, .middleTip, .ringTip, .littleTip]
             .compactMap { hand[$0] }.map { dist($0, wrist) / size }.max() ?? 0
 
@@ -133,6 +149,7 @@ public struct GestureClassifier {
                              upright: (midMCP.y - wrist.y) / size, tooSmall: false, angled: false)
         f.indexRise = (indexTip.y - indexMCP.y) / size
         if let middleTip = hand[.middleTip] { f.fingerSpread = Double(dist(indexTip, middleTip) / size) }
+        f.twoUp = ext[0] && ext[1] && folded[2] && folded[3]
         let n = f.extendedCount
         // Ensemble change: "gather" = all five fingertips brought together, fingers forward (not curled into a fist).
         // Measured live: gathered tips spread 0.33–0.55 palm lengths with the tip centroid 1.07–1.38 from the wrist;
@@ -150,7 +167,7 @@ public struct GestureClassifier {
         if gathered { f.gesture = .gather }
         else if n == 4 && tipReach <= Self.maxOpenTipReach { f.gesture = .openPalm }
         else if f.curled == 4 && !f.thumb && tipReach < (f.extent >= Self.closeFistExtent ? Self.closeFistTipReach : Self.fistTipReach) { f.gesture = .fist }
-        else if ext[0] && ext[1] && curl[2] && curl[3] { f.gesture = .twoFingers }
+        else if f.twoUp { f.gesture = .twoFingers }
         else if f.curled == 4 && f.thumb && f.thumbUp { f.gesture = .thumbsUp }
         else if ext[0] && curl[1] && curl[2] && curl[3] {
             if f.indexRise > Self.pointMinRise { f.gesture = .pointUp }
@@ -158,7 +175,7 @@ public struct GestureClassifier {
         }
 
         if let g = f.gesture {
-            let floor = (g == .openPalm || g == .twoFingers) ? minOpenExtent : minClosedExtent
+            let floor = g == .openPalm ? minOpenExtent : g == .twoFingers ? minTwoFingersExtent : minClosedExtent
             if f.extent < floor { f.tooSmall = true; f.gesture = nil }
             else if (g != .thumbsUp && g != .gather && f.span > (g == .fist && f.extent >= Self.closeFistExtent ? Self.closeFistMaxPalmSpan : Self.maxPalmSpan)) || (f.upright < Self.minUpright && g != .pointUp && g != .pointDown) { f.angled = true; f.gesture = nil }
         }
