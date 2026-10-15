@@ -16,6 +16,8 @@ final class ClaudeBridge: @unchecked Sendable {
     /// Dictation start has its own queue so a slow session refresh on `queue` cannot delay it.
     let startQueue = DispatchQueue(label: "ensemble.claude.bridge.start", qos: .userInteractive)
     let inFlight = InFlightTracker()
+    /// Claude's own notifications that its windows or panes changed; see `refreshSessions(watched:)`.
+    let watcher = ClaudeWatcher()
 
     private let lock = NSLock()
     private var cache: [String: CachedSession] = [:]
@@ -124,36 +126,51 @@ final class ClaudeBridge: @unchecked Sendable {
 
     // MARK: Sessions
 
-    /// The session list, for the 1 s refresh. A full walk costs Claude's own main thread a read per node, so while
-    /// Claude's windows are unchanged this re-reads only each cached checkbox and pane frame, walking again when a
-    /// window moved, opened or closed, a cached element stopped answering, or every `SessionScan.fullWalkEvery`.
+    /// The session list. A full walk costs Claude's own main thread a read per node, so this re-reads only what the
+    /// last walk cached (`SessionScan.plan`), walking again when a window opened, closed or left the screen, a cached
+    /// element stopped answering, or the cache is old.
+    /// `watched`: the 1 s check, using Claude's change notifications. While `watcher` receives them, the pane frames are
+    /// read only when a notification or the window server says something moved, a window move no longer walks, and
+    /// the walk that runs regardless comes every `SessionScan.safetyWalkEvery`. Otherwise (and for the width steps,
+    /// which watch their own drags) every call reads each checkbox and pane frame and walks every
+    /// `SessionScan.fullWalkEvery`.
     /// `recording`: the sessions whose dictation checkbox reads "Stop dictation", from the same read that checks the
-    /// checkbox still answers (no extra Accessibility call), so a dictation Claude runs without Ensemble is seen.
-    func refreshSessions() async -> (sessions: [ClaudeSession], recording: Set<String>) {
-        await run { self.refreshNow() }
+    /// checkbox still answers (no extra Accessibility call), so a dictation Claude runs without Ensemble is seen. The
+    /// checkboxes are read on every call either way.
+    func refreshSessions(watched: Bool = false) async -> (sessions: [ClaudeSession], recording: Set<String>) {
+        await run { self.refreshNow(watched: watched) }
     }
 
-    private func refreshNow() -> (sessions: [ClaudeSession], recording: Set<String>) {
+    private func refreshNow(watched: Bool) -> (sessions: [ClaudeSession], recording: Set<String>) {
         let windows = Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
+        let observing = watched && claudePID.map { watcher.isObserving($0) } == true
+        let changes = watched ? watcher.take() : []
         lock.lock()
         let cached = cacheOrder.compactMap { cache[$0] }
-        let windowsChanged = walkedWindows != windows
+        let walked = walkedWindows
         let sinceWalk = Date().timeIntervalSince(lastFullWalk)
         lock.unlock()
+        let setChanged = SessionScan.windowSetChanged(walked, windows)
+        var plan = SessionScan.plan(cached: cached.count, windowSetChanged: setChanged, boundsChanged: walked != windows,
+                                    changes: changes, observing: observing, sinceFullWalk: sinceWalk)
         var refreshed: [CachedSession] = []
         var recording = Set<String>()
-        var answer = true
-        if !cached.isEmpty, !windowsChanged, sinceWalk < SessionScan.fullWalkEvery {
+        if case .reread(let frames) = plan {
             for var entry in cached {
-                guard let label = Self.micLabel(entry.elements.mic), let frame = AX.frame(entry.elements.pane),
-                      frame.width > 50, frame.height > 50 else { answer = false; break }
-                entry.session.frame = frame
+                guard let label = Self.micLabel(entry.elements.mic) else { plan = .walk; break }
+                if frames {
+                    guard let frame = AX.frame(entry.elements.pane), frame.width > 50, frame.height > 50 else { plan = .walk; break }
+                    let moved = SessionScan.windowMoved(entry.session.windowNumber, from: walked, to: windows)
+                    if observing, SessionScan.retiled(cachedFrame: entry.session.frame, frame: frame, windowMoved: moved) {
+                        plan = .walk; break
+                    }
+                    entry.session.frame = frame
+                }
                 if label == ClaudeLabels.micActive { recording.insert(entry.session.id) }
                 refreshed.append(entry)
             }
         }
-        guard !SessionScan.needsFullWalk(cached: cached.count, windowsChanged: windowsChanged, cachedAnswer: answer,
-                                         sinceFullWalk: sinceWalk) else {
+        guard plan != .walk else {
             let found = discover(windows: windows)
             let active = found.filter { Self.micLabel($0.elements.mic) == ClaudeLabels.micActive }
             return (found.map(\.session), Set(active.map(\.session.id)))
@@ -162,6 +179,8 @@ final class ClaudeBridge: @unchecked Sendable {
         // A stop or send may have re-walked meanwhile; its result wins over these frames.
         if cacheOrder == refreshed.map(\.session.id) {
             for entry in refreshed { cache[entry.session.id]?.session.frame = entry.session.frame }
+            // The frames now match these window positions: the next check need not read them again.
+            if observing, plan == .reread(frames: true) { walkedWindows = windows }
         }
         let current = cacheOrder.compactMap { cache[$0]?.session }
         lock.unlock()
@@ -186,6 +205,7 @@ final class ClaudeBridge: @unchecked Sendable {
             noteAX(.success)
             lock.lock(); listHold.reset(); lock.unlock()
             replaceCache([], windows: nil)
+            watcher.forget()
             return []
         }
         let app = AX.application(pid: pid)
@@ -194,11 +214,15 @@ final class ClaudeBridge: @unchecked Sendable {
         let cgWindows = given ?? Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
         var found: [CachedSession] = []
         var complete = true
+        var shownWindows: [AXUIElement] = []
+        var dividers: [AXUIElement] = []
         // Right after the flag is set Chromium builds its tree incrementally; give it a few passes.
         for attempt in 0..<(justEnabled ? 8 : 1) {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.4) }
             found = []
             complete = true
+            shownWindows = []
+            dividers = []
             let deadline = Date().addingTimeInterval(Self.walkBudget)
             let windows = AX.read(app, kAXWindowsAttribute)
             noteAX(windows.error)
@@ -212,6 +236,8 @@ final class ClaudeBridge: @unchecked Sendable {
                 let walked = sessions(in: window, windowNumber: number, idKey: number != 0 ? number : -(windowIndex + 1),
                                       deadline: deadline)
                 found += walked.sessions
+                dividers += walked.dividers
+                shownWindows.append(window)
                 complete = complete && walked.complete
             }
             if !found.isEmpty { break }
@@ -231,6 +257,8 @@ final class ClaudeBridge: @unchecked Sendable {
             return previous
         }
         replaceCache(found, windows: cgWindows)
+        watcher.watch(pid: pid, windows: shownWindows, panes: found.map(\.elements.pane), mics: found.map(\.elements.mic),
+                      dividers: dividers)
         return found
     }
 
@@ -244,11 +272,11 @@ final class ClaudeBridge: @unchecked Sendable {
     }
 
     private func sessions(in window: AXUIElement, windowNumber: Int, idKey: Int,
-                          deadline: Date) -> (sessions: [CachedSession], complete: Bool) {
-        let (mics, complete) = Self.collectMics(in: window, deadline: deadline)
+                          deadline: Date) -> (sessions: [CachedSession], dividers: [AXUIElement], complete: Bool) {
+        let (mics, dividers, complete) = Self.collectMics(in: window, deadline: deadline)
         var result: [CachedSession] = []
         for (i, mic) in mics.enumerated() {
-            guard Date() < deadline else { return (result, false) }
+            guard Date() < deadline else { return (result, dividers, false) }
             guard let paneIndex = Self.paneIndex(for: i, among: mics, deadline: deadline),
                   let pane = Optional(mic.path[paneIndex]),
                   let frame = AX.frame(pane) else { continue }
@@ -259,7 +287,7 @@ final class ClaudeBridge: @unchecked Sendable {
                                         modeControl: scan.mode, transcript: scan.transcript)
             result.append(CachedSession(session: ClaudeSession(id: id, frame: frame, windowNumber: windowNumber, title: scan.title), elements: elements))
         }
-        return (result, complete && Date() < deadline)
+        return (result, dividers, complete && Date() < deadline)
     }
 
     /// Keyed on the window and the mic's order in it, never on the frame, so dragging or resizing a window
@@ -345,12 +373,13 @@ final class ClaudeBridge: @unchecked Sendable {
 
     private static let walkAttrs = [kAXRoleAttribute, kAXDescriptionAttribute, kAXTitleAttribute, kAXChildrenAttribute]
 
-    /// Every dictation checkbox under `window` with its ancestor path. The transcript is not entered:
-    /// it holds most of the nodes and never contains a composer.
+    /// Every dictation checkbox under `window` with its ancestor path, and every divider (`AXSplitter`, for
+    /// `ClaudeWatcher`). The transcript is not entered: it holds most of the nodes and never contains a composer.
     /// `complete` is false when the walk ran out of time before `deadline`.
     static func collectMics(in window: AXUIElement, maxNodes: Int = 12_000,
-                            deadline: Date = .distantFuture) -> (hits: [MicHit], complete: Bool) {
+                            deadline: Date = .distantFuture) -> (hits: [MicHit], dividers: [AXUIElement], complete: Bool) {
         var hits: [MicHit] = []
+        var dividers: [AXUIElement] = []
         var count = 0
         var outOfTime = false
         func go(_ el: AXUIElement, _ path: [AXUIElement], _ roles: [String], _ depth: Int) {
@@ -367,11 +396,12 @@ final class ClaudeBridge: @unchecked Sendable {
                 hits.append(MicHit(element: el, path: path, roles: roles))
                 return
             }
+            if role == "AXSplitter" { dividers.append(el) }
             if desc == ClaudeLabels.transcript { return }
             for c in (v[3] as? [AXUIElement]) ?? [] { go(c, path, roles, depth + 1) }
         }
         go(window, [], [], 0)
-        return (hits, !outOfTime)
+        return (hits, dividers, !outOfTime)
     }
 
     /// Index into `mics[i].path` of the session's pane. The choice itself is `PaneChoice`; this reads the
