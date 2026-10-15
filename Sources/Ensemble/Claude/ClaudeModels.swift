@@ -3,12 +3,6 @@ import EnsembleCore
 import CoreGraphics
 import Foundation
 
-enum MicState: Equatable, Sendable {
-    case on
-    case off
-    case unknown(String)
-}
-
 enum ScrollMethod: String, Sendable {
     case accessibility, wheelEvent, failed
 }

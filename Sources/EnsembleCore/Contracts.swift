@@ -113,6 +113,14 @@ public enum GestureIntent: Equatable, Sendable {
 
 public enum TalkEndReason: String, Sendable { case released, stale }
 
+/// Claude's microphone in one session pane, from two sources that must agree: the dictation checkbox and CoreAudio's
+/// per-process capture flag. `.on` and `.off` need both; anything else is `.unknown` with the reason.
+public enum MicState: Equatable, Sendable {
+    case on
+    case off
+    case unknown(String)
+}
+
 /// A Claude Code session pane visible on screen.
 public struct ClaudeSession: Equatable, Sendable {
     public var id: String                   // opaque, stable while the pane exists

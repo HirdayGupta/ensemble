@@ -62,6 +62,10 @@ public final class GestureMachine {
     static let stopAndSendHold = 0.35
     static let sendAfterTalkEnd = 0.5
     static let cancelHold = 0.3
+    /// After a send fires, the send pose must be gone this long before a new hold can count. A thumbs-up still up
+    /// after the send that flickers for a frame (a misread pose) otherwise started a second hold: the bar filled
+    /// again after the send and a second send was asked for.
+    static let sendRearm = 0.3
     static let scrollHold = 0.25
 
     // Scroll: while a pointing pose is held, each frame scrolls speed * frame time. The speed ramps from
@@ -79,12 +83,22 @@ public final class GestureMachine {
         var startedWhileTalking: Bool
         var fired = false
         var stoppedForSend = false     // this send pose already ended a dictation; it may still send
+        var blocked = false            // a send pose that returned too soon after a send fired: it never acts
         var lastT: TimeInterval
     }
 
     private var run: Run?
     private var lastPushT: TimeInterval?
     private var lastTalkEndT: TimeInterval?
+    /// The last frame of a send pose that fired (or was blocked), for `sendRearm`.
+    private var firedSendLastT: TimeInterval = -.infinity
+
+    /// The send pose that just stopped a dictation is still held toward its send: the coordinator stops dictation
+    /// and settles the transcript during the hold, so Send can be pressed the moment it completes.
+    public var holdingSendAfterStop: Bool {
+        guard let r = run, r.pose == mapping.send else { return false }
+        return r.stoppedForSend && !r.fired && !r.blocked
+    }
 
     public init(mapping: GestureMapping = .init()) { self.mapping = mapping }
 
@@ -98,7 +112,7 @@ public final class GestureMachine {
             GestureProgress(pose: r.pose, action: action, progress: min(max(held / need, 0), 1), willAct: can, active: false)
         }
         if talking { return nil }
-        if r.pose == mapping.send { return make(.send, sendHold, (!r.startedWhileTalking || r.stoppedForSend) && !r.fired) }
+        if r.pose == mapping.send { return make(.send, sendHold, (!r.startedWhileTalking || r.stoppedForSend) && !r.fired && !r.blocked) }
         // An open hand is just a resting hand: nothing to show (cancel has nothing to cancel since send became a hold).
         if r.pose == mapping.cancel { return nil }
         if let direction = scrollDirection(r.pose) {
@@ -112,7 +126,7 @@ public final class GestureMachine {
         talking = false
         pinchIsClosed = false; pinchClosedAt = nil; lastTapEnd = nil
         pinchToggled = false; dragging = false; isDragging = false; edgeCount = 0
-        pinchSuspect = false; lastSendPoseT = -.infinity
+        pinchSuspect = false; lastSendPoseT = -.infinity; firedSendLastT = -.infinity
         lastToggleAt = -.infinity
         run = nil
         lastPushT = nil
@@ -147,12 +161,16 @@ public final class GestureMachine {
         trackTaps(h, into: &intents)
 
         guard h.present, let pose = h.pose else {
+            noteSendRunEnding()
             run = nil
             return intents
         }
 
         if run?.pose != pose {
-            run = Run(pose: pose, start: h.t, startedWhileTalking: talking, lastT: h.t)
+            noteSendRunEnding()
+            var fresh = Run(pose: pose, start: h.t, startedWhileTalking: talking, lastT: h.t)
+            fresh.blocked = pose == mapping.send && h.t - firedSendLastT < Self.sendRearm
+            run = fresh
         }
         guard var r = run else { return intents }
         let held = h.t - r.start
@@ -162,7 +180,7 @@ public final class GestureMachine {
             r.stoppedForSend = true
             endTalk(.released, at: h.t, into: &intents)
         } else if !talking {
-            if pose == mapping.send, !r.startedWhileTalking || r.stoppedForSend, !r.fired, held >= sendHold,
+            if pose == mapping.send, !r.startedWhileTalking || r.stoppedForSend, !r.fired, !r.blocked, held >= sendHold,
                r.stoppedForSend || (lastTalkEndT.map({ h.t - $0 >= Self.sendAfterTalkEnd }) ?? true) {
                 r.fired = true
                 intents.append(.sendRequested)
@@ -279,6 +297,10 @@ public final class GestureMachine {
     public var awaitingSecondTap: Bool {
         guard let end = lastTapEnd, let now = lastPushT else { return false }
         return now - end <= Self.tapGap
+    }
+
+    private func noteSendRunEnding() {
+        if let r = run, r.pose == mapping.send, r.fired || r.blocked { firedSendLastT = r.lastT }
     }
 
     private func endTalk(_ reason: TalkEndReason, at t: TimeInterval, into intents: inout [GestureIntent]) {
