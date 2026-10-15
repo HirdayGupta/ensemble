@@ -24,6 +24,7 @@ final class ClaudeBridge: @unchecked Sendable {
     private var scrollMethod: ScrollMethod?
     private var noScrollAreaUntil: [String: Date] = [:]
     private var shuttingDown = false
+    private var startPresses = 0
     private var axDisabled = false
     private var lastMicReading: (text: String, at: Date)?
 
@@ -44,6 +45,23 @@ final class ClaudeBridge: @unchecked Sendable {
     /// Once set, no new dictation can start; the quit path uses it so a start in flight cannot press after the stop.
     func beginShutdown() { lock.lock(); shuttingDown = true; lock.unlock() }
     var isShuttingDown: Bool { lock.lock(); defer { lock.unlock() }; return shuttingDown }
+
+    /// A start press is queued or running: it could still turn the microphone on. The quit path waits for it
+    /// before trusting an "off" reading.
+    var startPressInFlight: Bool { lock.lock(); defer { lock.unlock() }; return startPresses > 0 }
+    func noteStartPress(_ began: Bool) { lock.lock(); startPresses += began ? 1 : -1; lock.unlock() }
+
+    /// The pane's frame read straight from its cached element: one bounded Accessibility read, never a tree walk,
+    /// so it is safe while dictating. nil when the pane is not cached or does not answer.
+    func paneFrame(_ s: ClaudeSession) async -> CGRect? {
+        guard let pane = cachedPane(s.id) else { return nil }
+        return await run { AX.frame(pane) }
+    }
+
+    private func cachedPane(_ id: String) -> AXUIElement? {
+        lock.lock(); defer { lock.unlock() }
+        return cache[id]?.elements.pane
+    }
 
     /// True when the last discovery was refused because Accessibility is off or the grant is stale.
     var accessibilityDisabled: Bool { lock.lock(); defer { lock.unlock() }; return axDisabled }

@@ -15,6 +15,9 @@ protocol AppCoordinating: AnyObject {
     /// Called once as the app quits; must finish within about two seconds and leave nothing recording.
     func shutdown()
     var cameraNames: [String] { get }
+    /// Something is under way that an update's relaunch would cut off: a press in flight, a dictation, a pending
+    /// or running send, or a gesture being held.
+    var isBusy: Bool { get }
     /// While the tour's gesture-practice step is open, real gesture intents and head readings go to `sink`
     /// instead of acting on Claude. Ends any dictation in progress first, the same as `calibrate()` does.
     func enterGesturePractice(_ sink: TourPracticeSink)

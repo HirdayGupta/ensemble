@@ -4,6 +4,18 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- A thumbs-up send feels like one step: the island goes from "Sending" straight to "Sent" (or "Not sent" with the reason) instead of flicking back to the dictation and folding away first, and only the send sound plays. The fixed 0.6 s wait for Claude's transcript is replaced by waiting until the draft stops changing for 0.3 s, and Send's result is checked every 30 ms instead of every 100 ms.
+- When macOS cannot read whether Claude is recording for 3 seconds while a dictation record is open, the alarm sounds and the input is muted, instead of waiting for a reading that may never come.
+- A new dictation is refused while an earlier one's stop is unconfirmed, its alarm sounds or its safety mute is on, so that dictation's stop is never abandoned. The alarm now also ends when the microphone is confirmed off without a mute having been needed.
+- Quitting while a dictation is starting waits for the start press before reading the microphone, so the safety record is not deleted moments before Claude's microphone opens.
+- A dictation interrupted by sleep, a lock or the safety check while it was starting or stopping can no longer be sent by a later thumbs-up.
+- The safety mute counts only when macOS accepts it and reads back silent, lands on the device of every Claude process the recording check counts (helpers included), and is undone when an unplugged device comes back.
+- Starting a dictation, sending and switching off no longer read the audio system or wait on the safety check on the main thread, so a stalled audio device cannot freeze the app.
+- Music paused for a dictation no longer resumes in the middle of the next one started within 0.7 s.
+- The camera turns off while the Mac or display sleeps, the screen is locked or the screen saver runs, and Ensemble moves no focus meanwhile; it comes back on when you return.
+- Moving or resizing the Claude window you are dictating into keeps the highlight and edge warnings on it.
+- An automatic update no longer installs while a send is pending or a gesture is being held.
+
 - The "Claude's microphone may still be on" alarm now always shows as a banner on the island and stays until the safety check confirms the microphone is off and the mute is undone, even when notifications are refused or a Focus mode hides them; the system notification is sent as well when allowed.
 - On first launch the tour's Welcome step is no longer covered by the Accessibility prompt and the Camera request: the camera starts when the tour moves on to calibration, and the Accessibility prompt waits for the tour's permissions step or for the tour to close.
 - The tour's Camera card now has three states: Allow (not asked yet), Open Settings with a plain explanation (denied), and Granted. The Accessibility Grant button also opens the Accessibility list in System Settings, because macOS shows its own prompt only once.

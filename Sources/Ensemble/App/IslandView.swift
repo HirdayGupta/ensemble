@@ -8,12 +8,14 @@ struct IslandView: View {
     @ObservedObject var model: OverlayModel
     let notch: CGSize
 
-    private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, otherGesture, banner }
+    private enum Mode: Equatable { case idle, dictating, switching, firstPinch, sendHold, sending, otherGesture, banner }
     /// What is drawn. It follows `liveMode` only once that has held steady for a moment, so a state that lasts
     /// a frame or two (a dropped hand frame, the gap between a gesture firing and Claude confirming) never flashes.
     @State private var shown: Mode = .idle
     private var mode: Mode { shown }
     private var liveMode: Mode {
+        // From the end of the hold until the result, a send is one step, even while its stop is still completing.
+        if model.sending != nil { return .sending }
         if model.listening, model.sessionSwitch != nil { return .switching }
         if let g = model.gesture {
             if (g.action == .talk || g.action == .stop) && !g.active { return .firstPinch }
@@ -32,7 +34,7 @@ struct IslandView: View {
         switch mode {
         case .idle: return CGSize(width: 120, height: 0)
         case .otherGesture: return CGSize(width: 200, height: 36)
-        case .dictating, .switching, .firstPinch, .sendHold, .banner: return CGSize(width: 360, height: floating ? 46 : 48)
+        case .dictating, .switching, .firstPinch, .sendHold, .sending, .banner: return CGSize(width: 360, height: floating ? 46 : 48)
         }
     }
 
@@ -41,6 +43,7 @@ struct IslandView: View {
         switch mode {
         case .switching: return model.sessionSwitch?.progress
         case .sendHold: return model.gesture?.progress
+        case .sending: return 1
         default: return nil
         }
     }
@@ -69,7 +72,8 @@ struct IslandView: View {
                 .padding(.vertical, 8)
                 .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.85)).animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.08)),
                                         removal: .opacity.animation(.easeOut(duration: 0.12))))
-                .id(mode)
+                // The hold turns into the send in place: same content, no re-entry animation.
+                .id(mode == .sending ? Mode.sendHold : mode)
         }
         .padding(.top, mode == .idle ? 0 : notch.height)
         .frame(width: max(size.width, notch.width + (mode == .idle ? 0 : 40)), height: size.height + (mode == .idle ? 0 : notch.height))
@@ -93,8 +97,13 @@ struct IslandView: View {
         .onChange(of: liveMode) { _, next in settle(next) }
     }
 
-    /// 0.15 s for a new state, 0.35 s before folding away.
+    /// 0.15 s for a new state, 0.35 s before folding away. A send's hold turning into the send, and the send turning
+    /// into its result, are decided facts rather than flickers: they show at once.
     private func settle(_ next: Mode) {
+        if (shown == .sendHold && next == .sending) || (shown == .sending && next == .banner) {
+            shown = next
+            return
+        }
         let wait: UInt64 = next == .idle ? 350_000_000 : 150_000_000
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: wait)
@@ -168,13 +177,13 @@ struct IslandView: View {
                 lines(Text(stopping ? "Pinch again to stop dictation" : "Pinch again to dictate"), Text("in ") + session(name))
                 Spacer(minLength: 0)
             }
-        case .sendHold:
+        case .sendHold, .sending:
             HStack(spacing: 11) {
                 Image(systemName: "paperplane.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ensembleBlue)
                     .frame(width: 26)
-                lines(Text("Sending in ") + session(name), nil)
+                lines(Text("Sending in ") + session(mode == .sending ? (model.sending ?? name) : name), nil)
                 Spacer(minLength: 8)
-                hint("lower to cancel")
+                if mode == .sendHold { hint("lower to cancel") }
             }
         case .otherGesture:
             if let g = model.gesture {

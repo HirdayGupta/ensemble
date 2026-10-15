@@ -13,7 +13,8 @@ struct InputMuter {
     /// Devices Claude is capturing from, falling back to the default input device.
     static func targetDevices() -> [AudioObjectID] {
         var devices: [AudioObjectID] = []
-        for p in CoreAudioInput.processes() ?? [] where p.isRunningInput && p.bundleID.hasPrefix(ClaudeLabels.bundleID) {
+        let roots = ClaudeBridge.claudeRoots()
+        for p in CoreAudioInput.processes() ?? [] where p.isRunningInput && ClaudeBridge.isClaude(p, roots: roots) {
             devices += CoreAudioInput.inputDevices(of: p)
         }
         if devices.isEmpty, let d = CoreAudioInput.defaultInputDevice() { devices = [d] }
@@ -40,19 +41,36 @@ struct InputMuter {
                 EnsembleLog.write("mute skipped: could not write the mute record (\(error))")
                 continue
             }
+            // Success counts only when the write is accepted and a read-back shows the device silent. Otherwise the
+            // record is dropped, so nothing claims a mute that is not there and a later restore never "undoes" it.
+            let silenced: Bool
             switch record.method {
-            case .mute: CoreAudioInput.setMuted(device, true)
-            case .volume: CoreAudioInput.setVolume(device, 0)
+            case .mute: silenced = CoreAudioInput.setMuted(device, true) && CoreAudioInput.isMuted(device) == true
+            case .volume: silenced = CoreAudioInput.setVolume(device, 0) && (CoreAudioInput.volume(device).map { $0 < 0.001 } ?? false)
+            }
+            if !silenced {
+                switch record.method {
+                case .mute: _ = CoreAudioInput.setMuted(device, false)
+                case .volume: _ = CoreAudioInput.setVolume(device, record.priorVolume ?? 0.5)
+                }
+                records.removeLast()
+                if records.isEmpty { SafetyFiles.deleteMutes() } else { try? SafetyFiles.writeMutes(records) }
+                EnsembleLog.write("mute failed on an input device: the write was refused or did not read back silent")
             }
         }
         return isActive
+    }
+
+    /// A recorded mute whose device is connected now, so a restore can act on it.
+    var anyDeviceConnected: Bool {
+        records.contains { CoreAudioInput.device(withUID: $0.deviceUID) != nil }
     }
 
     /// Undo what this app did, but only where its change is still in effect. A record stays on disk while its
     /// device is absent or its restore could not be confirmed, so a later launch can try again.
     /// Returns true if anything was undone.
     @discardableResult
-    mutating func restore() -> Bool {
+    mutating func restore(logIncomplete: Bool = true) -> Bool {
         var restored = false
         var remaining: [MuteRecord] = []
         for record in records {
@@ -80,7 +98,7 @@ struct InputMuter {
             SafetyFiles.deleteMutes()
         } else {
             try? SafetyFiles.writeMutes(remaining)
-            EnsembleLog.write("mute restore incomplete: \(remaining.count) record(s) kept for a later attempt")
+            if logIncomplete || restored { EnsembleLog.write("mute restore incomplete: \(remaining.count) record(s) kept for a later attempt") }
         }
         return restored
     }

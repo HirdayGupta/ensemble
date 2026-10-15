@@ -12,12 +12,18 @@ final class DictationSafety: @unchecked Sendable {
 
     private let callbackLock = NSLock()
     private var alarmHandler: ((String) -> Void)?
+    private var alarmEndedHandler: (() -> Void)?
     private var mutedHandler: ((Bool) -> Void)?
     private var holdEndedHandler: ((String) -> Void)?
 
     var onAlarm: ((String) -> Void)? {
         get { callbackLock.lock(); defer { callbackLock.unlock() }; return alarmHandler }
         set { callbackLock.lock(); alarmHandler = newValue; callbackLock.unlock() }
+    }
+    /// The alarm ended because the microphone was confirmed off; called on the main queue.
+    var onAlarmEnded: (() -> Void)? {
+        get { callbackLock.lock(); defer { callbackLock.unlock() }; return alarmEndedHandler }
+        set { callbackLock.lock(); alarmEndedHandler = newValue; callbackLock.unlock() }
     }
     /// The safety check ended the hold itself (no heartbeat, or Accessibility stalled); called on the main queue.
     var onHoldEnded: ((String) -> Void)? {
@@ -36,6 +42,8 @@ final class DictationSafety: @unchecked Sendable {
     private var lastHeartbeat = Date.distantPast
     private var holdEndedAt = Date.distantPast
     private var offSince: Date?
+    /// Since when, with a record open and no hold, the microphone state could not be read.
+    private var unreadableSince: Date?
     private var stopInFlight = false
     private var stopStartedAt: Date?
     private var stopReason = ""
@@ -60,26 +68,39 @@ final class DictationSafety: @unchecked Sendable {
 
     deinit { timer?.cancel() }
 
+    /// Runs `work` on the safety queue without blocking the caller's thread (the main thread, usually), since the
+    /// queue can be busy with a CoreAudio read that stalls while devices change.
+    private func onQueue<T>(_ work: @escaping () -> T) async -> T {
+        await withCheckedContinuation { cont in queue.async { cont.resume(returning: work()) } }
+    }
+
     // MARK: Episode lifecycle
 
-    /// Records the episode on disk (fsynced) before anything presses the microphone control.
-    /// Returns false if the record could not be written; callers must not press in that case.
-    @discardableResult
-    func episodeStarting(session: ClaudeSession) -> Bool {
-        queue.sync {
-            let record = EpisodeRecord(id: UUID().uuidString, startedAt: Date(), pid: ProcessInfo.processInfo.processIdentifier,
-                                       bootSessionUUID: SafetyFiles.bootSessionUUID(), sessionID: session.id,
-                                       claudeVersion: bridge.claudeVersion)
-            do { try SafetyFiles.writeEpisode(record) } catch { return false }
-            episode = record
-            self.session = session
-            holdActive = true
-            lastHeartbeat = Date()
-            offSince = nil
-            stopStartedAt = nil
-            escalated = false
-            return true
+    /// Records the episode on disk (fsynced) before anything presses the microphone control. Returns why the start
+    /// is refused, or nil once the record is written; callers must not press unless it is nil. Refuses while an
+    /// earlier dictation is still owed a confirmed stop, so that dictation's record, alarm and mute are never abandoned.
+    func episodeStarting(session: ClaudeSession) async -> String? {
+        await onQueue {
+            if let why = DictationRules.startRefusal(stopOwed: self.stopStartedAt != nil, alarmOn: self.escalated,
+                                                     muteInEffect: self.muter.isActive && self.muter.anyDeviceConnected) {
+                return why
+            }
+            return self.writeEpisode(session: session) ? nil : "Could not write the safety record; not starting"
         }
+    }
+
+    private func writeEpisode(session: ClaudeSession) -> Bool {
+        let record = EpisodeRecord(id: UUID().uuidString, startedAt: Date(), pid: ProcessInfo.processInfo.processIdentifier,
+                                   bootSessionUUID: SafetyFiles.bootSessionUUID(), sessionID: session.id,
+                                   claudeVersion: bridge.claudeVersion)
+        do { try SafetyFiles.writeEpisode(record) } catch { return false }
+        episode = record
+        self.session = session
+        holdActive = true
+        lastHeartbeat = Date()
+        offSince = nil
+        unreadableSince = nil
+        return true
     }
 
     func episodeConfirmed() {
@@ -104,25 +125,26 @@ final class DictationSafety: @unchecked Sendable {
     /// Forget everything: delete the episode file, undo our mute, silence the alarm. Refuses (returns false)
     /// unless Claude is definitely not capturing: while it captures, or while CoreAudio cannot say, the episode
     /// stays and the standing check keeps trying to stop it.
-    @discardableResult
-    func clearAndDisarm() -> Bool {
-        queue.sync {
-            holdActive = false
-            if !DictationRules.confirmedOff(capture: bridge.claudeCaptureActive()) {
-                holdEndedAt = Date()
-                offSince = nil
-                return false
-            }
-            stopInFlight = false
-            stopStartedAt = nil
-            escalated = false
-            episode = nil
-            session = nil
-            SafetyFiles.deleteEpisode()
-            stopAlarm()
-            restoreMute()
-            return true
+    func clearAndDisarm() async -> Bool {
+        await onQueue { self.clearAndDisarmNow() }
+    }
+
+    private func clearAndDisarmNow() -> Bool {
+        holdActive = false
+        if !DictationRules.confirmedOff(capture: bridge.claudeCaptureActive()) {
+            holdEndedAt = Date()
+            offSince = nil
+            return false
         }
+        stopInFlight = false
+        stopStartedAt = nil
+        unreadableSince = nil
+        episode = nil
+        session = nil
+        SafetyFiles.deleteEpisode()
+        stopAlarm()
+        restoreMute()
+        return true
     }
 
     /// Quit path: stops Claude's dictation and undoes our mute before the process exits. The caller blocks for at
@@ -142,12 +164,17 @@ final class DictationSafety: @unchecked Sendable {
     }
 
     private func terminationStop(session: ClaudeSession?, deadline: Date) {
+        // A start press already sent can open the microphone after a first "off" reading. Wait for it to land (one
+        // not yet sent is refused by the shutdown flag); if it is still in flight at the deadline, nothing counts as off.
+        while bridge.startPressInFlight, Date() < deadline { Thread.sleep(forTimeInterval: 0.025) }
+        let startInFlight = bridge.startPressInFlight
+        if startInFlight { EnsembleLog.write("quit: a start press is still in flight; the safety record stays") }
         let (episodeOpen, remembered) = queue.sync { (episode != nil || holdActive || stopStartedAt != nil, self.session) }
-        guard session != nil || episodeOpen || SafetyFiles.episodeFileExists() else {
+        guard session != nil || episodeOpen || startInFlight || SafetyFiles.episodeFileExists() else {
             queue.sync { restoreMute() }
             return
         }
-        var off = bridge.claudeCaptureActive() == false
+        var off = !startInFlight && bridge.claudeCaptureActive() == false
         if !off {
             let left = deadline.timeIntervalSinceNow
             let result = left > 0.1 ? bridge.stopDictationBlocking(session ?? remembered, timeout: left) : nil
@@ -157,7 +184,7 @@ final class DictationSafety: @unchecked Sendable {
                 capture = bridge.claudeCaptureActive()
             }
             // A stop that reported done without a definite "not capturing" reading is not proof: mute and keep the record.
-            off = DictationRules.confirmedOff(capture: capture)
+            off = !bridge.startPressInFlight && DictationRules.confirmedOff(capture: capture)
             if !off { EnsembleLog.write("quit: stop \(result.map { "\($0)" } ?? "timed out"), capture \(capture.map(String.init) ?? "unreadable")") }
         }
         EnsembleLog.write("quit: microphone \(off ? "confirmed off" : "NOT confirmed off; muting the input")")
@@ -189,7 +216,10 @@ final class DictationSafety: @unchecked Sendable {
             }
         }
         if stopStartedAt != nil { driveStop(now) }
-        if ticks % 4 == 0 { standingCheck(now) }
+        if ticks % 4 == 0 {
+            standingCheck(now)
+            retryUnmute()
+        }
     }
 
     private func endHoldAndStop(_ reason: String) {
@@ -206,13 +236,33 @@ final class DictationSafety: @unchecked Sendable {
         switch bridge.claudeCaptureActive() {
         case .some(true):
             offSince = nil
+            unreadableSince = nil
             if stopStartedAt == nil { beginStop("Claude is capturing audio with no hold active") }
         case .some(false):
-            if stopStartedAt != nil { stopConfirmed() }
+            unreadableSince = nil
+            if stopStartedAt != nil || escalated { stopConfirmed() }
             if offSince == nil { offSince = now }
             if now.timeIntervalSince(offSince!) >= Self.settleWindow { finishEpisode() }
         case .none:
+            // Unreadable is never off. Left alone it could last for ever with nothing stopping or muting, so after a
+            // while it is handled as a stop that cannot be confirmed: keep trying to stop, sound the alarm, mute.
             offSince = nil
+            if unreadableSince == nil { unreadableSince = now }
+            if DictationRules.escalateUnreadable(recordOpen: true, holdActive: holdActive,
+                                                 unreadableFor: now.timeIntervalSince(unreadableSince!)) {
+                if stopStartedAt == nil { beginStop("Claude's microphone state could not be read") }
+                if !escalated { escalate("Claude's microphone state could not be read for \(Int(DictationRules.unreadableLimit)) s") }
+            }
+        }
+    }
+
+    /// A device unplugged while muted kept its mute record. Once it is back and no stop is owed, the mute is undone.
+    private func retryUnmute() {
+        guard muter.isActive, stopStartedAt == nil, !escalated, !holdActive, muter.anyDeviceConnected else { return }
+        if episode != nil, !DictationRules.confirmedOff(capture: bridge.claudeCaptureActive()) { return }
+        if muter.restore(logIncomplete: false) {
+            EnsembleLog.write("safety mute undone on a reconnected input device")
+            notifyMuted(false)
         }
     }
 
@@ -253,7 +303,7 @@ final class DictationSafety: @unchecked Sendable {
     private func stopConfirmed() {
         stopStartedAt = nil
         stopInFlight = false
-        escalated = false
+        unreadableSince = nil
         stopAlarm()
         restoreMute()
     }
@@ -262,7 +312,9 @@ final class DictationSafety: @unchecked Sendable {
         episode = nil
         session = nil
         offSince = nil
+        unreadableSince = nil
         SafetyFiles.deleteEpisode()
+        stopAlarm()
         restoreMute()
     }
 
@@ -284,10 +336,15 @@ final class DictationSafety: @unchecked Sendable {
         }
     }
 
+    /// Called only once the microphone reads definitely off: ends the sound, and the island alarm if one was raised.
     private func stopAlarm() {
+        let wasRaised = escalated
+        escalated = false
+        let handler = onAlarmEnded
         DispatchQueue.main.async {
             self.sound?.stop()
             self.sound = nil
+            if wasRaised { handler?() }
         }
     }
 
@@ -307,35 +364,35 @@ final class DictationSafety: @unchecked Sendable {
     /// Run at launch and after wake. Acts only on evidence this app left behind: an episode file from the
     /// current boot while Claude is capturing means a recording of ours may still be running.
     func launchSweep() async {
-        let hadLiveEpisode: Bool = queue.sync {
+        let hadLiveEpisode: Bool = await onQueue {
             guard let record = SafetyFiles.readEpisode() else { return false }
             if record.bootSessionUUID != SafetyFiles.bootSessionUUID() {
                 SafetyFiles.deleteEpisode()
                 return false
             }
-            if episode == nil {
-                episode = record
-                session = nil
-                holdActive = false
-                holdEndedAt = .distantPast
+            if self.episode == nil {
+                self.episode = record
+                self.session = nil
+                self.holdActive = false
+                self.holdEndedAt = .distantPast
             }
             return true
         }
 
         guard hadLiveEpisode else {
-            queue.sync { if !holdActive { restoreMute() } }
+            await onQueue { if !self.holdActive { self.restoreMute() } }
             return
         }
 
         switch bridge.claudeCaptureActive() {
         case .some(false):
-            queue.sync { finishEpisode() }
+            await onQueue { self.finishEpisode() }
         case .some(true):
-            queue.sync { if stopStartedAt == nil { beginStop("recording found at launch from a previous run") } }
+            await onQueue { if self.stopStartedAt == nil { self.beginStop("recording found at launch from a previous run") } }
             let deadline = Date().addingTimeInterval(6)
             while Date() < deadline {
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                if queue.sync(execute: { episode == nil || escalated }) { break }
+                if await onQueue({ self.episode == nil || self.escalated }) { break }
             }
         case .none:
             break

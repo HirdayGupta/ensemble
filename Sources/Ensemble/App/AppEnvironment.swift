@@ -79,7 +79,7 @@ final class AppEnvironment {
     func start() {
         updates.isBusy = { [weak self] in
             guard let self else { return true }
-            return self.state.listening || self.state.calibrating || self.tourWindow.isShown
+            return self.state.listening || self.state.calibrating || self.tourWindow.isShown || self.coordinator.isBusy
         }
         guard !started else { return }
         started = true
