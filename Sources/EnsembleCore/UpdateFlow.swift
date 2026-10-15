@@ -23,6 +23,19 @@ public enum UpdateOffer: Equatable, Sendable {
     }
 }
 
+/// What a press of the one update button starts. A button that already says "Update to x.y.z" is the go-ahead
+/// itself: the install starts and nothing is asked, whatever state Sparkle's previous session is in.
+public enum UpdatePress: Equatable, Sendable {
+    /// Download, install and relaunch the known version with no alert.
+    case install(version: String)
+    /// No version is known yet: check, and ask once if one is found.
+    case check
+
+    public static func decide(availableVersion: String?) -> UpdatePress {
+        availableVersion.map { .install(version: $0) } ?? .check
+    }
+}
+
 /// The version Ensemble was installing when it quit for an update, kept on disk so the copy that opens next can
 /// say "Updated to x.y.z" and log the relaunch.
 public struct PendingUpdate: Equatable, Sendable {

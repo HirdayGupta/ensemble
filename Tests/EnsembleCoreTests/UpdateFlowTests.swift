@@ -26,6 +26,18 @@ import Testing
         #expect(UpdateOffer.decide(version: "1.1", installRequested: false, userInitiated: false, automatic: false, declined: ["1.0"]) == .ask)
     }
 
+    @Test func pressingTheButtonWithAKnownVersionInstallsWithoutAPrompt() {
+        let press = UpdatePress.decide(availableVersion: "1.1")
+        #expect(press == .install(version: "1.1"))
+        // The find that follows the press is the go-ahead, even though Sparkle reports it as user initiated.
+        let offer = UpdateOffer.decide(version: "1.1", installRequested: press != .check, userInitiated: true, automatic: false, declined: [])
+        #expect(offer == .install)
+    }
+
+    @Test func pressingTheButtonWithNoKnownVersionChecks() {
+        #expect(UpdatePress.decide(availableVersion: nil) == .check)
+    }
+
     // MARK: UpdateRelaunch
 
     @Test func noRecordMeansNothing() {
