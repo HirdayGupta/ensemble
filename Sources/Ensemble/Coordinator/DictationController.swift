@@ -15,6 +15,10 @@ final class DictationController {
     private let ducker = MediaDucker()
     private var duckWanted = false
     private var disarming = false            // "Clear and disarm" is stopping the microphone
+    /// A start press is between the press request and its result; it could still turn the microphone on.
+    private var startInFlight = false
+    /// Switching off gave up waiting for a start press: stop that dictation the moment the press lands.
+    private var stopWhenStarted = false
     private var cancellables = Set<AnyCancellable>()
     /// Claude's process when the dictation began: a different (or missing) one later means the dictation is gone.
     private var processID: pid_t?
@@ -73,6 +77,7 @@ final class DictationController {
         send.afterStop = false; focus.clearDeferred()
         guard safety.episodeStarting(session: session) else { refuseStart("Could not write the safety record; not starting"); return }
         ctx.busy = true
+        startInFlight = true
         ctx.listening = session
         processID = ctx.bridge.claudePID
         ctx.state.listening = true
@@ -82,14 +87,21 @@ final class DictationController {
             if self.ctx.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
             let result = await self.ctx.bridge.startDictation(session)
             self.ctx.busy = false
+            self.startInFlight = false
+            let switchedOff = self.disarming || self.stopWhenStarted
+            self.stopWhenStarted = false
+            var confirmedOn = false
+            if case .done = result { confirmedOn = true }
+            // The hand may already have opened, or Ensemble been switched off, while the press was in flight.
+            let next = DictationRules.afterStart(confirmedOn: confirmedOn, switchedOff: switchedOff, poseHeld: self.ctx.gestures.talking)
             switch result {
             case .done:
-                EnsembleLog.write("dictation started")
-                if self.ctx.settings.liveSoundBars { self.meter.start() }
+                EnsembleLog.write(next == .stopSwitchedOff ? "dictation started after Ensemble was switched off; stopping it now" : "dictation started")
+                if self.ctx.settings.liveSoundBars, next != .stopSwitchedOff { self.meter.start() }
                 self.startedAt = CACurrentMediaTime()
                 self.inputDevice = self.ctx.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()
-                Notifier.shared.playCue(.listenStart)
+                if next != .stopSwitchedOff { Notifier.shared.playCue(.listenStart) }
             case .refused(let why), .unknown(let why):
                 self.ctx.listening = nil
                 self.ctx.state.listening = false
@@ -99,8 +111,12 @@ final class DictationController {
                 self.ctx.refuse("Could not start dictation: \(why)", title: "Dictation not started")
                 self.checkClaudeUpdate()
             }
-            // The hand may already have opened while the press was in flight.
-            if !self.ctx.gestures.talking, self.ctx.listening != nil { self.end(reason: "released") }
+            switch next {
+            // The record stays until the stop is confirmed and capture has been off for the settle window.
+            case .stopSwitchedOff: self.end(reason: "switched off while starting", immediate: true)
+            case .stopReleased: self.end(reason: "released")
+            case .keepListening, .notStarted: break
+            }
             self.ctx.changed()
         }
     }
@@ -239,17 +255,35 @@ final class DictationController {
         ctx.gestures.reset()
         EnsembleLog.write("clear and disarm requested")
         Task { @MainActor in
-            for _ in 0..<30 where self.ctx.busy { try? await Task.sleep(nanoseconds: 100_000_000) }
+            // A start press still in flight could turn the microphone on after the check below reads it off.
+            let began = CACurrentMediaTime()
+            waiting: while true {
+                switch DictationRules.disarmStep(stepInFlight: self.ctx.busy, startInFlight: self.startInFlight, waited: CACurrentMediaTime() - began) {
+                case .wait:
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                case .proceed:
+                    break waiting
+                case .stopWhenStarted:
+                    // The listening state and the safety record stay with the start; it stops the moment the press lands.
+                    self.disarming = false
+                    self.stopWhenStarted = true
+                    EnsembleLog.write("clear and disarm: a start press is still in flight after \(Int(DictationRules.disarmWait)) s; it is stopped when it lands and the safety record stays")
+                    self.ctx.refuse("Could not confirm the microphone is off; the safety check keeps watching")
+                    self.ctx.changed()
+                    return
+                }
+            }
             let result = await self.ctx.bridge.stopAnyDictation()
             var capture = self.ctx.bridge.claudeCaptureActive()
-            for _ in 0..<15 where capture == true {
+            for _ in 0..<15 where !DictationRules.confirmedOff(capture: capture) {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 capture = self.ctx.bridge.claudeCaptureActive()
             }
             self.disarming = false
             self.ctx.listening = nil
             self.ctx.state.listening = false
-            if capture == true || !self.safety.clearAndDisarm() {
+            // An unreadable microphone state is not off: the record and any mute stay for the standing check.
+            if !DictationRules.confirmedOff(capture: capture) || !self.safety.clearAndDisarm() {
                 EnsembleLog.write("clear and disarm: microphone still recording (stop \(result)); the safety check keeps watching")
                 self.safety.episodeEnded()
                 self.ctx.refuse("Could not confirm the microphone is off; the safety check keeps watching")

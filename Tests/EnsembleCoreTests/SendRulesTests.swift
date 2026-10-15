@@ -18,4 +18,11 @@ import Testing
         #expect(SendRules.typedRefusal(spokenAgo: 10, inputAge: 10.1) == nil)
         #expect(SendRules.typedRefusal(spokenAgo: 40, inputAge: 5) != nil)     // the window is not this check's business
     }
+
+    /// A fresh dictation and no input since, but the user swiped to a full-screen call: nothing is sent.
+    @Test func anotherAppInFrontRefuses() {
+        #expect(SendRules.refusal(spokenAgo: 5, inputAge: 100) == nil)
+        #expect(SendRules.frontRefusal(claudeInFront: false) == "Claude is not the app in front")
+        #expect(SendRules.frontRefusal(claudeInFront: true) == nil)
+    }
 }

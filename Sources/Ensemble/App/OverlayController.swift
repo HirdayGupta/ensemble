@@ -3,7 +3,9 @@ import SwiftUI
 import EnsembleCore
 
 struct OverlayBanner: Equatable, Identifiable {
-    enum Style: Equatable { case sent, stopped, refused, info }
+    /// `success`: something was restored or finished (a tick). `info`: a neutral heads-up about what Ensemble is
+    /// doing. `refused`: a real problem or a refusal (the amber warning). `sent` and `stopped` are the dictation banners.
+    enum Style: Equatable { case sent, stopped, refused, info, success }
     let id = UUID()
     var title: String
     var body: String

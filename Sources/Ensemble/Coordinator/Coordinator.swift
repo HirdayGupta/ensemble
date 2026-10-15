@@ -59,7 +59,7 @@ final class Coordinator: AppCoordinating {
         ctx.pointer.screenSizeProvider = { ScreenGeometry.physicalSizeCm(ofScreenID: $0) }
         if let data = settings.calibration { ctx.pointer.calibration = data }
         ctx.setup.startFullCalibration = { [weak self] in self?.calibrate() }
-        ctx.setup.startSubsetCalibration = { [weak self] screens in self?.runCalibration(screens: screens, replacingAll: false) }
+        ctx.setup.runPlan = { [weak self] plan in self?.runCalibration(plan) }
         gestures.mapping = settings.mapping
         ctx.pointer.setSmoothing(settings.pointerSmoothing)
         gestures.sendHold = settings.sendCountdownSeconds
@@ -159,20 +159,29 @@ final class Coordinator: AppCoordinating {
         EnsembleLog.flush()
     }
 
-    func calibrate() {
+    func calibrate() { calibrate(.recalibrate) }
+
+    func calibrate(_ request: CalibrationRequest) {
         let clickedAt = CACurrentMediaTime()
         guard !state.calibrating else { EnsembleLog.write("calibrate ignored: already in progress"); return }
-        EnsembleLog.write("calibrate requested (enabled=\(settings.enabled), engine running=\(engine.isRunning), face tracker ready=\(health.trackerReady))")
+        guard let plan = ctx.setup.plan(for: request) else { ctx.refuse("That screen is no longer connected"); return }
+        EnsembleLog.write("calibrate requested (\(request), \(plan.purpose), enabled=\(settings.enabled), engine running=\(engine.isRunning), face tracker ready=\(health.trackerReady))")
         // The window goes up first, before anything that can take time. Calibrating while off, or while the camera is
         // down, then turns Ensemble on or restarts the camera behind the window, which says what it is waiting for.
-        runCalibration(screens: NSScreen.screens, replacingAll: true, clickedAt: clickedAt)
+        runCalibration(plan, clickedAt: clickedAt)
         if !settings.enabled { settings.enabled = true } else if !health.running || !engine.isRunning { start() }   // the enabled sink starts it
     }
 
-    /// `replacingAll`: a manual Calibrate from the menu, covering (and replacing) every current screen for
-    /// the current camera. Otherwise just the given screens are calibrated and merged into whatever this
-    /// camera already has (a desk-setup prompt asking about one new screen, say).
-    private func runCalibration(screens: [NSScreen], replacingAll: Bool, clickedAt: TimeInterval = CACurrentMediaTime()) {
+    func removeCalibrationSpot(_ id: String) {
+        guard !state.calibrating else { return }
+        EnsembleLog.write("calibration position \(id) removed")
+        ctx.setup.removeSpot(id)
+        health.update()
+    }
+
+    /// Runs one calibration plan: every screen or only some, for the position in use or a new one. What the
+    /// run collected is stored as the plan's purpose says.
+    private func runCalibration(_ plan: CalibrationPlan, clickedAt: TimeInterval = CACurrentMediaTime()) {
         let fingerprint = ScreenFacts.displayFingerprint()
         let camera = state.cameraName
         state.calibrating = true
@@ -190,7 +199,7 @@ final class Coordinator: AppCoordinating {
                 guard let self, self.health.running, self.health.cameraFailed else { return nil }
                 return self.health.cameraAllowed ? "The camera did not start: \(self.health.failure ?? "no reading")" : "Calibration needs Camera permission"
             })
-        CalibrationController.shared.run(screens: screens, feed: feed, clickedAt: clickedAt) { [weak self] results in
+        CalibrationController.shared.run(screens: plan.screens, note: plan.note, feed: feed, clickedAt: clickedAt) { [weak self] results in
             guard let self else { return }
             self.state.calibrating = false
             EnsembleLog.write("calibration samples: \(results.map(\.samples.count))")
@@ -203,7 +212,7 @@ final class Coordinator: AppCoordinating {
                 self.ctx.refuse("Calibration discarded: the screens or the camera changed while it ran; try again")
                 return
             }
-            let ok = replacingAll ? self.ctx.setup.storeFullCalibration(results) : self.ctx.setup.storeSubsetCalibration(results)
+            let ok = self.ctx.setup.storeCalibration(results, purpose: plan.purpose)
             if !ok { self.ctx.refuse("Calibration did not fit; try again sitting where you normally work") }
             else if let failure { self.ctx.refuse(failure) }
             self.health.update()
@@ -267,6 +276,7 @@ final class Coordinator: AppCoordinating {
         guard !state.calibrating else { return }
         if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head), ctx.setup.isUsable(p) {
             // A pinch or scroll in progress holds everything still: the hand is in front of the face.
+            state.set(\.spotInUse, ctx.setup.spotInUseID)
             let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
             dot.follow(nose: p, onSession: under != nil)
             EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")

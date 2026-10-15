@@ -1,9 +1,10 @@
 // node --test docs/live/test : the ported pure logic, replayed with explicit clocks.
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   OneEuroFilter, GestureMachine, FocusTracker, sessionAt, FOCUS, observationFromHand, handFromLandmarks, J,
-  HeadPointer, CentreStep, HEAD, pinchMeasure, PinchAdapt, PINCH, AxisSign, anglesFromMatrix, noseOffset, FrameScheduler, PointerHand, islandMode, wordsTyped, classify,
+  HeadPointer, CentreStep, HEAD, pinchMeasure, PinchAdapt, PINCH, AxisSign, anglesFromMatrix, noseOffset, FrameScheduler, NoseGlide, PointerHand, islandMode, wordsTyped, classify,
 } from '../logic.js';
 
 const near = (a, b, e = 1e-9) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
@@ -275,16 +276,45 @@ test('angles from a head matrix, and the nose offset in face widths', () => {
 
 // ---- scheduler, pointer stand-in, island ----
 
-test('frame scheduler: hand every due frame, face decimated, and both slow down when inference is dear', () => {
-  const s = new FrameScheduler({ handHz: 30, faceHz: 15 });
+test('frame scheduler: the hand on every frame, the face decimated only as far as the budget needs', () => {
+  const s = new FrameScheduler();
   let hand = 0, face = 0;
-  for (let i = 0; i < 300; i++) { const p = s.plan(i / 30); hand += p.hand; face += p.face; if (p.hand) s.record('hand', 6); if (p.face) s.record('face', 8); }
-  assert.ok(hand >= 280, `hand ${hand}`);
-  assert.ok(face >= 130 && face <= 160, `face ${face}`);
-  const slow = new FrameScheduler({ handHz: 30, faceHz: 15 });
-  for (let i = 0; i < 600; i++) { const p = slow.plan(i / 30); if (p.hand) slow.record('hand', 30); if (p.face) slow.record('face', 40); }
-  assert.ok(slow.faceHz < 15 && slow.handHz < 30, `${slow.handHz} ${slow.faceHz}`);
-  assert.ok(slow.faceHz >= slow.minFaceHz && slow.handHz >= slow.minHandHz);
+  for (let i = 0; i < 600; i++) { const p = s.plan(i / 60); hand += p.hand; face += p.face; if (p.hand) s.record('hand', 6); if (p.face) s.record('face', 4); }
+  assert.equal(hand, 600, 'every frame');
+  assert.ok(face >= 280 && face <= 320, `face ${face}`);     // about 30 Hz of 60
+  const slow = new FrameScheduler();
+  for (let i = 0; i < 900; i++) { const p = slow.plan(i / 30); if (p.hand) slow.record('hand', 18); if (p.face) slow.record('face', 14); }
+  assert.ok(slow.faceHz < 30 && slow.faceHz >= slow.minFaceHz, `${slow.faceHz}`);
+  let h2 = 0; const slower = new FrameScheduler();
+  for (let i = 0; i < 900; i++) { const p = slower.plan(i / 30); h2 += p.hand; if (p.hand) slower.record('hand', 30); if (p.face) slower.record('face', 30); }
+  assert.ok(h2 < 900 && h2 >= 440, `the hand is thinned only as a last resort (${h2})`);
+});
+
+test('nose glide: moves at display rate between 20 Hz samples, extrapolates at most one interval, never overshoots a stop', () => {
+  const g = new NoseGlide();
+  const xs = [];
+  // a head moving at 400 px/s sampled at 20 Hz, drawn at 120 Hz
+  for (let f = 0; f < 240; f++) {
+    const t = f / 120;
+    if (f % 6 === 0) g.sample(t, 400 * t, 100);
+    xs.push(g.frame(t).x);
+  }
+  const distinct = new Set(xs.map((x) => x.toFixed(3))).size;
+  assert.ok(distinct > 220, `distinct ${distinct}`);
+  // no step bigger than 2x the smooth stride
+  const steps = xs.slice(1).map((x, i) => x - xs[i]);
+  assert.ok(Math.max(...steps) < 2 * (400 / 120) + 1, `largest step ${Math.max(...steps)}`);
+  // the lag behind the true position stays under one sample interval of travel
+  const lag = (400 * 1.9) - xs[228];
+  assert.ok(Math.abs(lag) < 400 * 0.05 + 4, `lag ${lag}`);
+  // the head stops: the dot settles on the last sample and stays
+  const g2 = new NoseGlide();
+  for (let i = 0; i < 10; i++) g2.sample(i / 20, 10 * i, 0);
+  let p; for (let f = 0; f < 200; f++) p = g2.frame(0.45 + f / 120);
+  assert.ok(p === null || p.x < 90 + 400 * 0.05 + 1, `settles near ${p && p.x}`);
+  // no recent sample: no dot
+  assert.equal(new NoseGlide().frame(1), null);
+  g2.reset(); assert.equal(g2.frame(5), null);
 });
 
 const pos = (x, y) => ({ x, y, nx: x / 800, ny: y / 600 });
@@ -453,12 +483,14 @@ test('pinch measure from image points corrects x for the frame aspect (4:3 frame
   }
 });
 
-test('the observation carries the world pinch when the model gives it, and the image one when not', () => {
+test('the observation measures the pinch in the image (the world distance is kept alongside but not used to decide)', () => {
   const hand = { points: imageHand(0.018).map((p) => ({ x: p.x, y: 1 - p.y })) };
-  const w = observationFromHand(hand, 1, false, { world: worldHand(0.018), aspect: 4 / 3 });
+  const w = observationFromHand(hand, 1, false, { world: worldHand(0.08), aspect: 4 / 3 });
+  assert.equal(w.pinchSource, 'image');
+  assert.ok(w.pinch < PINCH.closed, 'the picture says touching');
+  near(w.pinchWorld, 0.08 / 0.09, 0.02);   // the world distance disagrees here, and does not win
   const i = observationFromHand(hand, 1, false, { aspect: 4 / 3 });
-  assert.equal(w.pinchSource, 'world'); assert.equal(i.pinchSource, 'image');
-  assert.ok(w.pinch < PINCH.closed && i.pinch < PINCH.closed);
+  assert.equal(i.pinchWorld, null);
 });
 
 test('the machine treats a world-measure touching pinch as closed and a relaxed hand as open', () => {
@@ -500,4 +532,143 @@ test('adaptive pinch thresholds: defaults first, then converge on this visitor a
   for (let i = 0; i < 20; i++) c.push(0.5);
   assert.equal(c.closed, PINCH.minClosed);
   c.push(NaN); assert.ok(Number.isFinite(c.closed));
+});
+
+// ---- tap detection does not depend on the frame rate ----
+
+/** Frames at `hz` with a phase offset (a fraction of a frame); `closedSpans` are [from, to) seconds with the pinch closed. */
+function tapFrames(hz, closedSpans, { phase = 0, until = 4, closed = 0.15, open = 0.7 } = {}) {
+  const out = [];
+  for (let k = 0; ; k++) {
+    const t = (k + phase) / hz;
+    if (t > until) break;
+    out.push([t, closedSpans.some(([a, b]) => t >= a && t < b) ? closed : open]);
+  }
+  return out;
+}
+
+test('quick double taps register at 15, 20, 30 and 60 Hz, at every phase, for 80 to 150 ms taps 200 to 400 ms apart', () => {
+  for (const hz of [15, 20, 30, 60]) {
+    for (const dur of [0.08, 0.1, 0.15]) {
+      for (const gap of [0.2, 0.3, 0.4]) {
+        for (const phase of [0, 0.25, 0.5, 0.75]) {
+          const m = new GestureMachine();
+          const spans = [[0.5, 0.5 + dur], [0.5 + dur + gap, 0.5 + 2 * dur + gap]];
+          const out = run(m, tapFrames(hz, spans, { phase }));
+          assert.deepEqual(out.map((i) => i.type), ['talkBegan'], `${hz} Hz, tap ${dur}, gap ${gap}, phase ${phase}`);
+        }
+      }
+    }
+  }
+});
+
+test('a single tap, a slow pair, and a long hold do not start dictation, at any frame rate', () => {
+  for (const hz of [15, 20, 30, 60]) {
+    const single = run(new GestureMachine(), tapFrames(hz, [[0.5, 0.6]]));
+    assert.deepEqual(single, [], `single tap at ${hz} Hz`);
+    const slow = run(new GestureMachine(), tapFrames(hz, [[0.5, 0.6], [2.0, 2.1]], { until: 4 }));
+    assert.deepEqual(slow, [], `taps 1.4 s apart at ${hz} Hz`);
+    const held = run(new GestureMachine(), tapFrames(hz, [[0.5, 3.0], [3.2, 3.3]], { until: 5 }));
+    assert.deepEqual(held, [], `a 2.5 s hold, then a tap at ${hz} Hz`);
+  }
+});
+
+test('one closed frame is a tap when frames are slow, and a one-frame blip is noise when they are fast', () => {
+  // 20 Hz: a single closed frame, twice
+  const m = new GestureMachine();
+  const out = run(m, tapFrames(20, [[0.5, 0.52], [0.8, 0.82]]));
+  assert.deepEqual(out.map((i) => i.type), ['talkBegan']);
+  // 60 Hz: one closed frame (17 ms) is jitter, never a tap
+  const n = new GestureMachine();
+  assert.deepEqual(run(n, tapFrames(60, [[0.5, 0.51], [0.8, 0.81]])), []);
+});
+
+test('the time-based debounce still ignores a noisy single reading inside an open hand', () => {
+  const m = new GestureMachine();
+  const f = tapFrames(60, [], { until: 2 }); f[40][1] = 0.1; f[90][1] = 0.1;
+  assert.deepEqual(run(m, f), []);
+  assert.equal(m.pinchHeld, false);
+});
+
+// ---- pinch and drag with a noisy measure, and the owner's real hand recordings ----
+
+function dragFrames(hz, { wobble = 0.08, centre = 0.3, lead = 0.25, drag = 2.0, rest = 1.0, seed = 7 } = {}) {
+  let s = seed; const rnd = () => { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; };
+  const out = [], total = lead + drag + rest;
+  for (let k = 0; ; k++) {
+    const t = k / hz; if (t > total) break;
+    const dragging = t < lead + drag;
+    const pinch = t < lead ? 0.15 : dragging ? centre + wobble * (2 * rnd() - 1) : 0.8;
+    out.push({ t, present: true, pose: null, palmCenter: { x: 0.5, y: 0.7 - 0.12 * Math.max(t - 0.1, 0) }, pinch });
+  }
+  return { frames: out, openAt: lead + drag };
+}
+
+test('pinch and drag with a measure wobbling +-0.08 around 0.3 scrolls continuously and stops on a real open, at 20, 30 and 60 Hz', () => {
+  for (const hz of [20, 30, 60]) for (const seed of [1, 7, 99]) {
+    const { frames, openAt } = dragFrames(hz, { seed });
+    const m = new GestureMachine();
+    const scrolls = [], ended = [];
+    for (const f of frames) for (const i of m.push(f)) { if (i.type === 'dragScroll') scrolls.push(f.t); if (i.type === 'dragScrollEnded') ended.push(f.t); }
+    const during = scrolls.filter((t) => t < openAt);
+    assert.ok(during.length >= (openAt - 0.6) * hz * 0.9, `${hz} Hz seed ${seed}: ${during.length} scroll frames of ${(openAt * hz).toFixed(0)}`);
+    // no gap longer than 3 frames while dragging
+    let worst = 0; for (let i = 1; i < during.length; i++) worst = Math.max(worst, during[i] - during[i - 1]);
+    assert.ok(worst <= 3.5 / hz + 1e-9, `${hz} Hz seed ${seed}: a gap of ${(worst * 1000).toFixed(0)} ms`);
+    assert.equal(ended.length, 1, `${hz} Hz seed ${seed}: ended ${ended.length} times`);
+    assert.ok(ended[0] >= openAt && ended[0] <= openAt + 0.08 + 2 / hz + 1e-9, `ended at ${ended[0]} (open at ${openAt})`);
+    assert.equal(scrolls.filter((t) => t > openAt).length, 0, 'the page stops the moment the pinch opens');
+    assert.equal(m.pinchHeld, false);
+  }
+});
+
+test('noise just above the closed value never ends a drag; only a clear open held for 80 ms does', () => {
+  const m = new GestureMachine();
+  let t = 0; const out = [];
+  const push = (pinch, y) => { for (const i of m.push({ t, present: true, pose: null, palmCenter: { x: 0.5, y }, pinch })) out.push([t, i.type]); t += 1 / 30; };
+  for (let i = 0; i < 8; i++) push(0.15, 0.7);
+  for (let i = 0; i < 60; i++) push(i % 3 === 0 ? 0.4 : 0.32, 0.7 - i * 0.004);     // up to 0.4, still under the open threshold 0.42
+  assert.ok(out.filter(([, ty]) => ty === 'dragScroll').length > 50);
+  assert.equal(out.filter(([, ty]) => ty === 'dragScrollEnded').length, 0);
+  push(0.6, 0.45);                                                          // one open frame: not yet
+  assert.equal(out.filter(([, ty]) => ty === 'dragScrollEnded').length, 0);
+  push(0.3, 0.45); push(0.6, 0.45); push(0.6, 0.45); push(0.6, 0.45); push(0.6, 0.45);
+  assert.equal(out.filter(([, ty]) => ty === 'dragScrollEnded').length, 1);
+});
+
+const REAL = JSON.parse(readFileSync(new URL('./fixtures/real-hand.json', import.meta.url), 'utf8'));
+
+/** Replays a recorded take through the demo's own pipeline at its recorded timestamps. */
+function replayTake(name) {
+  const m = new GestureMachine(); m.sendHold = 0.75; m.frameAspect = REAL.camera.width / REAL.camera.height;
+  const ad = new PinchAdapt(); const out = { intents: [], scrollFrames: [], openScrolls: 0, worstGap: 0 };
+  for (const e of REAL.takes[name]) {
+    const t = e.t / 1000; let obs;
+    if (e.world && e.image) {
+      const hand = handFromLandmarks(e.image.map(([x, y]) => ({ x, y })));
+      obs = observationFromHand(hand, t, e.gesture === 'Thumb_Up' && e.score >= 0.6, { world: e.world.map(([x, y, z]) => ({ x, y, z })), aspect: m.frameAspect });
+      if (obs.pinch !== null) { ad.push(obs.pinch); m.pinchClosed = ad.closed; m.pinchOpen = ad.open; }
+    } else obs = observationFromHand(null, t);
+    for (const i of m.push(obs)) {
+      out.intents.push(i.type);
+      if (i.type === 'dragScroll') { out.scrollFrames.push(t); if (obs.pinch > ad.open) out.openScrolls += 1; }
+    }
+  }
+  for (let i = 1; i < out.scrollFrames.length; i++) if (out.scrollFrames[i] - out.scrollFrames[i - 1] < 0.5) out.worstGap = Math.max(out.worstGap, out.scrollFrames[i] - out.scrollFrames[i - 1]);
+  return out;
+}
+
+test('real hand recordings: dictation, scroll and send register; rest and look do nothing', () => {
+  const has = (r, ty) => r.intents.includes(ty);
+  assert.ok(has(replayTake('b/dictate'), 'talkBegan'), 'the double pinch in the dictate take starts dictation');
+  for (const take of ['a/scroll', 'b/scroll']) {
+    const r = replayTake(take);
+    assert.ok(r.scrollFrames.length >= 120, `${take}: ${r.scrollFrames.length} scroll frames`);
+    assert.ok(r.worstGap < 0.08, `${take}: scrolls continuously (worst gap ${(r.worstGap * 1000).toFixed(0)} ms)`);
+    assert.equal(r.openScrolls, 0, `${take}: an open hand never scrolls`);
+  }
+  assert.ok(has(replayTake('a/send'), 'sendRequested'), 'a/send');
+  assert.ok(has(replayTake('b/send'), 'sendRequested'), 'b/send');
+  for (const take of ['a/rest', 'a/look']) assert.deepEqual(replayTake(take).intents, [], `${take} does nothing`);
+  for (const take of Object.keys(REAL.takes)) assert.equal(replayTake(take).openScrolls, 0, `${take}: no scroll on an open hand`);
 });

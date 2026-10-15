@@ -16,6 +16,8 @@ final class SendController {
 
     func request() {
         guard ctx.settings.mapping.send != nil else { return }
+        // Acting only on Claude: a thumbs-up made while another app is in front sends nothing.
+        guard claudeInFront() else { return }
         guard ctx.listening == nil, !ctx.busy else {
             ctx.refuse("Send ignored: busy (\(ctx.listening != nil ? "still listening" : "a step in flight"))")
             return
@@ -32,6 +34,7 @@ final class SendController {
             }
             // The draft read takes a moment; a new dictation or keystroke may have started meanwhile.
             guard self.ctx.listening == nil, !self.ctx.busy else { self.ctx.refuse("Send dropped: something else started"); return }
+            guard self.claudeInFront() else { return }
             if let why = SendRules.typedRefusal(spokenAgo: Date().timeIntervalSince(spoken.stoppedAt), inputAge: ClaudeBridge.secondsSinceTypingOrClick()) {
                 self.ctx.refuse(why); return
             }
@@ -40,7 +43,15 @@ final class SendController {
         }
     }
 
+    /// Refuses with the "Not sent" notice unless Claude is the app in front. The bridge checks again right before the press.
+    private func claudeInFront() -> Bool {
+        guard let why = SendRules.frontRefusal(claudeInFront: ctx.bridge.claudeIsFrontmost()) else { return true }
+        ctx.refuse("Not sent: \(why)")
+        return false
+    }
+
     private func sendNow(_ session: ClaudeSession, shown: String) {
+        guard claudeInFront() else { return }
         ctx.busy = true
         Task { @MainActor in
             let result = await self.ctx.bridge.sendDraft(session, shown: shown)

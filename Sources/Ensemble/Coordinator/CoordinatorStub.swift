@@ -6,6 +6,10 @@ protocol AppCoordinating: AnyObject {
     func start()
     func stop(disarm: Bool)
     func calibrate()
+    /// One screen only, or a new position beside the saved ones; `calibrate()` is `.recalibrate`.
+    func calibrate(_ request: CalibrationRequest)
+    /// Forgets one saved position for the camera in use; the last one cannot be removed.
+    func removeCalibrationSpot(_ id: String)
     /// Called once as the app quits; must finish within about two seconds and leave nothing recording.
     func shutdown()
     var cameraNames: [String] { get }
@@ -67,6 +71,9 @@ final class StubCoordinator: AppCoordinating {
     func exitGesturePractice() {}
     func enterTour() {}
     func exitTour() {}
+
+    func calibrate(_ request: CalibrationRequest) { calibrate() }
+    func removeCalibrationSpot(_ id: String) {}
 
     func calibrate() {
         guard !state.calibrating else { return }

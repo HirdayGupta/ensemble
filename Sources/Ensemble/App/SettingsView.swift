@@ -6,7 +6,8 @@ struct SettingsView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
     @ObservedObject var updates: UpdateController
-    let calibrate: () -> Void
+    let calibrate: (CalibrationRequest) -> Void
+    let removeSpot: (String) -> Void
     let replayTour: (TourStep?) -> Void
 
     var body: some View {
@@ -17,7 +18,7 @@ struct SettingsView: View {
                 .tabItem { Label("Gestures", systemImage: "hand.raised") }
             DisplaySettings(settings: settings)
                 .tabItem { Label("Display", systemImage: "rectangle.on.rectangle") }
-            CalibrationSettings(state: state, settings: settings, calibrate: calibrate)
+            CalibrationSettings(state: state, settings: settings, calibrate: calibrate, removeSpot: removeSpot)
                 .tabItem { Label("Calibration", systemImage: "scope") }
             AboutSettings(updates: updates)
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -208,7 +209,11 @@ private struct DisplaySettings: View {
 private struct CalibrationSettings: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
-    let calibrate: () -> Void
+    let calibrate: (CalibrationRequest) -> Void
+    let removeSpot: (String) -> Void
+    /// Nil: every screen.
+    @State private var screenID: String?
+    @State private var removing: CalibrationSpotSummary?
 
     var body: some View {
         Form {
@@ -220,14 +225,57 @@ private struct CalibrationSettings: View {
                         Text("Never").foregroundStyle(.secondary)
                     }
                 }
-                Button("Calibrate…", action: calibrate)
-                    .disabled(state.calibrating)
-                    .ensembleButtonStyle(prominent: true)
+                if state.screenChoices.count > 1 {
+                    Picker("Screens", selection: $screenID) {
+                        Text("All screens").tag(String?.none)
+                        ForEach(state.screenChoices) { Text($0.name).tag(String?.some($0.id)) }
+                    }
+                }
+                Button(screenID == nil ? "Calibrate…" : "Calibrate this screen…") {
+                    calibrate(screenID.map(CalibrationRequest.screen) ?? .recalibrate)
+                }
+                .disabled(state.calibrating)
+                .ensembleButtonStyle(prominent: true)
             } footer: {
-                Text("A dot visits five spots on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera.")
+                Text("A dot visits five points on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera. Pick one screen to redo only that one; the others keep theirs.")
+            }
+            Section {
+                ForEach(state.calibrationSpots) { spot in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(spot.name)
+                            Text(spot.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        if state.calibrationSpots.count > 1, spot.id == state.spotInUse {
+                            Text("In use").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Button("Remove") { removing = spot }
+                            .disabled(state.calibrationSpots.count < 2 || state.calibrating)
+                    }
+                }
+                Button("Add position…") { calibrate(.newPosition) }
+                    .disabled(state.calibrating || state.calibrationSpots.isEmpty)
+            } header: {
+                Text("Positions")
+            } footer: {
+                Text("Calibrate again from another place, such as standing or leaning back, and keep the ones you have. Ensemble uses the position closest to where your head is. Calibrate above redoes the one in use.")
             }
         }
         .formStyle(.grouped)
+        .onChange(of: state.screenChoices) { _, choices in
+            if let id = screenID, !choices.contains(where: { $0.id == id }) { screenID = nil }
+        }
+        .confirmationDialog("Remove \(removing?.name ?? "this position")?", isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }
+        )) {
+            Button("Remove", role: .destructive) {
+                if let id = removing?.id { removeSpot(id) }
+                removing = nil
+            }
+        } message: {
+            Text("Its calibration is deleted. The other positions keep working.")
+        }
     }
 }
 

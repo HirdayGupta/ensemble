@@ -91,10 +91,15 @@ extension ClaudeBridge {
 
     func stopAnyNow() -> BridgeResult {
         var worst: BridgeResult = .done
+        var confirmed: [Bool] = []
         for entry in discover() {
             let result = stopNow(entry.session)
-            if case .done = result { continue }
+            if case .done = result { confirmed.append(true); continue }
+            confirmed.append(false)
             worst = result
+        }
+        if DictationRules.stopAll(paneConfirmedOff: confirmed) == .nothingFound {
+            return .refused("no Claude session pane found; nothing pressed")
         }
         return worst
     }
