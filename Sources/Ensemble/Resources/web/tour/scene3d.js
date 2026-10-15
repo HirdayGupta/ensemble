@@ -543,10 +543,10 @@
       } };
     }
     var shortList = [
-      userBubble('The sync job drops events when the queue is full. Can you add retries with backoff?'),
-      asst('On it. I read the worker and wrapped the flush call in a retry loop.'),
+      userBubble('Add retries with backoff to the sync job.'),
+      asst('On it. I wrapped the flush call in a retry loop.'),
       code(),
-      asst('Done: up to 5 attempts, waiting 100 ms and doubling each time. The sync tests still pass.')
+      asst('Done: up to 5 attempts, waiting 100 ms and doubling each time. Tests pass.')
     ];
     var longList = shortList.concat([
       userBubble('Log each retry with its attempt number.'),
