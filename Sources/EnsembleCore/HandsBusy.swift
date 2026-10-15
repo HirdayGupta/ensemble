@@ -81,11 +81,4 @@ public struct HandsBusy: Equatable {
     }
 
     public func isPaused(at now: TimeInterval) -> Bool { now - lastInputAt < quiet }
-
-    /// The `ownKeyAt` to feed `update`: a key read at `keyAt` inside one of the windows in which Ensemble posted keys
-    /// of its own (the divider keys) is that key; otherwise `other`, the last key Ensemble held back or posted
-    /// elsewhere. The hardware state never holds a posted key, so this only guards a reading that mixes the two.
-    public static func ownKeyAt(keys: OwnInputWindows, keyAt: TimeInterval, other: TimeInterval) -> TimeInterval {
-        keys.isOwn(keyAt) ? keyAt : other
-    }
 }

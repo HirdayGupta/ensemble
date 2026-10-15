@@ -36,14 +36,20 @@ import Testing
     }
 
     @Test func claudesOwnSoundIsNeverDoubled() {
-        #expect(!DictationAudio.ensemblePlays(claudeOutputBefore: false, claudeOutputAfter: true))
+        #expect(!DictationAudio.ensemblePlays(claudeOutputsBefore: 0, claudeOutputsAfter: 1))
     }
 
-    @Test func ensemblePlaysWhenClaudeStaysSilentOrCannotBeTold() {
-        #expect(DictationAudio.ensemblePlays(claudeOutputBefore: false, claudeOutputAfter: false))
-        #expect(DictationAudio.ensemblePlays(claudeOutputBefore: true, claudeOutputAfter: true))
-        #expect(DictationAudio.ensemblePlays(claudeOutputBefore: nil, claudeOutputAfter: true))
-        #expect(DictationAudio.ensemblePlays(claudeOutputBefore: false, claudeOutputAfter: nil))
+    @Test func aRiseWhileClaudeAlreadyPlaysIsClaudesSoundToo() {
+        // Claude was already sending audio before the press: a rise after it is still its own sound.
+        #expect(!DictationAudio.ensemblePlays(claudeOutputsBefore: 1, claudeOutputsAfter: 2))
+    }
+
+    @Test func ensemblePlaysWhenClaudeOutputDoesNotRiseOrCannotBeTold() {
+        #expect(DictationAudio.ensemblePlays(claudeOutputsBefore: 0, claudeOutputsAfter: 0))
+        #expect(DictationAudio.ensemblePlays(claudeOutputsBefore: 1, claudeOutputsAfter: 1))
+        #expect(DictationAudio.ensemblePlays(claudeOutputsBefore: 2, claudeOutputsAfter: 1))
+        #expect(DictationAudio.ensemblePlays(claudeOutputsBefore: nil, claudeOutputsAfter: 1))
+        #expect(DictationAudio.ensemblePlays(claudeOutputsBefore: 0, claudeOutputsAfter: nil))
     }
 
     @Test func theSoundWaitsForTheCheckAndABluetoothProfileSwitch() {

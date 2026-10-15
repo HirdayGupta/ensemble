@@ -19,6 +19,8 @@ final class SendController {
     var afterStopByReturn = false
     /// For a send asked for with Return: seconds since a click or any key other than those Returns.
     var returnInputAge: () -> Double = { ClaudeBridge.secondsSinceTypingOrClick() }
+    /// The stop sound for the dictation this send followed, through the same look at Claude's own sound as the stop.
+    var playStopSound: () -> Void = { Notifier.shared.playDictationSound(.stop) }
     /// A send is between its request and its result (reading the draft, waiting for it to settle, pressing Send).
     private(set) var inFlight = false {
         didSet { if !inFlight { inFlightByReturn = false } }
@@ -134,7 +136,7 @@ final class SendController {
 
     private func showKept(_ session: ClaudeSession) {
         ctx.overlay.showBanner(title: "Kept, not sent", body: ctx.name(of: session), style: .stopped, seconds: 2.5)
-        Notifier.shared.playDictationSound(.stop)
+        playStopSound()
     }
 
     /// Every send rule again, right before the press: the gesture send setting, Claude in front, nothing else started,

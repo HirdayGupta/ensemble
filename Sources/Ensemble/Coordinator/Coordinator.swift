@@ -109,6 +109,7 @@ final class Coordinator: AppCoordinating {
         keyTap.onReturnUp = { [weak self] in self?.returnKeys.returnReleased() }
         keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
         send.lookedAt = { [weak self] in self?.focus.target }
+        send.playStopSound = { [weak self] in self?.dictation.playStopSound() }
         send.returnInputAge = { [weak self] in
             let clicks = ClaudeBridge.secondsSinceClick()
             guard let self else { return clicks }
@@ -592,8 +593,9 @@ final class Coordinator: AppCoordinating {
     private func updateHandsBusy(now: TimeInterval) {
         handsBusy.quiet = settings.pauseAfterInputSeconds
         let input = ClaudeBridge.lastHardwareInput(now: now)
-        let ownKeyAt = HandsBusy.ownKeyAt(keys: ClaudeBridge.ownKeysNow(), keyAt: input.key,
-                                          other: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt))
+        // The hardware state never holds a key Ensemble posted (the divider keys), so a key read here inside one of
+        // its key windows is the owner's own hand and pauses; only a Return held back or a play/pause key is excluded.
+        let ownKeyAt = max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt)
         let busy = handsBusy.update(now: now, keyAt: input.key, clickAt: input.click, scrollAt: input.scroll, moveAt: input.move,
                                     pointer: NSEvent.mouseLocation, ownKeyAt: ownKeyAt,
                                     ownPointerAt: ClaudeBridge.ownPointerMove.withLock { $0 }, ownFocusAt: focus.lastOwnFocusAt)

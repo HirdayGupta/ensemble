@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Claude plays its own dictation sounds (enter and exit voice mode) from a web audio context that Chromium lets
 /// start only after a real user gesture. Ensemble's Accessibility press is not one, so after an Ensemble start
-/// Claude's sounds usually stay silent; Ensemble then plays the same sound itself, unless Claude's process is seen
-/// to start sending audio out right after the press.
+/// Claude's sounds usually stay silent; Ensemble then plays the same sound itself, unless more of Claude's processes
+/// are seen sending audio out right after the press than before it.
 public enum DictationAudio {
     public enum StartStep: Equatable, Sendable {
         /// The play/pause key for media on speakers, checked to have stopped before the microphone opens.
@@ -41,11 +41,13 @@ public enum DictationAudio {
     /// How long after the confirmation Claude's own sound is looked for.
     public static let claudeSoundWindow: TimeInterval = 0.15
 
-    /// Ensemble plays its sound unless Claude was silent before the press and is sending audio out after it: then
-    /// Claude's own sound is playing and a second would double it. Claude already sending audio before the press
-    /// says nothing about its sound, so Ensemble plays; an unreadable process list counts as silent.
-    public static func ensemblePlays(claudeOutputBefore: Bool?, claudeOutputAfter: Bool?) -> Bool {
-        !(claudeOutputBefore == false && claudeOutputAfter == true)
+    /// Ensemble plays its sound unless Claude's output rose after the press: more of Claude's processes sending
+    /// audio out than just before it, so Claude's own sound is playing and a second would double it. Claude already
+    /// sending audio before the press no longer means Ensemble plays regardless: only a rise counts, from silent or
+    /// from already playing. An unreadable process list, before or after, counts as no rise.
+    public static func ensemblePlays(claudeOutputsBefore: Int?, claudeOutputsAfter: Int?) -> Bool {
+        guard let before = claudeOutputsBefore, let after = claudeOutputsAfter else { return true }
+        return after <= before
     }
 
     /// Opening a Bluetooth headset's microphone switches it to its call profile, and a sound played during the
