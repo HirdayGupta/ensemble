@@ -32,6 +32,9 @@ final class DictationController {
     private var audioCheckInFlight = false
     /// Wait this long after the hand opens before stopping, so the last word is caught.
     private static let stopTail = 0.4
+    /// A thumbs-up made while dictating is recognised only after 0.35 s of the pose, which already holds the last
+    /// word; the short tail keeps the stop (and the transcript settle after it) inside the send hold.
+    static let sendStopTail = 0.1
 
     /// Ends everything that was about to act and stops the dictation (wired by the Coordinator).
     var interrupt: (String) -> Void = { _ in }
@@ -95,7 +98,7 @@ final class DictationController {
                         resolves: .whenOnSession)
             return
         }
-        send.afterStop = false; focus.clearDeferred()
+        send.afterStop = false; send.dropEarly(); focus.clearDeferred()
         interrupted = false
         // Busy from here: no second start, and switching off waits for this one.
         ctx.busy = true
@@ -104,6 +107,28 @@ final class DictationController {
         Task { @MainActor in
             // CoreAudio and the safety queue can stall while devices change; neither is waited on from the main thread.
             let other = await Task.detached { bridge.otherProcessCapturingInput() }.value
+            if other == nil {
+                // Claude may already be dictating here, started with its own button or shortcut: the double pinch then
+                // stops it. Never start while it is on, and never press a checkbox whose state is unclear.
+                switch ClaudeDictation.talkStep(target: await bridge.micState(session)) {
+                case .start:
+                    break
+                case .stopRunning:
+                    if let why = await self.takeOver(session, reason: "double pinch") {
+                        self.ctx.busy = false
+                        self.startInFlight = false
+                        self.refuseStart(why)
+                    }
+                    self.ctx.changed()
+                    return
+                case .refuse(let why):
+                    self.ctx.busy = false
+                    self.startInFlight = false
+                    self.refuseStart(why)
+                    self.ctx.changed()
+                    return
+                }
+            }
             let refusal: String?
             if let other { refusal = "\(other) is using a microphone" } else { refusal = await self.safety.episodeStarting(session: session) }
             // While those were read, the pose may have been released, the screen locked or Ensemble switched off.
@@ -120,6 +145,7 @@ final class DictationController {
                 return
             }
             self.ctx.listening = session
+            self.ctx.ownDictation(in: session)
             self.processID = bridge.claudePID
             self.ctx.state.listening = true
             self.ctx.changed()
@@ -154,7 +180,7 @@ final class DictationController {
                 self.safety.episodeEnded()
                 self.ctx.gestures.abortTalk()
                 EnsembleLog.write("start dictation \(result): \(self.ctx.bridge.micSnapshot)")
-                self.ctx.refuse("Could not start dictation: \(why)", title: "Dictation not started")
+                self.ctx.refuse(why == ClaudeDictation.alreadyDictating ? why : "Could not start dictation: \(why)", title: "Dictation not started")
                 self.checkClaudeUpdate()
             }
             switch next {
@@ -167,14 +193,16 @@ final class DictationController {
         }
     }
 
-    func end(reason: String, immediate: Bool = false) {
+    /// `tail`: how long to wait before the stop press so the last word is caught; ignored when `immediate`.
+    func end(reason: String, immediate: Bool = false, tail: TimeInterval? = nil) {
         guard let session = ctx.listening, !ctx.busy else { return }
         ctx.busy = true
         Task { @MainActor in
-            if !immediate { try? await Task.sleep(nanoseconds: UInt64(Self.stopTail * 1e9)) }
+            if !immediate { try? await Task.sleep(nanoseconds: UInt64((tail ?? Self.stopTail) * 1e9)) }
             let result = await self.ctx.bridge.stopDictation(session)
             self.ctx.busy = false
             self.ctx.listening = nil
+            self.ctx.ownDictation(in: session)
             self.ctx.state.listening = false
             self.meter.stop()
             self.safety.episodeEnded()
@@ -197,11 +225,13 @@ final class DictationController {
                 }
                 self.ctx.settings.lastClaudeVersion = self.ctx.bridge.claudeVersion
                 // An interrupted dictation (sleep, lock, safety stop) is never sent by a later thumbs-up.
-                if sendable { self.send.spoke(in: session) } else { self.send.afterStop = false }
+                if sendable { self.send.spoke(in: session) } else { self.send.afterStop = false; self.send.dropEarly() }
                 if self.send.afterStop {
                     // One step on the island and one sound: "Sending" runs on into "Sent" with the send cue, so
                     // neither the stopped banner nor the stop cue plays in between.
                     self.send.stopConfirmedForSend()
+                } else if self.send.earlyStopConfirmed(session) {
+                    // A thumbs-up is still being held (or was let go): its "Sent" or "Kept, not sent" speaks for this stop.
                 } else {
                     self.ctx.overlay.showBanner(title: "Dictation stopped", body: self.ctx.name(of: session), style: .stopped, seconds: 2.5)
                     Notifier.shared.playCue(.listenEnd)
@@ -212,11 +242,67 @@ final class DictationController {
                 self.ctx.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
                 // A Return-asked send says so through stopResolved; a gesture-asked one says so here.
                 if sendWasPending { self.ctx.refuse("Not sent: the stop was not confirmed") }
+                self.send.earlyStopFailed()
                 self.stopResolved(false)
                 self.checkClaudeUpdate()
             }
             self.ctx.changed()
         }
+    }
+
+    enum TakeOver: Equatable {
+        /// Claude was dictating there; its stop is under way through Ensemble's stop path.
+        case stopping
+        /// Nothing is recording there (or its state is unclear): nothing was pressed.
+        case notDictating
+        /// It could not be taken over now.
+        case refused(String)
+    }
+
+    /// A send (thumbs-up, two Returns, a headphone double press) with no Ensemble dictation running. If Claude is
+    /// dictating in `session`, whoever started it, Ensemble takes that dictation over and stops it through its own
+    /// stop path. `beforeStop` runs before the stop begins, so the stop's end already sees the send it asked for.
+    func takeOverIfDictating(_ session: ClaudeSession, reason: String, beforeStop: () -> Void) async -> TakeOver {
+        guard ctx.listening == nil, !ctx.busy, !disarming else { return .refused("a step is still in flight") }
+        ctx.busy = true
+        startInFlight = true
+        interrupted = false
+        let state = await ctx.bridge.micState(session)
+        guard ClaudeDictation.sendStep(target: state) == .stopThenSend else {
+            ctx.busy = false
+            startInFlight = false
+            return .notDictating
+        }
+        beforeStop()
+        if let why = await takeOver(session, reason: reason) {
+            ctx.busy = false
+            startInFlight = false
+            return .refused(why)
+        }
+        return .stopping
+    }
+
+    /// Takes over a dictation Claude is running in `session` that Ensemble did not start, and stops it the way
+    /// Ensemble stops its own: the safety record is on disk before the stop press (written before pressed), the hold
+    /// and the dead-man check run until the stop, only a definite "off" confirms it, and a confirmed stop counts as
+    /// dictated just now for the send window. Runs with `ctx.busy` set; returns why not, or nil once the stop is under way.
+    private func takeOver(_ session: ClaudeSession, reason: String) async -> String? {
+        if let refusal = await safety.episodeStarting(session: session) { return refusal }
+        ctx.listening = session
+        ctx.ownDictation(in: session)
+        processID = ctx.bridge.claudePID
+        ctx.state.listening = true
+        startedAt = CACurrentMediaTime()
+        inputDevice = nil
+        safety.episodeConfirmed()
+        EnsembleLog.write("Claude was already dictating in this session; stopping it the way Ensemble stops its own (\(reason))")
+        // Switched off, asleep or locked meanwhile: stop at once, and never send it.
+        let immediate = disarming || stopWhenStarted || interrupted
+        stopWhenStarted = false
+        ctx.busy = false
+        startInFlight = false
+        end(reason: reason, immediate: immediate)
+        return nil
     }
 
     /// Sleep, a lock or the safety check interrupted whatever dictation is starting, running or stopping.

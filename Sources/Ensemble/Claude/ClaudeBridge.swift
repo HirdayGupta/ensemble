@@ -127,11 +127,13 @@ final class ClaudeBridge: @unchecked Sendable {
     /// The session list, for the 1 s refresh. A full walk costs Claude's own main thread a read per node, so while
     /// Claude's windows are unchanged this re-reads only each cached checkbox and pane frame, walking again when a
     /// window moved, opened or closed, a cached element stopped answering, or every `SessionScan.fullWalkEvery`.
-    func refreshSessions() async -> [ClaudeSession] {
+    /// `recording`: the sessions whose dictation checkbox reads "Stop dictation", from the same read that checks the
+    /// checkbox still answers (no extra Accessibility call), so a dictation Claude runs without Ensemble is seen.
+    func refreshSessions() async -> (sessions: [ClaudeSession], recording: Set<String>) {
         await run { self.refreshNow() }
     }
 
-    private func refreshNow() -> [ClaudeSession] {
+    private func refreshNow() -> (sessions: [ClaudeSession], recording: Set<String>) {
         let windows = Self.cgWindows(pids: Set(claudeApps.map(\.processIdentifier)))
         lock.lock()
         let cached = cacheOrder.compactMap { cache[$0] }
@@ -139,18 +141,22 @@ final class ClaudeBridge: @unchecked Sendable {
         let sinceWalk = Date().timeIntervalSince(lastFullWalk)
         lock.unlock()
         var refreshed: [CachedSession] = []
+        var recording = Set<String>()
         var answer = true
         if !cached.isEmpty, !windowsChanged, sinceWalk < SessionScan.fullWalkEvery {
             for var entry in cached {
-                guard Self.isMicCheckbox(entry.elements.mic), let frame = AX.frame(entry.elements.pane),
+                guard let label = Self.micLabel(entry.elements.mic), let frame = AX.frame(entry.elements.pane),
                       frame.width > 50, frame.height > 50 else { answer = false; break }
                 entry.session.frame = frame
+                if label == ClaudeLabels.micActive { recording.insert(entry.session.id) }
                 refreshed.append(entry)
             }
         }
         guard !SessionScan.needsFullWalk(cached: cached.count, windowsChanged: windowsChanged, cachedAnswer: answer,
                                          sinceFullWalk: sinceWalk) else {
-            return discover(windows: windows).map(\.session)
+            let found = discover(windows: windows)
+            let active = found.filter { Self.micLabel($0.elements.mic) == ClaudeLabels.micActive }
+            return (found.map(\.session), Set(active.map(\.session.id)))
         }
         lock.lock()
         // A stop or send may have re-walked meanwhile; its result wins over these frames.
@@ -159,7 +165,7 @@ final class ClaudeBridge: @unchecked Sendable {
         }
         let current = cacheOrder.compactMap { cache[$0]?.session }
         lock.unlock()
-        return current
+        return (current, recording.intersection(current.map(\.id)))
     }
 
     func session(at point: CGPoint) -> ClaudeSession? {
@@ -260,6 +266,19 @@ final class ClaudeBridge: @unchecked Sendable {
     /// mid-hold does not change the id the stop is looked up by.
     static func sessionID(windowKey: Int, micIndex: Int) -> String { "w\(windowKey)#\(micIndex)" }
 
+    /// The pane a dictated draft is read from and sent in, and only that pane (`SessionMatch`): the cached entry when
+    /// it is still the same window, title and place, otherwise a fresh walk's pane that is. nil rather than another
+    /// pane that took the id after a layout change, or another window's pane at the same place.
+    func dictatedEntry(_ s: ClaudeSession) -> CachedSession? {
+        if let entry = liveEntry(s, rescanPane: true) {
+            var live = entry.session
+            if let frame = AX.frame(entry.elements.pane) { live.frame = frame }
+            if SessionMatch.same(s, live) { return entry }
+        }
+        let all = discover()
+        return SessionMatch.pick(s, among: all.map(\.session)).map { all[$0] }
+    }
+
     /// A cached session whose mic checkbox still answers; otherwise rediscover and match by id, then by overlap.
     func liveEntry(_ s: ClaudeSession, rescanPane: Bool = false) -> CachedSession? {
         lock.lock()
@@ -315,9 +334,13 @@ final class ClaudeBridge: @unchecked Sendable {
 
     static func isMicLabel(_ s: String?) -> Bool { s == ClaudeLabels.micIdle || s == ClaudeLabels.micActive }
 
-    static func isMicCheckbox(_ el: AXUIElement) -> Bool {
+    static func isMicCheckbox(_ el: AXUIElement) -> Bool { micLabel(el) != nil }
+
+    /// The dictation checkbox's label ("Stop dictation" while recording), or nil when `el` is no longer one.
+    static func micLabel(_ el: AXUIElement) -> String? {
         let v = AX.multi(el, [kAXRoleAttribute, kAXDescriptionAttribute])
-        return (v[0] as? String) == "AXCheckBox" && isMicLabel(v[1] as? String)
+        guard (v[0] as? String) == "AXCheckBox", let label = v[1] as? String, isMicLabel(label) else { return nil }
+        return label
     }
 
     private static let walkAttrs = [kAXRoleAttribute, kAXDescriptionAttribute, kAXTitleAttribute, kAXChildrenAttribute]
