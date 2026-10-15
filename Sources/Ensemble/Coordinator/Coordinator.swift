@@ -61,6 +61,7 @@ final class Coordinator: AppCoordinating {
         keyTap.onKey = { [weak self] isReturn, modified, isRepeat in
             self?.handleKey(isReturn: isReturn, modified: modified, isRepeat: isRepeat) ?? false
         }
+        keyTap.onReturnUp = { [weak self] in self?.returnKeys.returnReleased() }
         keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
         send.returnInputAge = { [weak self] in
             let clicks = ClaudeBridge.secondsSinceClick()
@@ -360,7 +361,7 @@ final class Coordinator: AppCoordinating {
         }
         dictation.supervise(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
-        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.awaitingStop || returnKeys.inDoubleWindow(now: now)))
+        keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now)))
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.

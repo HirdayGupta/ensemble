@@ -115,9 +115,56 @@ import Testing
         #expect(ret(&keys, at: 1.3, repeat: true) == .swallow)
         keys.stopConfirmed(now: 2)
         #expect(!keys.awaitingStop)
-        // A repeat already running when a dictation starts does not stop it.
+        // A repeat already running when a dictation starts does not stop it, and never reaches Claude mid-dictation.
         var fresh = ReturnKeys()
-        #expect(ret(&fresh, at: 1, repeat: true) == .pass)
+        #expect(ret(&fresh, at: 1, repeat: true) == .swallow)
+        #expect(!fresh.awaitingStop)
+        // Outside a dictation, with nothing kept, a repeat is not this watch's business.
+        var idle = ReturnKeys()
+        #expect(ret(&idle, at: 1, dictating: false, repeat: true) == .pass)
+    }
+
+    /// Holding Return down can never send: the repeats after the stop, after the double window and after any reset
+    /// stay kept from Claude until the key is released, and never count as the second press.
+    @Test func holdingReturnNeverSends() {
+        var keys = ReturnKeys()
+        #expect(ret(&keys, at: 1) == .swallowAndStop)
+        // macOS's repeat delay passes while the stop runs; repeats arrive every 0.1 s.
+        for t in stride(from: 1.5, through: 2.0, by: 0.1) { #expect(ret(&keys, at: t, repeat: true) == .swallow) }
+        keys.stopConfirmed(now: 2.1)
+        #expect(!keys.awaitingStop)
+        // Stop confirmed, double window long closed: the hold's repeats are still kept and still not a press.
+        for t in stride(from: 2.2, through: 4.0, by: 0.1) {
+            #expect(ret(&keys, at: t, dictating: false, repeat: true) == .swallow)
+            #expect(keys.wantsKeys(now: t))
+        }
+        keys.reset()
+        #expect(ret(&keys, at: 4.1, dictating: false, repeat: true) == .swallow)
+        // Released: the next Return is Claude's.
+        keys.returnReleased()
+        #expect(ret(&keys, at: 4.5, dictating: false) == .pass)
+        #expect(!keys.wantsKeys(now: 4.5))
+    }
+
+    @Test func holdingTheSecondReturnSendsOnce() {
+        var keys = ReturnKeys()
+        #expect(ret(&keys, at: 1) == .swallowAndStop)
+        keys.returnReleased()
+        #expect(ret(&keys, at: 1.2) == .swallowAndSendAfterStop)
+        for t in stride(from: 1.7, through: 2.5, by: 0.1) { #expect(ret(&keys, at: t, repeat: true) == .swallow) }
+        keys.stopConfirmed(now: 2.6)
+        #expect(ret(&keys, at: 2.7, dictating: false, repeat: true) == .swallow)
+        keys.returnReleased()
+        #expect(ret(&keys, at: 3, dictating: false) == .pass)
+    }
+
+    @Test func aLostReleaseEndsTheHoldAfterAQuietSpell() {
+        var keys = ReturnKeys()
+        #expect(ret(&keys, at: 1) == .swallowAndStop)
+        keys.stopConfirmed(now: 2)
+        #expect(keys.wantsKeys(now: 3.4))
+        #expect(!keys.wantsKeys(now: 3.6))
+        #expect(ret(&keys, at: 3.6, dictating: false) == .pass)
     }
 
     @Test func returnSendIgnoresOnlyTheReturns() {

@@ -14,6 +14,8 @@ final class ReturnKeyTap {
     var onKey: (_ isReturn: Bool, _ modified: Bool, _ isRepeat: Bool) -> Bool = { _, _, _ in false }
     /// macOS turned the watch off for a while; keys may have gone by unseen.
     var onUnseenKeys: () -> Void = {}
+    /// Return was released.
+    var onReturnUp: () -> Void = {}
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
@@ -29,7 +31,8 @@ final class ReturnKeyTap {
     }
 
     private func create() {
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        // Key up too, so a held Return's repeats stay kept from Claude until it is released.
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue) | CGEventMask(1 << CGEventType.keyUp.rawValue)
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                            eventsOfInterest: mask, callback: { _, type, event, info in
             guard let info else { return Unmanaged.passUnretained(event) }
@@ -61,6 +64,9 @@ final class ReturnKeyTap {
             let modified = !event.flags.intersection(Self.modifiers).isEmpty
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             return onKey(isReturn, modified, isRepeat)
+        case .keyUp:
+            if wanted, Self.returnCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) { onReturnUp() }
+            return false
         default:
             return false
         }

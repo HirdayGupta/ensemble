@@ -8,6 +8,9 @@ public struct ReturnKeys {
     public static let doubleWindow: TimeInterval = 0.5
     /// A stop that has not resolved by now is given up on: the key passes through again and any send is dropped.
     public static let stopLimit: TimeInterval = 5
+    /// A Return held down repeats well inside this (macOS's longest repeat delay is under 2 s); with no Return event
+    /// for this long the hold is over even if its release went unseen.
+    public static let holdLimit: TimeInterval = 2.5
 
     public enum Decision: Equatable, Sendable {
         /// Leave the key alone; Claude gets it.
@@ -31,6 +34,9 @@ public struct ReturnKeys {
     private var phase: Phase = .idle
     /// When a key other than a plain Return was last pressed while this watched the keyboard.
     public private(set) var lastOtherKeyAt: TimeInterval = -.infinity
+    /// A Return this kept from Claude is still held down: the last time it pressed or repeated. Its repeats are kept
+    /// from Claude until it is released, so holding Return can never send.
+    private var holdSeenAt: TimeInterval?
 
     public init() {}
 
@@ -46,6 +52,14 @@ public struct ReturnKeys {
         return false
     }
 
+    /// True while the key watch must stay on: a stop pending, the double window open, or a kept Return still held.
+    public func wantsKeys(now: TimeInterval) -> Bool {
+        awaitingStop || inDoubleWindow(now: now) || holdSeenAt.map { now - $0 <= Self.holdLimit } == true
+    }
+
+    /// Return was released.
+    public mutating func returnReleased() { holdSeenAt = nil }
+
     /// One key press. `isReturn` is Return or keypad Enter; `modified` any of Shift, Control, Option or Command
     /// held; `dictating` an Ensemble dictation is on (or its start or stop is in flight).
     public mutating func press(isReturn: Bool, modified: Bool, isRepeat: Bool, claudeInFront: Bool,
@@ -57,23 +71,32 @@ public struct ReturnKeys {
         }
         // Acting only on Claude: with another app in front the key is that app's.
         guard claudeInFront else { return .pass }
+        // An auto-repeat is never a press: it is kept from Claude while a kept Return is held, while dictating, and
+        // while a stop or the double window is open, and changes nothing.
+        if isRepeat {
+            if holdSeenAt != nil { holdSeenAt = now; return .swallow }
+            return dictating || phase != .idle ? .swallow : .pass
+        }
+        let decision: Decision
         switch phase {
         case .idle:
             guard dictating else { return .pass }
-            // A held Return repeating into a dictation started later is not a press.
-            if isRepeat { return .pass }
             phase = .stopping(firstAt: now, sendAfter: false)
-            return .swallowAndStop
+            decision = .swallowAndStop
         case .stopping(let first, let sendAfter):
-            // The key held down auto-repeats; only a fresh press asks to send.
-            if isRepeat || sendAfter { return .swallow }
-            phase = .stopping(firstAt: first, sendAfter: true)
-            return .swallowAndSendAfterStop
+            if sendAfter {
+                decision = .swallow
+            } else {
+                phase = .stopping(firstAt: first, sendAfter: true)
+                decision = .swallowAndSendAfterStop
+            }
         case .stopped(let first):
             phase = .idle
-            if isRepeat { return now - first <= Self.doubleWindow ? .swallow : .pass }
-            return now - first <= Self.doubleWindow ? .swallowAndSend : .pass
+            guard now - first <= Self.doubleWindow else { return .pass }
+            decision = .swallowAndSend
         }
+        holdSeenAt = now
+        return decision
     }
 
     /// The dictation stopped and it was confirmed off, by any route.
@@ -92,6 +115,7 @@ public struct ReturnKeys {
         return false
     }
 
+    /// Forgets a pending stop or send. A held Return stays held: its repeats are still kept from Claude until release.
     public mutating func reset() { phase = .idle }
 
     /// The key watch was off for a while (macOS disabled it after a slow callback): keys may have gone by unseen, so
@@ -110,6 +134,7 @@ public struct ReturnKeys {
             phase = .idle
         default: break
         }
+        if let held = holdSeenAt, now - held > Self.holdLimit { holdSeenAt = nil }
         return false
     }
 
