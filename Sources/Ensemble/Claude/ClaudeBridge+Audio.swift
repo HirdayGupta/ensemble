@@ -144,12 +144,6 @@ extension ClaudeBridge {
     private static let ownKeyLock = NSLock()
     nonisolated(unsafe) private static var ownKeys = OwnInputWindows()
 
-    /// Ensemble's own key windows so far, for `HandsBusy`.
-    static func ownKeysNow() -> OwnInputWindows {
-        ownKeyLock.lock(); defer { ownKeyLock.unlock() }
-        return ownKeys
-    }
-
     /// Ensemble starts or ends posting its own keys; see `OwnInputWindows`.
     static func ownKeys(began: Bool) {
         let now = CACurrentMediaTime()

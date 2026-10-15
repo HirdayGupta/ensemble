@@ -120,21 +120,16 @@ import Testing
         #expect(!p22)
     }
 
-    @Test func ensemblesOwnDividerKeysAreNotTyping() {
-        var own = OwnInputWindows()
-        own.begin(at: 10)
-        own.end(at: 10.5)
-        // A key read inside the window is Ensemble's own, even if a reading ever mixed it into the hardware state.
-        let ownKey = HandsBusy.ownKeyAt(keys: own, keyAt: 10.3, other: never)
-        #expect(ownKey == 10.3)
+    @Test func aHardwareKeyDuringAResizeIsTypingAndPauses() {
+        // The hardware key state never holds the divider keys Ensemble posts, so a key it reports while a resize
+        // runs is the owner's own hand: only a held-back Return or play/pause key is passed as Ensemble's own.
         var s = HandsBusy()
         _ = read(&s, 10)
-        let p23 = read(&s, 10.4, key: 10.3, ownKey: ownKey)
-        #expect(!p23)
-        // A key after the window is yours; the other own key still counts as before.
-        #expect(HandsBusy.ownKeyAt(keys: own, keyAt: 11, other: 9) == 9)
+        let p23 = read(&s, 10.4, key: 10.3, ownKey: never)
+        #expect(p23)
         var t = HandsBusy()
-        let p24 = read(&t, 11.1, key: 11, ownKey: HandsBusy.ownKeyAt(keys: own, keyAt: 11, other: never))
-        #expect(p24)
+        _ = read(&t, 10)
+        let p24 = read(&t, 10.4, key: 10.3, ownKey: 10.3)
+        #expect(!p24)
     }
 }
