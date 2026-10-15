@@ -19,7 +19,9 @@ final class AppEnvironment {
     private(set) lazy var panelActions = PanelActions(
         calibrate: { [weak self] in self?.dismissMenuPanel(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
-        checkForUpdates: { [weak self] in self?.dismissMenuPanel(); self?.updates.checkForUpdates() },
+        openCalibration: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show(tab: .calibration) },
+        // The panel stays open so the button itself can say what the check found.
+        checkForUpdates: { [weak self] in self?.updates.checkForUpdates() },
         startTour: { [weak self] in self?.dismissMenuPanel(); self?.tourWindow.show() },
         dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
         quit: { NSApp.terminate(nil) }
@@ -51,8 +53,9 @@ final class AppEnvironment {
                 .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(.white.opacity(0.12)))
         )
     }
-    private(set) lazy var settingsWindow = SettingsWindowController { [unowned self] in
-        AnyView(SettingsView(state: state, settings: settings, updates: updates,
+    let settingsNavigation = SettingsNavigation()
+    private(set) lazy var settingsWindow = SettingsWindowController(navigation: settingsNavigation) { [unowned self] in
+        AnyView(SettingsView(state: state, settings: settings, updates: updates, navigation: settingsNavigation,
                               calibrate: { [weak self] request in self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate(request) },
                               removeSpot: { [weak self] id in self?.coordinator.removeCalibrationSpot(id) },
                               replayTour: { [weak self] step in
@@ -69,7 +72,8 @@ final class AppEnvironment {
         PanelActions(
             calibrate: { [weak self] in self?.floatingPanel.hide(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
-            checkForUpdates: { [weak self] in self?.floatingPanel.hide(); self?.updates.checkForUpdates() },
+            openCalibration: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show(tab: .calibration) },
+            checkForUpdates: { [weak self] in self?.updates.checkForUpdates() },
             startTour: { [weak self] in self?.floatingPanel.hide(); self?.tourWindow.show() },
             dismissTourBanner: { [weak self] in self?.settings.tourSkipped = true },
             quit: { NSApp.terminate(nil) }

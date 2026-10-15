@@ -3,13 +3,16 @@ import SwiftUI
 struct PanelActions {
     var calibrate: () -> Void
     var openSettings: () -> Void
+    /// Settings, opened at Calibration: the screens, with a Recalibrate button for each.
+    var openCalibration: () -> Void
     var checkForUpdates: () -> Void
     var startTour: () -> Void
     var dismissTourBanner: () -> Void
     var quit: () -> Void
 }
 
-/// The menu-bar panel; also shown in the floating panel the global hotkey opens.
+/// The menu-bar panel; also shown in the floating panel the global hotkey opens. Top to bottom: on/off, camera and
+/// calibration, the overlay toggles, the buttons, and a footer with the installed version and Quit.
 struct MenuPanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
@@ -24,6 +27,7 @@ struct MenuPanelView: View {
                 statusCard
                 togglesCard
                 buttons
+                footer
             }
         }
         .padding(14)
@@ -74,7 +78,18 @@ struct MenuPanelView: View {
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             row(symbol: "web.camera", text: cameraLine)
-            if let line = state.calibratedLine { row(symbol: "display.2", text: line) }
+            if let line = state.calibratedLine {
+                Button { actions.openCalibration() } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        row(symbol: "display.2", text: line)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("See your screens and recalibrate one of them")
+            }
             if settings.enabled, case .needsPermission(let what) = state.status {
                 row(symbol: "exclamationmark.circle", text: Permissions.guidance(for: what), tint: .orange)
                 Button { Permissions.openSettings(for: what) } label: {
@@ -94,10 +109,13 @@ struct MenuPanelView: View {
             if state.muted {
                 row(symbol: "speaker.slash", text: "Sounds muted", tint: .secondary)
             }
+            // A refusal is a short-lived note about one attempt (`RefusalNotice`); it fades in and out.
             if let refusal = state.lastRefusal {
                 row(symbol: "info.circle", text: refusal, tint: .orange)
+                    .transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.4), value: state.lastRefusal)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -127,30 +145,34 @@ struct MenuPanelView: View {
         .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    /// Read left to right, top to bottom: Replay tour, the update button, Calibrate, Settings.
     private var buttons: some View {
         VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button { actions.startTour() } label: { Label("Replay tour", systemImage: "play.circle").frame(maxWidth: .infinity) }
+                UpdateButton(updates: updates, fillsWidth: true) { actions.checkForUpdates() }
+            }
             HStack(spacing: 8) {
                 Button { actions.calibrate() } label: { Label("Calibrate…", systemImage: "scope").frame(maxWidth: .infinity) }
                     .disabled(state.calibrating)
                 Button { actions.openSettings() } label: { Label("Settings…", systemImage: "gearshape").frame(maxWidth: .infinity) }
             }
-            HStack(spacing: 8) {
-                Button { actions.startTour() } label: { Label("Replay tour", systemImage: "play.circle").frame(maxWidth: .infinity) }
-                Button { actions.checkForUpdates() } label: {
-                    Label(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…",
-                          systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
-                }
-            }
-            UpdateStatusLines(updates: updates).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
-            HStack {
-                Text("⌥⌘K shows this panel").font(.caption).foregroundStyle(.tertiary)
-                Spacer()
-                Button("Quit Ensemble") { actions.quit() }.buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
         }
         .ensembleButtonStyle()
         .controlSize(.large)
+    }
+
+    private var footer: some View {
+        HStack {
+            Text(UpdateController.installedVersion).font(.caption).foregroundStyle(.tertiary)
+            Spacer()
+            Button { actions.quit() } label: {
+                Image(systemName: "power").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Quit Ensemble")
+            .accessibilityLabel("Quit Ensemble")
+        }
+        .padding(.horizontal, 4)
     }
 }

@@ -91,7 +91,8 @@ final class DictationController {
         guard let session = focus.target else {
             // No session at all while Claude runs: its windows are on another Space, minimized or behind a
             // full-screen app, and pointing better cannot help.
-            refuseStart(ctx.sessions.isEmpty && ctx.bridge.claudeIsRunning() ? "Claude isn't on screen" : "Your nose is not on a Claude session")
+            refuseStart(ctx.sessions.isEmpty && ctx.bridge.claudeIsRunning() ? "Claude isn't on screen" : "Your nose is not on a Claude session",
+                        resolves: .whenOnSession)
             return
         }
         send.afterStop = false; focus.clearDeferred()
@@ -232,9 +233,9 @@ final class DictationController {
 
     /// The machine already flipped to talking when it announced the start; a refusal must flip it back,
     /// or the next double tap would be read as a stop.
-    private func refuseStart(_ why: String) {
+    private func refuseStart(_ why: String, resolves: RefusalNotice.Resolves = .byTime) {
         ctx.gestures.abortTalk()
-        ctx.refuse(why, title: "Dictation not started")
+        ctx.refuse(why, title: "Dictation not started", resolves: resolves)
     }
 
     // MARK: - While it runs

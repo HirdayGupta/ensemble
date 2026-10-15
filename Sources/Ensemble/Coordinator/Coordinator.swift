@@ -223,6 +223,7 @@ final class Coordinator: AppCoordinating {
         focus.forgetTarget()
         returnKeys.reset(); keyTap.setActive(false)
         state.status = .off
+        state.clearRefusal()
         pushOverlay()
     }
 
@@ -432,6 +433,10 @@ final class Coordinator: AppCoordinating {
         dictation.supervise(now: now)
         refreshDictatingFrame(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
+        if state.lastRefusal != nil {
+            state.clearRefusalIfStale(now: now, lastInputAt: now - ClaudeBridge.secondsSinceTypingOrClick(),
+                                      dictating: ctx.listening != nil, onSession: focus.target != nil)
+        }
         keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
     }
 

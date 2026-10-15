@@ -1,13 +1,13 @@
 #!/bin/bash
 # Fails (exit 1) if the built app is larger than the budget. The size is the sum of every file's bytes in
-# build/Ensemble.app, so it does not move with disk block rounding. Measured 2026-10-14 after the size work: 7,160,670 bytes. The tour's 3D scenes (three.js, its glTF loader and IK solver, the scene module and the hand model) add about 225,000 bytes packed, and the budget rose from 7,600,000 to 7,800,000 for them. Per-screen calibration and saved positions took it from 8,000,000 to 8,100,000 (about 45,000 bytes of app code). The tour's new scene module and the owner's recorded hand motion (capture-default.js, 290 KB raw, 43,016 bytes LZMA-packed) grew the bundle by about 54,000 bytes packed, and the budget rose from 8,100,000 to 8,160,000 for them. The 60 Hz dot spring, camera format choice and the second dictation-safety batch (about 50,000 bytes of app code) took it to 8,250,000.
+# build/Ensemble.app, so it does not move with disk block rounding. Measured 2026-10-14 after the size work: 7,160,670 bytes. The tour's 3D scenes (three.js, its glTF loader and IK solver, the scene module and the hand model) add about 225,000 bytes packed, and the budget rose from 7,600,000 to 7,800,000 for them. Per-screen calibration and saved positions took it from 8,000,000 to 8,100,000 (about 45,000 bytes of app code). The tour's new scene module and the owner's recorded hand motion (capture-default.js, 290 KB raw, 43,016 bytes LZMA-packed) grew the bundle by about 54,000 bytes packed, and the budget rose from 8,100,000 to 8,160,000 for them. The 60 Hz dot spring, camera format choice and the second dictation-safety batch (about 50,000 bytes of app code) took it to 8,250,000. The menu panel reorder, the combined update button and transient refusal notes took it to 8,300,000.
 # Raise BUDGET_BYTES in the same change that adds a heavier dependency or asset, and say why in the commit message.
 #
 # Usage: scripts/check-size.sh [path to Ensemble.app]
 set -u
 cd "$(dirname "$0")/.."
 
-BUDGET_BYTES=8250000
+BUDGET_BYTES=8300000
 APP="${1:-build/Ensemble.app}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }

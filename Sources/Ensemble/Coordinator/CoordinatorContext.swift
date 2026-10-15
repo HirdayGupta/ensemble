@@ -77,8 +77,10 @@ final class CoordinatorContext {
         return nil
     }
 
-    func refuse(_ why: String, title: String? = nil) {
-        state.lastRefusal = why
+    /// `resolves`: `.whenOnSession` for a refusal about where the nose points, so the panel drops it once the nose
+    /// is back on a session.
+    func refuse(_ why: String, title: String? = nil, resolves: RefusalNotice.Resolves = .byTime) {
+        state.showRefusal(why, resolves: resolves)
         if gestureShowing || headphoneActive || why.hasPrefix("Send") || why.hasPrefix("Not sent") {
             let sendRelated = why.hasPrefix("Send") || why.hasPrefix("Not sent")
             let body = why.hasPrefix("Not sent: ") ? String(why.dropFirst("Not sent: ".count)) : why

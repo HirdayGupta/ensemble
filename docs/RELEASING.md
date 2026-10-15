@@ -97,7 +97,7 @@ GitHub Pages serves the `gh-pages` branch: `appcast.xml` (written by `release.ym
 ## How updates reach users
 
 - Each installed copy reads the appcast at `UpdateConfig.feedURL` (GitHub Pages, HTTPS), compares the build number, downloads the DMG from the GitHub Release, verifies the EdDSA signature against `SUPublicEDKey` and the Apple code signature, then replaces the app and relaunches.
-- Policy in `UpdateController.swift`: no network until the user turns on "Update automatically" in Settings, General (or presses Check for Updates). With it on, Sparkle checks every 6 hours (`SUScheduledCheckInterval` = 21600), downloads in the background, and installs only while Ensemble is idle (not dictating, calibrating or in the tour), then relaunches. Sparkle's own "check automatically?" prompt is suppressed. With it off, a manual check is the only check.
+- Policy in `UpdateController.swift`: no network until the user turns on "Update automatically" in Settings, General (or presses Check for Updates). With it on, Ensemble checks 15 seconds after launch and Sparkle then checks every hour (`SUScheduledCheckInterval` = 3600, `UpdatePolicy.checkInterval`), downloads in the background, and installs only while Ensemble is idle (not dictating, calibrating or in the tour), then relaunches. Any check that finds a version, background ones included, turns the update button into "Update to x.y.z", and pressing it installs a version already downloaded at once. Sparkle's own "check automatically?" prompt is suppressed. With it off, a manual check is the only check.
 - To check for updates by default (Sparkle's standard behavior is a prompt on the second launch), remove the `updaterShouldPromptForPermissionToCheck` override and let Sparkle ask, or set `SUEnableAutomaticChecks` to true in `Info.plist` (no consent step).
 - A build whose `SUPublicEDKey` is still the placeholder, or whose feed URL still says `OWNER`, has updates off: the menu entry explains it and Sparkle never starts.
 
@@ -112,7 +112,7 @@ These need a notarized build on a real Mac and could not be run from the develop
 - Face tracking starts (MediaPipe's WASM runs in WebKit's separate process, so no JIT entitlement is expected; if it fails under the hardened runtime, add `com.apple.security.cs.allow-jit` to `Ensemble.entitlements`, nothing broader).
 - The Camera prompt appears and the camera opens (`com.apple.security.device.camera`).
 - Accessibility control of Claude and the pinch gestures work.
-- Settings, About, Check for Updates reaches the appcast and reports "up to date".
+- Settings, About, Check for Updates reaches the appcast and the button reads "Up to date" for a few seconds.
 - Install version N, publish N+1, confirm the update installs and the app relaunches (the login agent has `KeepAlive` only on failure exit, so Sparkle's clean quit should not fight it).
 
 ## Homebrew
