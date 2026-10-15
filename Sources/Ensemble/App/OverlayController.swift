@@ -49,9 +49,11 @@ final class OverlayModel: ObservableObject {
     @Published var sessionSwitch: SessionSwitch?
     /// While dictating: what the nose is approaching beyond the dictating session's edge.
     @Published var edge: OverlayEdge?
+    /// A send is on its way: the session's name, from the end of the thumbs-up hold until "Sent" or "Not sent".
+    @Published var sending: String?
 
     var hasContent: Bool {
-        (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil
+        (showHighlight && target != nil) || (showNoseDot && hasNose) || listening || banner != nil || sending != nil
     }
 }
 
@@ -114,6 +116,11 @@ final class OverlayController {
     }
 
     func setEdge(_ edge: OverlayEdge?) { setIfChanged(&model.edge, edge) }
+
+    func setSending(name: String?) {
+        setIfChanged(&model.sending, name)
+        syncPanels()
+    }
 
     func setLiveSoundBars(_ on: Bool) { setIfChanged(&model.liveSoundBars, on) }
 

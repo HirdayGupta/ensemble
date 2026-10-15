@@ -38,12 +38,20 @@ extension ClaudeBridge {
     /// nil = the CoreAudio process list could not be read.
     func claudeCaptureActive() -> Bool? {
         guard let processes = CoreAudioInput.processes() else { return nil }
-        let roots = Set(NSRunningApplication.runningApplications(withBundleIdentifier: ClaudeLabels.bundleID).map(\.processIdentifier))
-        for p in processes where p.isRunningInput {
-            if p.bundleID.hasPrefix(ClaudeLabels.bundleID) { return true }
-            if ProcessInfoLookup.isDescendant(p.pid, ofAny: roots) { return true }
-        }
-        return false
+        let roots = Self.claudeRoots()
+        return processes.contains { $0.isRunningInput && Self.isClaude($0, roots: roots) }
+    }
+
+    /// Claude's own processes, the roots for `isClaude`.
+    static func claudeRoots() -> Set<pid_t> {
+        Set(NSRunningApplication.runningApplications(withBundleIdentifier: ClaudeLabels.bundleID).map(\.processIdentifier))
+    }
+
+    /// The one test for "this audio process is Claude": its bundle id, or descent from a Claude process (helpers
+    /// that carry no bundle id). The capture check and the safety mute use it alike, so the mute always lands on
+    /// the device of whatever the capture check counted.
+    static func isClaude(_ p: AudioProcess, roots: Set<pid_t>) -> Bool {
+        p.bundleID.hasPrefix(ClaudeLabels.bundleID) || ProcessInfoLookup.isDescendant(p.pid, ofAny: roots)
     }
 
     func micStateSync(mic: AXUIElement) -> MicState {
@@ -78,12 +86,12 @@ extension ClaudeBridge {
     /// Display name of any process other than Claude (and its helpers) and this app that is capturing input.
     func otherProcessCapturingInput() -> String? {
         guard let processes = CoreAudioInput.processes() else { return nil }
-        let roots = Set(NSRunningApplication.runningApplications(withBundleIdentifier: ClaudeLabels.bundleID).map(\.processIdentifier))
+        let roots = Self.claudeRoots()
         let me = ProcessInfo.processInfo.processIdentifier
         let myBundle = Bundle.main.bundleIdentifier
         for p in processes where p.isRunningInput {
             if p.pid == me || (myBundle != nil && p.bundleID == myBundle) { continue }
-            if p.bundleID.hasPrefix(ClaudeLabels.bundleID) || ProcessInfoLookup.isDescendant(p.pid, ofAny: roots) { continue }
+            if Self.isClaude(p, roots: roots) { continue }
             if Self.ambientInputAllowlist.contains(p.bundleID) { continue }
             return ProcessInfoLookup.name(of: p.pid) ?? (p.bundleID.isEmpty ? "pid \(p.pid)" : p.bundleID)
         }

@@ -48,7 +48,9 @@ extension ClaudeBridge {
 
     /// Starts Claude's dictation: exactly one press, and only when the mic is verifiably off.
     func startDictation(_ s: ClaudeSession) async -> BridgeResult {
-        await run(onStartQueue: true) { self.startNow(s) }
+        noteStartPress(true)
+        defer { noteStartPress(false) }
+        return await run(onStartQueue: true) { self.startNow(s) }
     }
 
     private func startNow(_ s: ClaudeSession) -> BridgeResult {

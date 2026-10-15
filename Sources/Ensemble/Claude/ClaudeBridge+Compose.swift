@@ -44,7 +44,7 @@ extension ClaudeBridge {
         guard let entry = liveEntry(s, rescanPane: true) else { return .refused(self.sessionNotFound) }
         let e = entry.elements
 
-        // Any permission mode: a deliberate 1.5 s hold is the confirmation (owner decision, 2026-10-14).
+        // Any permission mode: the deliberate thumbs-up hold is the confirmation (owner decision, 2026-10-14).
         if e.stopButton != nil { return .refused("Claude is still generating") }
         guard let composer = e.composer else { return .refused("composer not found") }
 
@@ -71,9 +71,10 @@ extension ClaudeBridge {
         let err = AX.perform(send, kAXPressAction)
         if err != .success { return .unknown("Send press returned error \(err.rawValue)") }
 
+        // Polled, not waited: the result is known the moment the composer empties (usually well under 0.1 s).
         let deadline = Date().addingTimeInterval(1.5)
         while Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: 0.03)
             let value = AX.string(composer, kAXValueAttribute)
             if value == nil || value!.isEmpty { return .done }
             if AX.string(send, kAXRoleAttribute) == nil { return .done }

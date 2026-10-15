@@ -19,6 +19,9 @@ final class DictationController {
     private var startInFlight = false
     /// Switching off gave up waiting for a start press: stop that dictation the moment the press lands.
     private var stopWhenStarted = false
+    /// Sleep, a lock or the safety check interrupted this dictation at some point: its stop is immediate and
+    /// it is never sendable, whichever route ends up stopping it. Cleared when the next dictation begins.
+    private var interrupted = false
     private var cancellables = Set<AnyCancellable>()
     /// Claude's process when the dictation began: a different (or missing) one later means the dictation is gone.
     private var processID: pid_t?
@@ -59,6 +62,14 @@ final class DictationController {
             self?.ctx.state.muted = muted
             if !muted { Notifier.shared.resolveAlarm() }   // the mute is undone only after a definite "off"
         }
+        // The alarm ends only after a definite "off". With no safety mute in effect (it could not be set), nothing
+        // else would ever clear the island banner; with one, the unmute above clears it.
+        safety.onAlarmEnded = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.ctx.state.muted else { return }
+                Notifier.shared.resolveAlarm()
+            }
+        }
         safety.onHoldEnded = { [weak self] why in
             MainActor.assumeIsolated {
                 guard let self, self.ctx.listening != nil else { return }
@@ -78,22 +89,41 @@ final class DictationController {
         if let why = ctx.commonRefusal() { refuseStart(why); return }
         guard ctx.calibratedHere else { refuseStart("Calibrate first (or recalibrate for this screen arrangement)"); return }
         guard let session = focus.target else { refuseStart("Your nose is not on a Claude session"); return }
-        if let other = ctx.bridge.otherProcessCapturingInput() { refuseStart("\(other) is using a microphone"); return }
         send.afterStop = false; focus.clearDeferred()
-        guard safety.episodeStarting(session: session) else { refuseStart("Could not write the safety record; not starting"); return }
+        interrupted = false
+        // Busy from here: no second start, and switching off waits for this one.
         ctx.busy = true
         startInFlight = true
-        ctx.listening = session
-        processID = ctx.bridge.claudePID
-        ctx.state.listening = true
-        ctx.changed()
+        let bridge = ctx.bridge
         Task { @MainActor in
+            // CoreAudio and the safety queue can stall while devices change; neither is waited on from the main thread.
+            let other = await Task.detached { bridge.otherProcessCapturingInput() }.value
+            let refusal: String?
+            if let other { refusal = "\(other) is using a microphone" } else { refusal = await self.safety.episodeStarting(session: session) }
+            // While those were read, the pose may have been released, the screen locked or Ensemble switched off.
+            let called = self.disarming || self.stopWhenStarted || self.interrupted || !self.ctx.gestures.talking
+                || self.ctx.commonRefusal() != nil
+            if refusal != nil || called {
+                self.ctx.busy = false
+                self.startInFlight = false
+                self.stopWhenStarted = false
+                // A written record stays until the standing check sees the microphone off for its settle window.
+                if refusal == nil { self.safety.episodeEnded() }
+                if let refusal { self.refuseStart(refusal) } else { self.ctx.gestures.abortTalk(); EnsembleLog.write("start called off before the press") }
+                self.ctx.changed()
+                return
+            }
+            self.ctx.listening = session
+            self.processID = bridge.claudePID
+            self.ctx.state.listening = true
+            self.ctx.changed()
             // Other audio is paused before the microphone opens, so neither it nor the pause is transcribed.
             if self.ctx.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
             let result = await self.ctx.bridge.startDictation(session)
             self.ctx.busy = false
             self.startInFlight = false
-            let switchedOff = self.disarming || self.stopWhenStarted
+            // An interruption (lock, sleep, the safety check) while the press was in flight stops at once, like a switch-off.
+            let switchedOff = self.disarming || self.stopWhenStarted || self.interrupted
             self.stopWhenStarted = false
             var confirmedOn = false
             if case .done = result { confirmedOn = true }
@@ -101,10 +131,10 @@ final class DictationController {
             let next = DictationRules.afterStart(confirmedOn: confirmedOn, switchedOff: switchedOff, poseHeld: self.ctx.gestures.talking)
             switch result {
             case .done:
-                EnsembleLog.write(next == .stopSwitchedOff ? "dictation started after Ensemble was switched off; stopping it now" : "dictation started")
+                EnsembleLog.write(next == .stopSwitchedOff ? "dictation started after Ensemble was switched off or interrupted; stopping it now" : "dictation started")
                 if self.ctx.settings.liveSoundBars, next != .stopSwitchedOff { self.meter.start() }
                 self.startedAt = CACurrentMediaTime()
-                self.inputDevice = self.ctx.bridge.defaultInputDeviceName()
+                self.inputDevice = await Task.detached { bridge.defaultInputDeviceName() }.value
                 self.safety.episodeConfirmed()
                 if next != .stopSwitchedOff { Notifier.shared.playCue(.listenStart) }
                 // Pressing the microphone can leave the keyboard on the button; a key typed while dictating belongs in
@@ -143,7 +173,9 @@ final class DictationController {
             self.meter.stop()
             self.safety.episodeEnded()
             if self.ctx.gestures.talking { self.ctx.gestures.reset() }
-            let sendByReturn = self.send.afterStopByReturn
+            // Read after the stop: an interruption during the tail or the press counts as much as one before it.
+            let sendable = DictationRules.sendableAfterStop(immediate: immediate, interrupted: self.interrupted)
+            let sendWasPending = self.send.afterStop && !self.send.afterStopByReturn
             if case .done = result {} else { self.send.afterStop = false; self.focus.clearAfterStop() }
             switch result {
             case .done:
@@ -159,25 +191,31 @@ final class DictationController {
                 }
                 self.ctx.settings.lastClaudeVersion = self.ctx.bridge.claudeVersion
                 // An interrupted dictation (sleep, lock, safety stop) is never sent by a later thumbs-up.
-                if !immediate { self.send.spoke(in: session) }
-                if !self.send.afterStop {
-                    self.ctx.overlay.showBanner(title: "Dictation stopped", body: self.ctx.name(of: session), style: .stopped, seconds: 2.5)
-                }
+                if sendable { self.send.spoke(in: session) } else { self.send.afterStop = false }
                 if self.send.afterStop {
-                    self.send.afterStop = false
-                    // Claude finalises the transcript a moment after the mic stops.
-                    Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); self.send.request(byReturn: sendByReturn) }
+                    // One step on the island and one sound: "Sending" runs on into "Sent" with the send cue, so
+                    // neither the stopped banner nor the stop cue plays in between.
+                    self.send.stopConfirmedForSend()
+                } else {
+                    self.ctx.overlay.showBanner(title: "Dictation stopped", body: self.ctx.name(of: session), style: .stopped, seconds: 2.5)
+                    Notifier.shared.playCue(.listenEnd)
                 }
-                Notifier.shared.playCue(.listenEnd)
                 self.stopResolved(true)
             case .refused(let why), .unknown(let why):
                 EnsembleLog.write("stop dictation \(result): \(self.ctx.bridge.micSnapshot)")
                 self.ctx.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
+                // A Return-asked send says so through stopResolved; a gesture-asked one says so here.
+                if sendWasPending { self.ctx.refuse("Not sent: the stop was not confirmed") }
                 self.stopResolved(false)
                 self.checkClaudeUpdate()
             }
             self.ctx.changed()
         }
+    }
+
+    /// Sleep, a lock or the safety check interrupted whatever dictation is starting, running or stopping.
+    func markInterrupted() {
+        if ctx.listening != nil || startInFlight { interrupted = true }
     }
 
     func endWhenIdle(reason: String, immediate: Bool = false) {
@@ -288,16 +326,22 @@ final class DictationController {
                 }
             }
             let result = await self.ctx.bridge.stopAnyDictation()
-            var capture = self.ctx.bridge.claudeCaptureActive()
-            for _ in 0..<15 where !DictationRules.confirmedOff(capture: capture) {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                capture = self.ctx.bridge.claudeCaptureActive()
-            }
+            let bridge = self.ctx.bridge
+            // Read off the main thread: CoreAudio can stall while devices change.
+            let capture = await Task.detached { () -> Bool? in
+                var capture = bridge.claudeCaptureActive()
+                for _ in 0..<15 where !DictationRules.confirmedOff(capture: capture) {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    capture = bridge.claudeCaptureActive()
+                }
+                return capture
+            }.value
             self.disarming = false
             self.ctx.listening = nil
             self.ctx.state.listening = false
             // An unreadable microphone state is not off: the record and any mute stay for the standing check.
-            if !DictationRules.confirmedOff(capture: capture) || !self.safety.clearAndDisarm() {
+            let cleared = DictationRules.confirmedOff(capture: capture) ? await self.safety.clearAndDisarm() : false
+            if !cleared {
                 EnsembleLog.write("clear and disarm: microphone still recording (stop \(result)); the safety check keeps watching")
                 self.safety.episodeEnded()
                 self.ctx.refuse("Could not confirm the microphone is off; the safety check keeps watching")

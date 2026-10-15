@@ -8,7 +8,7 @@ What each gesture does and what Settings can change. The overview is in the [REA
 |---|---|
 | Look at a Claude session | That session is the target of every gesture. Looking at a different session while listening pauses dictation after 2 seconds, once your nose is at least 15 percent of that session's width (or height) inside it. |
 | Pinch thumb and index twice, quickly | Starts listening through Claude's own dictation. Do it again to stop. Your hand can leave the frame in between. |
-| Hold a thumbs-up | Sends the dictated draft. The default hold is 0.75 seconds, adjustable from 0.5 to 3 seconds in Settings. It works only within 30 seconds of dictation ending. |
+| Hold a thumbs-up | Sends the dictated draft. The default hold is 0.75 seconds, adjustable from 0.5 to 3 seconds in Settings. It works only within 30 seconds of dictation ending. Made while dictating, it stops the dictation and sends once the transcript has settled; the island shows "Sending" from the end of the hold until "Sent" or "Not sent", as one step with one sound. |
 | Press the headphone stem once (Bluetooth output) | Same as the double pinch, in the session you are looking at: starts dictation, or stops it. Refused with the usual message when no session is targeted, Claude is not in front or the calibration is missing. |
 | Press the headphone stem twice | Same as the thumbs-up: sends the dictated draft under the same rules. |
 | Pinch and drag up or down | Scrolls the session, at your system's scroll direction and speed. A fast release carries on with momentum, a slow release stops dead. |

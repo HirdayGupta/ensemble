@@ -8,6 +8,8 @@ final class HealthMonitor {
     private let ctx: CoordinatorContext
     private let engine: VisionEngine
     var running = false
+    /// The screen is locked or asleep: the camera is off on purpose and is not restarted as if it had failed.
+    var away = false
     private(set) var cameraProblem: String?
     private(set) var trackerFailure: String?
     private(set) var trackerReady = false
@@ -80,9 +82,9 @@ final class HealthMonitor {
         let flippedOn = allowed && !cameraAllowed
         if allowed != cameraAllowed { EnsembleLog.write("camera permission is now \(allowed ? "granted" : "denied")") }
         cameraAllowed = allowed
-        if flippedOn {
+        if flippedOn, !away {
             restartCamera("camera permission granted")
-        } else if allowed, !engine.isRunning, Date().timeIntervalSince(lastCameraRestart) >= 5 {
+        } else if allowed, !away, !engine.isRunning, Date().timeIntervalSince(lastCameraRestart) >= 5 {
             restartCamera("the camera was not running")
         }
         update()

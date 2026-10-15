@@ -63,4 +63,55 @@ public enum DictationRules {
         if paneConfirmedOff.isEmpty { return .nothingFound }
         return paneConfirmedOff.allSatisfy { $0 } ? .allOff : .notAllOff
     }
+
+    /// How long an unreadable microphone state may last, with a dictation record open and no hold, before the
+    /// alarm sounds and the input is muted. Unreadable is never "off", so waiting for it to clear could last forever.
+    public static let unreadableLimit: TimeInterval = 3
+
+    public static func escalateUnreadable(recordOpen: Bool, holdActive: Bool, unreadableFor: TimeInterval) -> Bool {
+        recordOpen && !holdActive && unreadableFor >= unreadableLimit
+    }
+
+    /// A new dictation may not start while an earlier one is still owed a confirmed stop: starting would replace
+    /// that dictation's record and abandon its stop, its alarm and its mute. `muteInEffect` counts only a safety
+    /// mute still set on a connected device.
+    public static func startRefusal(stopOwed: Bool, alarmOn: Bool, muteInEffect: Bool) -> String? {
+        if stopOwed || alarmOn { return "The last dictation's stop is not confirmed yet; the safety check is still stopping it" }
+        if muteInEffect { return "The safety mute is still on; it is undone once the microphone is confirmed off" }
+        return nil
+    }
+
+    /// Whether a confirmed stop leaves the dictation sendable by a later thumbs-up. A stop forced at once (switch-off,
+    /// sleep, lock, the safety check), or any stop of a dictation that was interrupted along the way, never is.
+    public static func sendableAfterStop(immediate: Bool, interrupted: Bool) -> Bool {
+        !immediate && !interrupted
+    }
+}
+
+/// When the dictated draft is ready to send. Claude finishes the transcript a moment after its microphone stops, so
+/// a send waits until the draft has not changed for `quiet` seconds (and is not empty), never longer than `cap`.
+/// It replaces a fixed 0.6 s wait: a draft that is already final goes out after `quiet`, a late one is waited for.
+public struct DraftSettle {
+    public static let quiet: TimeInterval = 0.3
+    public static let cap: TimeInterval = 1.2
+
+    public let start: TimeInterval
+    public private(set) var text: String?
+    public private(set) var changedAt: TimeInterval
+    /// Seconds from `start` to the last change seen, for the log.
+    public var lastChangeAfter: TimeInterval { changedAt - start }
+
+    public init(start: TimeInterval, first: String?) {
+        self.start = start
+        text = first
+        changedAt = start
+    }
+
+    /// One fresh reading of the draft. True once the draft may be sent, or the wait is over.
+    public mutating func observe(_ reading: String?, at t: TimeInterval) -> Bool {
+        if reading != text { text = reading; changedAt = t }
+        if t - start >= Self.cap { return true }
+        let nonEmpty = !(text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return nonEmpty && t - changedAt >= Self.quiet
+    }
 }

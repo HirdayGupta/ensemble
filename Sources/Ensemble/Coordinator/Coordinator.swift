@@ -37,11 +37,19 @@ final class Coordinator: AppCoordinating {
     /// True while the tour window is open: Ensemble keeps reading the camera (the tour calibrates and practises with
     /// it) but acts on nothing, so looking at the tour never moves Claude's focus or raises a session behind it.
     private var tourOpen = false
+    /// Locked, asleep or behind the screen saver: see `setAway`.
+    private var awayState = AwayState()
+    private var frameRefreshInFlight = false
+    private var lastFrameRefresh: TimeInterval = 0
     private static let staleHeadSeconds = 2.0
     private static let sessionScanFaceWindow = 5.0
     private static let sessionScanIdleInterval = 5.0
 
     var cameraNames: [String] { VisionEngine.cameraNames() }
+
+    var isBusy: Bool {
+        ctx.busy || ctx.listening != nil || send.afterStop || send.inFlight || gestures.progress != nil
+    }
 
     init(state: AppState, settings: SettingsStore, overlay: OverlayController) {
         let ctx = CoordinatorContext(state: state, settings: settings, overlay: overlay)
@@ -103,6 +111,7 @@ final class Coordinator: AppCoordinating {
         engine.onDiagnostic = { note in EnsembleLog.write("engine: \(note)") }
         SystemEvents.observe(
             interrupt: { [weak self] in self?.interrupt($0) },
+            away: { [weak self] reason, on in self?.setAway(reason, on) },
             sweep: { [weak self] in self?.dictation.sweep() },
             screensChanged: { [weak self] in self?.screensChanged() })
     }
@@ -122,7 +131,9 @@ final class Coordinator: AppCoordinating {
         health.begin()
         headphone.start()
         ctx.latestHead = nil
-        engine.start(cameraName: settings.cameraName)
+        reconcileAway()
+        health.away = awayState.isAway
+        if !awayState.isAway { engine.start(cameraName: settings.cameraName) }
         tickTimer?.invalidate()
         tickTimer = commonModeTimer(1.0 / 20.0) { [weak self] in self?.tick() }
         refreshTimer?.invalidate()
@@ -137,6 +148,47 @@ final class Coordinator: AppCoordinating {
         recoveredAtLaunch = true
         dictation.sweep()
         MediaDucker.recoverAfterCrash()
+    }
+
+    // MARK: - Away (lock, sleep, screen saver)
+
+    /// Nobody can be at the Mac: the camera goes off (nothing is read while the screen is locked) and nothing
+    /// acts on Claude, focus included. It comes back on when every reason has cleared.
+    private func setAway(_ reason: AwayReason, _ on: Bool) {
+        guard awayState.set(reason, on) else { return }
+        applyAway()
+    }
+
+    /// A "back" notification macOS never delivered must not leave the camera off: clear what the facts disprove.
+    private func reconcileAway() {
+        let displayAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        if awayState.reconcile(sessionLockedOrInactive: ScreenFacts.sessionAway(), displayAsleep: displayAsleep,
+                               secondsSinceInput: ClaudeBridge.secondsSinceUserInput()) {
+            EnsembleLog.write("back at the Mac (found on the 1 s check)")
+            applyAway()
+        }
+    }
+
+    private func applyAway() {
+        let away = awayState.isAway
+        health.away = away
+        if away {
+            EnsembleLog.write("away (\(awayState.reasons.map(\.rawValue).sorted().joined(separator: ", "))): camera off")
+            engine.stop()
+            ctx.latestHead = nil
+            focus.forgetTargetAndCandidate()
+            focus.clearDeferred()
+            dot.clear()
+            dot.place(target: nil)
+            gestures.reset()
+            scroll.cancel()
+            ctx.overlay.setGesture(nil)
+            pushOverlay()
+        } else if health.running, settings.enabled, !engine.isRunning {
+            EnsembleLog.write("back at the Mac: camera on")
+            ctx.latestHead = nil
+            engine.start(cameraName: settings.cameraName)
+        }
     }
 
     private func promptAccessibilityOnce() {
@@ -292,6 +344,8 @@ final class Coordinator: AppCoordinating {
     // MARK: - Inputs
 
     private func handle(head: HeadObservation) {
+        // A reading already in flight when the camera went off for the lock: nothing acts on it.
+        if awayState.isAway { return }
         ctx.latestHead = head
         // Head readings are not practised in the tour, but they must not act on Claude while it is open.
         if practiceSink != nil || tourOpen { return }
@@ -360,7 +414,8 @@ final class Coordinator: AppCoordinating {
 
     private func tick() {
         dropStaleReadings()
-        focus.tick()
+        // Away: a deferred focus move must not land behind the lock screen.
+        if !awayState.isAway { focus.tick() }
         for intent in gestures.tick(now: CACurrentMediaTime()) {
             if let sink = practiceSink { sink.tourPractice(intent: intent) } else if !tourOpen { apply(intent) }
         }
@@ -373,8 +428,27 @@ final class Coordinator: AppCoordinating {
             if ctx.listening != nil ? !ctx.busy : scroll.isRunning, ScreenFacts.sessionAway() { interrupt("screen locked") }
         }
         dictation.supervise(now: now)
+        refreshDictatingFrame(now: now)
         if returnKeys.expire(now: now) { ctx.refuse("Not sent: the stop was not confirmed") }
         keyTap.setActive(health.running && (ctx.listening != nil || returnKeys.wantsKeys(now: now)))
+    }
+
+    /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized
+    /// meanwhile would leave the highlight and edge warnings on its old frame. Twice a second, only the dictating
+    /// pane's frame is read: one bounded Accessibility read of a cached element, never a tree walk.
+    private func refreshDictatingFrame(now: TimeInterval) {
+        guard let session = ctx.listening, !frameRefreshInFlight, now - lastFrameRefresh >= 0.5 else { return }
+        lastFrameRefresh = now
+        frameRefreshInFlight = true
+        Task { @MainActor in
+            defer { self.frameRefreshInFlight = false }
+            guard let frame = await self.ctx.bridge.paneFrame(session), frame.width > 50, frame.height > 50,
+                  self.ctx.listening?.id == session.id, self.ctx.listening?.frame != frame else { return }
+            self.ctx.listening?.frame = frame
+            if let i = self.ctx.sessions.firstIndex(where: { $0.id == session.id }) { self.ctx.sessions[i].frame = frame }
+            self.dot.place(target: self.focus.target)
+            self.pushOverlay()
+        }
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
@@ -400,6 +474,7 @@ final class Coordinator: AppCoordinating {
         guard claudeUp else {
             ctx.sessions = []; focus.forgetAll(); send.forget(); scroll.cancel(); health.update(); return
         }
+        if awayState.isAway { reconcileAway() }
         // No refresh while dictating: a slow Claude tree walk would otherwise trip the Accessibility stall limit mid-hold.
         guard !refreshInFlight, ctx.listening == nil else { return }
         // Nobody in front of the camera for 5 s: the window scan (which also costs Claude's own process) runs
@@ -431,7 +506,7 @@ final class Coordinator: AppCoordinating {
         case .sendRequested:
             // While the setup prompt shows, the held thumbs-up answers it instead of sending.
             if ctx.setup.isPromptShowing { ctx.setup.start(); return }
-            if ctx.listening != nil || ctx.busy { send.afterStop = true; EnsembleLog.write("send after stop") } else { send.request() }
+            if ctx.listening != nil || ctx.busy { send.sendAfterStop(in: ctx.listening); EnsembleLog.write("send after stop") } else { send.request() }
         case .cancelRequested: break
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
         case .dragScrollEnded: scroll.released()
@@ -466,7 +541,7 @@ final class Coordinator: AppCoordinating {
             ctx.overlay.showBanner(title: "Headphone double press", body: "Sending the draft", style: .info, seconds: 1.5)
             if ctx.listening != nil {
                 // Same as the thumbs-up held from the talk pose: stop, then send once the stop is confirmed.
-                send.afterStop = true
+                send.sendAfterStop(in: ctx.listening)
                 dictation.end(reason: "headphone double press")
             } else {
                 send.request()
@@ -493,16 +568,12 @@ final class Coordinator: AppCoordinating {
             return true
         case .swallowAndSendAfterStop:
             EnsembleLog.write("Return twice: send after stop")
-            send.afterStop = true
-            send.afterStopByReturn = true
+            send.sendAfterStop(in: ctx.listening, byReturn: true)
             return true
         case .swallowAndSend:
             EnsembleLog.write("Return twice: sending")
-            // The stop was confirmed a moment ago; Claude finalises the transcript shortly after the mic stops.
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                self.send.request(byReturn: true)
-            }
+            // The stop was confirmed a moment ago; the send waits for Claude to finish the transcript, no longer.
+            send.request(byReturn: true, settle: true)
             return true
         }
     }
@@ -519,6 +590,7 @@ final class Coordinator: AppCoordinating {
     /// tail wait), and forget anything that was about to act. The text stays; nothing is sent.
     private func interrupt(_ reason: String) {
         EnsembleLog.write("interrupt: \(reason)")
+        dictation.markInterrupted()
         send.afterStop = false; focus.clearDeferred()
         returnKeys.reset()
         send.forget()

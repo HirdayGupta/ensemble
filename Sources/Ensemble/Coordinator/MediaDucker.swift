@@ -17,12 +17,33 @@ import CoreAudio
 @MainActor
 final class MediaDucker {
     private var paused: (device: AudioObjectID, volume: Float32?)?
+    /// The resume after a dictation: waiting for Claude's stop sound (`resumePending` set), then fading in (`rampTarget` set).
+    private var resumeTask: Task<Void, Never>?
+    private var resumePending: (device: AudioObjectID, volume: Float32?)?
+    private var rampTarget: (device: AudioObjectID, volume: Float32)?
     private static let savedKey = "duck.savedVolume"
     private static let savedUIDKey = "duck.deviceUID"
 
     /// Runs before the microphone is pressed; returns once the media is paused (about 0.5 s) or at once when
     /// nothing is playing on speakers.
     func duck() async {
+        // A resume from the last dictation may still be pending (its 0.7 s wait) or fading in. Pressing play now
+        // would start the music under the new dictation: cancel it. Not yet pressed, the media is still paused and
+        // stays so for this dictation; already pressed, the volume goes straight to its target and the usual fade
+        // out below runs.
+        if let pending = resumeTask {
+            pending.cancel()
+            resumeTask = nil
+            if let p = resumePending {
+                resumePending = nil
+                paused = p
+                Self.clearSaved()
+                EnsembleLog.write("a new dictation began before the audio resumed; it stays paused")
+                return
+            }
+            if let r = rampTarget { Self.setVolume(r.device, r.volume); Self.clearSaved() }
+            rampTarget = nil
+        }
         guard paused == nil, let dev = Self.defaultOutput(), Self.mediaPlaying(dev), !Self.isHeadphones(dev) else { return }
         let volume = Self.volume(dev)
         Self.save(dev, volume)
@@ -42,18 +63,28 @@ final class MediaDucker {
     func restore() {
         guard let p = paused else { return }
         paused = nil
-        Task { @MainActor in
+        resumePending = p
+        resumeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, self.resumePending != nil else { return }
+            self.resumePending = nil
             let target = Self.volume(p.device) ?? p.volume
-            if let target { Self.save(p.device, target); Self.setVolume(p.device, 0) }
+            if let target { Self.save(p.device, target); Self.setVolume(p.device, 0); self.rampTarget = (p.device, target) }
             Self.pressPlayPause()
             if let target { await Self.ramp(p.device, from: 0, to: target, seconds: 0.4) }
+            guard !Task.isCancelled else { return }
+            self.rampTarget = nil
+            self.resumeTask = nil
             Self.clearSaved()
         }
     }
 
     /// Quit path: resume at once, no fade.
     func restoreNow() {
+        resumeTask?.cancel()
+        resumeTask = nil
+        if let r = rampTarget { Self.setVolume(r.device, r.volume); Self.clearSaved(); rampTarget = nil }
+        if let p = resumePending { resumePending = nil; paused = p }
         guard paused != nil else { return }
         paused = nil
         Self.pressPlayPause()
