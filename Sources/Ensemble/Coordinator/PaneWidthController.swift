@@ -69,7 +69,7 @@ final class PaneWidthController {
         var stuck = Set<Int>()
         var last: (divider: Int, fromX: Double)?
         for drags in 0...Self.maxDrags {
-            let sessions = await ctx.bridge.refreshSessions()
+            let sessions = await ctx.bridge.refreshSessions().sessions
             if !sessions.isEmpty { ctx.sessions = sessions; ctx.changed() }
             let row = PaneWidths.row(of: sessions.first { $0.id == target.id } ?? target, in: sessions)
             guard row.count >= 2, let k = row.firstIndex(where: { $0.id == target.id }) else {
