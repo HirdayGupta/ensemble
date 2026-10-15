@@ -130,7 +130,7 @@ final class SetupController {
         ctx.overlay.showBanner(
             title: "Desk setup recognised",
             body: "\(cameraName) with \(count) screen\(count == 1 ? "" : "s"). Calibration from \(date) restored.",
-            style: .info, seconds: 4)
+            style: .success, seconds: 4)
     }
 
     // MARK: - The prompt's actions
