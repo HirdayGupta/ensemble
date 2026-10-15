@@ -5,6 +5,8 @@ import EnsembleCore
 enum AppStatus: Equatable {
     case off
     case watching
+    /// Your hands are on the keyboard, mouse or trackpad: Ensemble keeps tracking but acts on nothing (`HandsBusy`).
+    case pausedForInput
     case listening
     case cameraCovered
     case needsCalibration
@@ -110,6 +112,7 @@ extension AppStatus {
         switch self {
         case .off: return "Off"
         case .watching: return "Watching"
+        case .pausedForInput: return "Paused while you type or use the mouse"
         case .listening: return "Claude dictation on"
         case .cameraCovered: return "Camera is covered"
         case .needsCalibration: return "Needs calibration"

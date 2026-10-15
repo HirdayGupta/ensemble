@@ -56,6 +56,17 @@ private struct GeneralSettings: View {
                 Toggle("Fade out and pause other audio while dictating", isOn: $settings.pauseMediaWhileDictating)
                 Text("Only when the sound comes from speakers the microphone can hear; headphones are left alone.")
                     .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Pause after typing or mouse use") {
+                    HStack {
+                        Slider(value: $settings.pauseAfterInputSeconds, in: HandsBusy.quietRange, step: 0.5)
+                            .frame(width: 160)
+                        Text(String(format: "%.1f s", settings.pauseAfterInputSeconds))
+                            .monospacedDigit()
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                }
+                Text("While you type, click, scroll or move the pointer, Ensemble moves no focus and acts on no gesture.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("Show the panel from anywhere", value: "⌥⌘K")

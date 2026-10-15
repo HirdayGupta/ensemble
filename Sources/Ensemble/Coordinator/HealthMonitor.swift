@@ -120,6 +120,7 @@ final class HealthMonitor {
         if !ctx.calibratedHere { return .needsCalibration }
         if !claudeRunning { return .claudeNotRunning }
         if sessionsScanned, ctx.sessions.isEmpty { return .claudeNotOnScreen }
-        return ctx.state.listening ? .listening : .watching
+        if ctx.state.listening { return .listening }
+        return ctx.handsBusy ? .pausedForInput : .watching
     }
 }
