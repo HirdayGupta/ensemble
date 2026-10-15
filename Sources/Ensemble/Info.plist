@@ -14,7 +14,7 @@
     <key>LSUIElement</key><true/>
     <!-- Sparkle. The feed URL is UpdateConfig.feedURL in UpdateController.swift (single source of truth). -->
     <!-- TODO(owner): run Sparkle's generate_keys once and paste the printed public key here (docs/RELEASING.md). -->
-    <key>SUPublicEDKey</key><string>TODO-REPLACE-WITH-SPARKLE-PUBLIC-ED-KEY</string>
+    <key>SUPublicEDKey</key><string>GNSpLhYi6EjQRPyCsrSKMYiopDX8IManqkkc9Elp30M=</string>
     <!-- Automatic checks are off until the user turns them on in Settings > About; once on, at most one check a day. -->
     <key>SUScheduledCheckInterval</key><integer>86400</integer>
     <key>NSCameraUsageDescription</key><string>Ensemble watches your head direction and hand gestures to control Claude. Video is analysed on this Mac and never stored or sent.</string>
