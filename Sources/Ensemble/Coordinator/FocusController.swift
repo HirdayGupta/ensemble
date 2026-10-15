@@ -22,7 +22,37 @@ final class FocusController {
     /// only when that list or a pane's frame changes, never per frame. Feeds the island's session-columns glyph.
     private var sessionOrderCache: (sessions: [ClaudeSession], ordered: [ClaudeSession], groupOf: [String: Int])?
 
-    init(ctx: CoordinatorContext) { self.ctx = ctx }
+    /// You switched to another app yourself (keyboard, click or Dock). Until Claude is frontmost again, Ensemble
+    /// never brings Claude forward: no raising a covered session, no focus moves. The highlight still follows.
+    /// Measured 2026-10-14: a covered-session raise pulled Claude back over a full-screen app twice in 7 s.
+    private(set) var userLeftClaude: Bool
+    private var activationObserver: NSObjectProtocol?
+
+    init(ctx: CoordinatorContext) {
+        self.ctx = ctx
+        userLeftClaude = !Self.isClaude(NSWorkspace.shared.frontmostApplication)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated { self?.activated(app) }
+        }
+    }
+
+    private static func isClaude(_ app: NSRunningApplication?) -> Bool {
+        app?.bundleIdentifier?.hasPrefix("com.anthropic.claudefordesktop") == true
+    }
+
+    /// Ensemble itself only ever activates Claude, so any other app becoming active was your choice.
+    private func activated(_ app: NSRunningApplication?) {
+        let left = !Self.isClaude(app)
+        if app?.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
+        guard left != userLeftClaude else { return }
+        userLeftClaude = left
+        EnsembleLog.write(left ? "you switched to another app; Claude stays where you put it until you return to it"
+                               : "Claude is frontmost again; focus follows the nose")
+        if left { pending = nil; tracker.clearCovered() }
+    }
 
     var target: ClaudeSession? { tracker.target }
     var candidate: (session: ClaudeSession?, since: TimeInterval)? { tracker.candidate }
@@ -102,6 +132,7 @@ final class FocusController {
     func clearDeferred() { pending = nil; afterStop = nil }
 
     private func raise(_ hidden: ClaudeSession, at t: TimeInterval) {
+        if userLeftClaude { tracker.clearCovered(); return }
         let typed = ClaudeBridge.secondsSinceTypingOrClick() < CoordinatorContext.inputQuiet
         if ctx.busy || typed {
             if t - lastRaiseBlockLog > 5 { lastRaiseBlockLog = t; EnsembleLog.write("raise held back: \(ctx.busy ? "busy" : "typing or clicking")") }
@@ -136,6 +167,8 @@ final class FocusController {
             afterStop = session
             EnsembleLog.write("looked at another session; dictation stopped and kept")
             stopDictation("looked at another session")
+        case .focusNow where userLeftClaude:
+            pending = nil
         case .focusNow:
             pending = nil
             lastFocusedId = session.id
