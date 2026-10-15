@@ -66,8 +66,11 @@ gh repo clone oficiallyAkshay/ensemble ~/ensemble && ~/ensemble/scripts/dev-inst
 
 It needs Swift 6.2 or newer, which comes with Apple's 2025 developer tools. It creates a self-signed
 `Ensemble Local Signing` identity once, so the Camera and Accessibility grants survive every rebuild, installs
-`~/Applications/Ensemble.app`, and loads a launchd agent that checks `main` every 2 minutes, rebuilds when it moved and
-relaunches the app. An update waits while Claude is listening. The log is `~/Library/Logs/Ensemble/updater.log`. Stop it
+Ensemble.app (over `/Applications/Ensemble.app` when that exists, else in `~/Applications`), and loads a launchd agent
+that checks `main` every 2 minutes, rebuilds when it moved and relaunches the app. macOS hides Desktop, Documents and
+Downloads from background agents, so a clone kept there gets a build-only clone in
+`~/Library/Application Support/Ensemble/checkout` for the agent. With only the Command Line Tools, the build uses the
+macOS 26 SDK, because the macOS 27 SDK's SwiftUI macros need Xcode. An update waits while Claude is listening. The log is `~/Library/Logs/Ensemble/updater.log`. Stop it
 with `launchctl bootout "gui/$(id -u)/dev.ensemble.updater"`.
 
 ## Repository checks

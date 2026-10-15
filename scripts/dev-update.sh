@@ -7,7 +7,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$HOME/Library/Logs/Ensemble"
 LOG="$LOG_DIR/updater.log"
-APP_DEST="${ENSEMBLE_APP_DEST:-$HOME/Applications/Ensemble.app}"
+# Replace the copy the owner already has where it is; a second copy in ~/Applications would sit beside the one
+# that holds the Camera and Accessibility grants and get rebuilt on every run.
+if [ -n "${ENSEMBLE_APP_DEST:-}" ]; then APP_DEST="$ENSEMBLE_APP_DEST"
+elif [ -d /Applications/Ensemble.app ]; then APP_DEST="/Applications/Ensemble.app"
+else APP_DEST="$HOME/Applications/Ensemble.app"; fi
 BUNDLE_ID="dev.ensemble.app"
 LOCK="$ROOT/.build/dev-update.lock"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"

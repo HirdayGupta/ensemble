@@ -2,8 +2,9 @@
 # Installs Ensemble on a development Mac and keeps it on the latest main.
 #   gh repo clone oficiallyAkshay/ensemble ~/ensemble && ~/ensemble/scripts/dev-install.sh
 # What it does: creates a self-signed "Ensemble Local Signing" identity once (a stable signature keeps the Camera and
-# Accessibility grants across rebuilds), builds and installs ~/Applications/Ensemble.app, and loads the
-# dev.ensemble.updater agent, which checks main every 2 minutes and rebuilds when it moved (scripts/dev-update.sh).
+# Accessibility grants across rebuilds), builds and installs Ensemble.app (over /Applications/Ensemble.app when that
+# exists, else in ~/Applications), and loads the dev.ensemble.updater agent, which checks main every 2 minutes and
+# rebuilds when it moved (scripts/dev-update.sh).
 # Undo: launchctl bootout "gui/$(id -u)/dev.ensemble.updater"; rm ~/Library/LaunchAgents/dev.ensemble.updater.plist
 set -euo pipefail
 
@@ -37,6 +38,21 @@ EOF
   rm -rf "$TMP"
 fi
 
+# macOS refuses background agents access to Desktop, Documents and Downloads (the agent exits 126 and never builds),
+# so a clone kept there gets a separate build-only clone for the agent. The updater resets that clone to main, so
+# nobody develops in it.
+case "$ROOT/" in
+  "$HOME/Desktop/"*|"$HOME/Documents/"*|"$HOME/Downloads/"*)
+    BUILD_ROOT="$HOME/Library/Application Support/Ensemble/checkout"
+    if [ ! -d "$BUILD_ROOT/.git" ]; then
+      say "this clone is in a folder macOS hides from background agents; cloning a build-only copy to $BUILD_ROOT"
+      mkdir -p "$(dirname "$BUILD_ROOT")"
+      git clone --quiet "$(git -C "$ROOT" remote get-url origin)" "$BUILD_ROOT"
+    fi
+    ROOT="$BUILD_ROOT"
+    ;;
+esac
+
 say "building and installing (first build takes a few minutes; macOS may ask once to let codesign use the key: choose Always Allow)"
 "$ROOT/scripts/dev-update.sh" --force
 LOG="$HOME/Library/Logs/Ensemble/updater.log"
@@ -65,5 +81,5 @@ cat > "$AGENT" <<EOF
 EOF
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT"
-say "done. Ensemble is in ~/Applications and updates itself from main every 2 minutes."
+say "done. Ensemble updates itself from main every 2 minutes, built from $ROOT."
 say "log: ~/Library/Logs/Ensemble/updater.log"
