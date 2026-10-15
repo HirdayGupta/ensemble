@@ -93,6 +93,7 @@ final class Coordinator: AppCoordinating {
         keyTap.onReturnUp = { [weak self] in self?.returnKeys.returnReleased() }
         keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
         send.lookedAt = { [weak self] in self?.focus.target }
+        send.playStopSound = { [weak self] in self?.dictation.playStopSound() }
         send.returnInputAge = { [weak self] in
             let clicks = ClaudeBridge.secondsSinceClick()
             guard let self else { return clicks }

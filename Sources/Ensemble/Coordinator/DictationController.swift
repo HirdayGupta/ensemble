@@ -152,7 +152,7 @@ final class DictationController {
             // Other audio is paused before the microphone opens, so neither it nor the pause is transcribed; the
             // pause never lowers the volume, so the start cue after the press plays at full volume.
             if self.ctx.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
-            let claudeOutputBefore = await Task.detached { Self.claudeSendingAudio() }.value
+            let claudeOutputBefore = await Task.detached { Self.claudeOutputs() }.value
             let result = await self.ctx.bridge.startDictation(session)
             self.ctx.busy = false
             self.startInFlight = false
@@ -171,7 +171,7 @@ final class DictationController {
                 self.inputDevice = await Task.detached { bridge.defaultInputDeviceName() }.value
                 self.safety.episodeConfirmed()
                 if DictationAudio.startSoundDue(after: next, soundsOn: self.ctx.settings.playSounds) {
-                    self.playDictationSound(.start, claudeOutputBefore: claudeOutputBefore)
+                    self.playDictationSound(.start, check: Self.soundCheck(before: claudeOutputBefore))
                 }
                 // Pressing the microphone can leave the keyboard on the button; a key typed while dictating belongs in
                 // this session's message box.
@@ -204,8 +204,11 @@ final class DictationController {
         Task { @MainActor in
             if !immediate { try? await Task.sleep(nanoseconds: UInt64((tail ?? Self.stopTail) * 1e9)) }
             // An immediate stop waits on nothing, not even this read (CoreAudio can stall while devices change).
-            let claudeOutputBefore: Bool? = immediate ? nil : await Task.detached { Self.claudeSendingAudio() }.value
+            let claudeOutputBefore: Int? = immediate ? nil : await Task.detached { Self.claudeOutputs() }.value
             let result = await self.ctx.bridge.stopDictation(session)
+            // Whether Claude plays its own stop sound, looked at once for this stop: the stop banner's cue and a later
+            // "Kept, not sent" cue both follow it, so neither doubles Claude's.
+            if case .done = result { self.stopSoundCheck = Self.soundCheck(before: claudeOutputBefore) }
             self.ctx.busy = false
             self.ctx.listening = nil
             self.ctx.ownDictation(in: session)
@@ -240,7 +243,7 @@ final class DictationController {
                     // A thumbs-up is still being held (or was let go): its "Sent" or "Kept, not sent" speaks for this stop.
                 } else {
                     self.ctx.overlay.showBanner(title: "Dictation stopped", body: self.ctx.name(of: session), style: .stopped, seconds: 2.5)
-                    if self.ctx.settings.playSounds { self.playDictationSound(.stop, claudeOutputBefore: claudeOutputBefore) }
+                    if self.ctx.settings.playSounds { self.playStopSound() }
                 }
                 self.stopResolved(true)
             case .refused(let why), .unknown(let why):
@@ -256,25 +259,42 @@ final class DictationController {
         }
     }
 
-    /// Whether any Claude process (helpers included) is sending audio out; nil when CoreAudio cannot be read.
-    nonisolated static func claudeSendingAudio() -> Bool? {
-        CoreAudioInput.processes()?.contains { $0.isRunningOutput && $0.bundleID.hasPrefix(ClaudeLabels.bundleID) }
+    /// How many Claude processes (helpers included) are sending audio out; nil when CoreAudio cannot be read.
+    nonisolated static func claudeOutputs() -> Int? {
+        CoreAudioInput.processes()?.filter { $0.isRunningOutput && $0.bundleID.hasPrefix(ClaudeLabels.bundleID) }.count
+    }
+
+    /// The last confirmed stop's look at Claude's output: true when Ensemble should play the stop sound.
+    private var stopSoundCheck: Task<Bool, Never>?
+
+    /// Looks at Claude's output `DictationAudio.claudeSoundWindow` after a press: true when Ensemble should play.
+    private static func soundCheck(before: Int?) -> Task<Bool, Never> {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(DictationAudio.claudeSoundWindow * 1e9))
+            let after = await Task.detached { Self.claudeOutputs() }.value
+            return DictationAudio.ensemblePlays(claudeOutputsBefore: before, claudeOutputsAfter: after)
+        }
+    }
+
+    /// The stop sound for the last confirmed stop, unless Claude played its own: the stop banner's cue and the
+    /// "Kept, not sent" cue of a thumbs-up let go both come here.
+    func playStopSound() {
+        playDictationSound(.stop, check: stopSoundCheck ?? Task { true })
     }
 
     /// Claude plays its dictation sounds only after a real user gesture, which Ensemble's press is not: unless
-    /// Claude is seen starting audio right after the press, Ensemble plays Claude's sound itself. The output volume
+    /// Claude's output is seen rising right after the press, Ensemble plays Claude's sound itself. The output volume
     /// is never lowered (DictationAudio), and on Bluetooth the sound waits out the headset's profile switch.
-    private func playDictationSound(_ sound: ClaudeDictationSound, claudeOutputBefore: Bool?) {
+    private func playDictationSound(_ sound: ClaudeDictationSound, check: Task<Bool, Never>) {
         let bluetooth = MediaDucker.defaultOutput().map(MediaDucker.isBluetooth) ?? false
         let delay = DictationAudio.soundDelay(outputIsBluetooth: bluetooth)
+        let started = CACurrentMediaTime()
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(DictationAudio.claudeSoundWindow * 1e9))
-            let after = await Task.detached { Self.claudeSendingAudio() }.value
-            guard DictationAudio.ensemblePlays(claudeOutputBefore: claudeOutputBefore, claudeOutputAfter: after) else {
+            guard await check.value else {
                 EnsembleLog.write("Claude played its own dictation \(sound == .start ? "start" : "stop") sound")
                 return
             }
-            let rest = delay - DictationAudio.claudeSoundWindow
+            let rest = delay - (CACurrentMediaTime() - started)
             if rest > 0 { try? await Task.sleep(nanoseconds: UInt64(rest * 1e9)) }
             Notifier.shared.playDictationSound(sound)
         }
