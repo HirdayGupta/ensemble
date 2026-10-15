@@ -32,6 +32,8 @@ final class DictationController {
 
     /// Ends everything that was about to act and stops the dictation (wired by the Coordinator).
     var interrupt: (String) -> Void = { _ in }
+    /// Every stop's outcome, by any route: true when the microphone was confirmed off (wired by the Coordinator).
+    var stopResolved: (Bool) -> Void = { _ in }
 
     init(ctx: CoordinatorContext, focus: FocusController, send: SendController) {
         self.ctx = ctx
@@ -51,9 +53,12 @@ final class DictationController {
         }.store(in: &cancellables)
         safety.onAlarm = { [weak self] msg in
             self?.ctx.refuse("Alarm: \(msg)")
-            Notifier.shared.notify(title: "Claude's microphone may still be on", body: msg)
+            Notifier.shared.alarm(title: "Claude's microphone may still be on", body: msg)
         }
-        safety.onMuted = { [weak self] muted in self?.ctx.state.muted = muted }
+        safety.onMuted = { [weak self] muted in
+            self?.ctx.state.muted = muted
+            if !muted { Notifier.shared.resolveAlarm() }   // the mute is undone only after a definite "off"
+        }
         safety.onHoldEnded = { [weak self] why in
             MainActor.assumeIsolated {
                 guard let self, self.ctx.listening != nil else { return }
@@ -102,6 +107,11 @@ final class DictationController {
                 self.inputDevice = self.ctx.bridge.defaultInputDeviceName()
                 self.safety.episodeConfirmed()
                 if next != .stopSwitchedOff { Notifier.shared.playCue(.listenStart) }
+                // Pressing the microphone can leave the keyboard on the button; a key typed while dictating belongs in
+                // this session's message box.
+                if next == .keepListening {
+                    Task { @MainActor in EnsembleLog.write(await self.ctx.bridge.focusComposerIfNeeded(session)) }
+                }
             case .refused(let why), .unknown(let why):
                 self.ctx.listening = nil
                 self.ctx.state.listening = false
@@ -133,6 +143,7 @@ final class DictationController {
             self.meter.stop()
             self.safety.episodeEnded()
             if self.ctx.gestures.talking { self.ctx.gestures.reset() }
+            let sendByReturn = self.send.afterStopByReturn
             if case .done = result {} else { self.send.afterStop = false; self.focus.clearAfterStop() }
             switch result {
             case .done:
@@ -155,12 +166,14 @@ final class DictationController {
                 if self.send.afterStop {
                     self.send.afterStop = false
                     // Claude finalises the transcript a moment after the mic stops.
-                    Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); self.send.request() }
+                    Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); self.send.request(byReturn: sendByReturn) }
                 }
                 Notifier.shared.playCue(.listenEnd)
+                self.stopResolved(true)
             case .refused(let why), .unknown(let why):
                 EnsembleLog.write("stop dictation \(result): \(self.ctx.bridge.micSnapshot)")
                 self.ctx.refuse("Stop not confirmed (\(why)); the safety check keeps watching")
+                self.stopResolved(false)
                 self.checkClaudeUpdate()
             }
             self.ctx.changed()
@@ -234,6 +247,7 @@ final class DictationController {
         safety.episodeEnded()
         send.afterStop = false; focus.clearAfterStop()
         ctx.gestures.reset()
+        stopResolved(false)
         ctx.changed()
     }
 

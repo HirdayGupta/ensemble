@@ -107,6 +107,12 @@ extension ClaudeBridge {
         return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
     }
 
+    /// Clicks only, for a send asked for with Return: the keys are watched separately.
+    static func secondsSinceClick() -> Double {
+        let types: [CGEventType] = [.leftMouseDown, .rightMouseDown]
+        return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+    }
+
     static func secondsSinceUserInput() -> Double {
         let types: [CGEventType] = [.keyDown, .mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel]
         return types.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity

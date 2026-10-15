@@ -1,16 +1,35 @@
 import AppKit
 import AVFoundation
+import EnsembleCore
 
 /// Live permission facts and the Settings panes that fix them. Nothing here is cached: grants change while Ensemble runs.
 enum Permissions {
     static var accessibilityTrusted: Bool { AXIsProcessTrusted() }
 
-    /// False when the user has denied the camera or it is restricted; "not yet asked" counts as allowed.
-    static var cameraAllowed: Bool {
+    /// The three camera states the tour shows. Only "not asked" can still be answered with a prompt.
+    static var cameraAccess: CameraAccess {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .denied, .restricted: return false
-        default: return true
+        case .authorized: return .granted
+        case .notDetermined: return .notAsked
+        default: return .denied
         }
+    }
+
+    /// False only when the owner has denied the camera or it is restricted. Health uses this: "not yet asked" must
+    /// not read as a failure, because starting the camera is what asks.
+    static var cameraAllowed: Bool { cameraAccess != .denied }
+
+    /// Shows macOS's Camera prompt; a no-op once the owner has answered.
+    static func requestCamera() {
+        guard cameraAccess == .notAsked else { return }
+        AVCaptureDevice.requestAccess(for: .video) { _ in }
+    }
+
+    /// The prompt is shown only once per install, so a button that only re-asks does nothing the second time:
+    /// it also opens the Accessibility list for the owner to switch Ensemble on.
+    static func grantAccessibility() {
+        requestAccessibility()
+        openSettings(for: "Accessibility")
     }
 
     /// Shows the system's "would like to control this computer" prompt if Accessibility is not already granted.
@@ -30,12 +49,19 @@ enum Permissions {
     }
 
     /// Quits and opens Ensemble again so macOS applies a grant made while it ran. Quitting stops any dictation first
-    /// (the normal terminate path); a detached shell reopens the same bundle a moment after this process exits.
+    /// (the normal terminate path), which can take a few seconds, so a detached shell waits for this process to
+    /// exit (up to 10 s) before reopening: a copy started earlier would see this one alive and exit at once,
+    /// leaving nothing running. With open-at-login on, launchd is asked to start its job; otherwise the bundle is opened.
     static func relaunch() {
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        let script = """
+        i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+        if [ "$3" = 1 ]; then /bin/launchctl kickstart "gui/$4/$5" 2>/dev/null && exit 0; fi
+        /usr/bin/open "$2"
+        """
+        task.arguments = ["-c", script, "sh", String(getpid()), path, LoginAgent.isEnabled ? "1" : "0", String(getuid()), LoginAgent.label]
         try? task.run()
         NSApp.terminate(nil)
     }

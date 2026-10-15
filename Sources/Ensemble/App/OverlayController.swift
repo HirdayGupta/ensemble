@@ -62,6 +62,7 @@ final class OverlayController {
     private let model = OverlayModel()
     private var panels: [CGDirectDisplayID: OverlayPanel] = [:]
     private var bannerTask: Task<Void, Never>?
+    private var alarmID: UUID?
     private var screenObserver: NSObjectProtocol?
 
     init() {
@@ -127,6 +128,7 @@ final class OverlayController {
     }
 
     func showBanner(title: String, body: String, style: OverlayBanner.Style = .info, seconds: Double = 5) {
+        guard alarmID == nil else { return }   // an open safety alarm is never covered by a passing message
         let banner = OverlayBanner(title: title, body: body, style: style)
         model.banner = banner
         syncPanels()
@@ -139,8 +141,26 @@ final class OverlayController {
         }
     }
 
+    /// The safety alarm (Claude's microphone may still be on). Stays on screen until `resolveAlarm`, whatever the
+    /// system's notification permission or Focus setting does with the notification that goes with it.
+    func showAlarm(title: String, body: String) {
+        let banner = OverlayBanner(title: title, body: body, style: .refused)
+        alarmID = banner.id
+        bannerTask?.cancel()
+        model.banner = banner
+        syncPanels()
+    }
+
+    func resolveAlarm() {
+        guard let id = alarmID else { return }
+        alarmID = nil
+        if model.banner?.id == id { model.banner = nil }
+        syncPanels()
+    }
+
     /// A new action starts: an older message must not reappear once that action's own feedback ends.
     func clearBanner() {
+        guard alarmID == nil else { return }
         bannerTask?.cancel()
         guard model.banner != nil else { return }
         model.banner = nil

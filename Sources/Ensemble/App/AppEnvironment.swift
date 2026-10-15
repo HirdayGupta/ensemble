@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import Carbon.HIToolbox
+import EnsembleCore
 
 /// Owns the long-lived objects and wires them together.
 @MainActor
@@ -16,7 +17,7 @@ final class AppEnvironment {
 
     private(set) lazy var coordinator: AppCoordinating = makeCoordinator(state: state, settings: settings, overlay: overlay)
     private(set) lazy var panelActions = PanelActions(
-        calibrate: { [weak self] in self?.dismissMenuPanel(); self?.coordinator.calibrate() },
+        calibrate: { [weak self] in self?.dismissMenuPanel(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
         openSettings: { [weak self] in self?.dismissMenuPanel(); self?.settingsWindow.show() },
         checkForUpdates: { [weak self] in self?.dismissMenuPanel(); self?.updates.checkForUpdates() },
         startTour: { [weak self] in self?.dismissMenuPanel(); self?.tourWindow.show() },
@@ -27,14 +28,20 @@ final class AppEnvironment {
         let controller = TourWindowController(state: state, settings: settings) { [unowned self] step, singleStep, close in
         TourModel(
             settings: settings, startAt: step, singleStep: singleStep,
-            calibrate: { [weak self] in self?.coordinator.calibrate() },
-            requestAccessibility: { Permissions.requestAccessibility() },
+            calibrate: { [weak self] in self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
+            requestAccessibility: { Permissions.grantAccessibility() },
             enterPractice: { [weak self] sink in self?.coordinator.enterGesturePractice(sink) },
             exitPractice: { [weak self] in self?.coordinator.exitGesturePractice() },
+            stepEntered: { [weak self] step in
+                if FirstRunGate.stepNeedsCoordinator(step) { self?.startCoordinatorIfNeeded() }
+            },
             close: close)
         }
         controller.onOpen = { [weak self] in self?.coordinator.enterTour() }
-        controller.onClose = { [weak self] in self?.coordinator.exitTour() }
+        controller.onClose = { [weak self] in
+            self?.coordinator.exitTour()
+            self?.startCoordinatorIfNeeded()
+        }
         return controller
     }()
     private(set) lazy var floatingPanel = FloatingPanelController { [unowned self] in
@@ -46,7 +53,7 @@ final class AppEnvironment {
     }
     private(set) lazy var settingsWindow = SettingsWindowController { [unowned self] in
         AnyView(SettingsView(state: state, settings: settings, updates: updates,
-                              calibrate: { [weak self] request in self?.coordinator.calibrate(request) },
+                              calibrate: { [weak self] request in self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate(request) },
                               removeSpot: { [weak self] id in self?.coordinator.removeCalibrationSpot(id) },
                               replayTour: { [weak self] step in
                                   if let step { self?.tourWindow.show(startAt: step, singleStep: true) } else { self?.tourWindow.show() }
@@ -56,10 +63,11 @@ final class AppEnvironment {
     private var hotKey: GlobalHotKey?
     private var cancellables = Set<AnyCancellable>()
     private var started = false
+    private var coordinatorStarted = false
 
     private var floatingActions: PanelActions {
         PanelActions(
-            calibrate: { [weak self] in self?.floatingPanel.hide(); self?.coordinator.calibrate() },
+            calibrate: { [weak self] in self?.floatingPanel.hide(); self?.startCoordinatorIfNeeded(); self?.coordinator.calibrate() },
             openSettings: { [weak self] in self?.floatingPanel.hide(); self?.settingsWindow.show() },
             checkForUpdates: { [weak self] in self?.floatingPanel.hide(); self?.updates.checkForUpdates() },
             startTour: { [weak self] in self?.floatingPanel.hide(); self?.tourWindow.show() },
@@ -87,9 +95,27 @@ final class AppEnvironment {
             MainActor.assumeIsolated { self?.floatingPanel.toggle() }
         }
 
-        coordinator.start()
+        // A new owner sees the tour before any permission prompt: the camera and the Accessibility prompt wait
+        // until the tour leaves Welcome or closes. The safety sweep never waits.
+        if FirstRunGate.shouldDeferStart(tourCompleted: settings.tourCompleted, tourSkipped: settings.tourSkipped) {
+            coordinator.recoverAtLaunch()
+            tourWindow.show()
+        } else {
+            startCoordinatorIfNeeded()
+        }
+        offerMoveToApplications()
+    }
 
-        if !settings.tourCompleted && !settings.tourSkipped { tourWindow.show() }
+    private func startCoordinatorIfNeeded() {
+        guard !coordinatorStarted else { return }
+        coordinatorStarted = true
+        coordinator.start()
+    }
+
+    /// Running from the disk image or Downloads: offer the standard move, once per install location.
+    private func offerMoveToApplications() {
+        guard InstallLocation.isTemporary(bundlePath: Bundle.main.bundlePath, home: NSHomeDirectory()) else { return }
+        DispatchQueue.main.async { InstallMover.offer() }
     }
 
     func stop() {

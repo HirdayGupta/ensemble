@@ -9,7 +9,7 @@ final class TourModel: ObservableObject, TourPracticeSink {
     @Published private(set) var step: TourStep
     @Published private(set) var practiceDone: Set<TourGestureTab> = []
     @Published var activeTab: TourGestureTab = .dictate
-    @Published var cameraGranted = Permissions.cameraAllowed
+    @Published var cameraAccess = Permissions.cameraAccess
     @Published var accessibilityGranted = Permissions.accessibilityTrusted
 
     let isSingleStep: Bool
@@ -20,6 +20,8 @@ final class TourModel: ObservableObject, TourPracticeSink {
     private let enterPractice: (TourPracticeSink) -> Void
     private let exitPractice: () -> Void
     private let close: () -> Void
+    /// Told as each step opens, so the app can hold the camera and the Accessibility prompt back on Welcome.
+    private let stepEntered: (TourStep) -> Void
 
     /// What the system currently sees of the owner's hand, for the gestures step's inset.
     let handInset = TourHandInsetModel()
@@ -31,6 +33,7 @@ final class TourModel: ObservableObject, TourPracticeSink {
     init(settings: SettingsStore, startAt step: TourStep = .welcome, singleStep: Bool = false,
          calibrate: @escaping () -> Void, requestAccessibility: @escaping () -> Void,
          enterPractice: @escaping (TourPracticeSink) -> Void, exitPractice: @escaping () -> Void,
+         stepEntered: @escaping (TourStep) -> Void = { _ in },
          close: @escaping () -> Void) {
         self.settings = settings
         self.isSingleStep = singleStep
@@ -41,6 +44,7 @@ final class TourModel: ObservableObject, TourPracticeSink {
         self.enterPractice = enterPractice
         self.exitPractice = exitPractice
         self.close = close
+        self.stepEntered = stepEntered
     }
 
     var canGoBack: Bool { machine.canGoBack }
@@ -98,6 +102,7 @@ final class TourModel: ObservableObject, TourPracticeSink {
     }
 
     private func enteringStep(_ step: TourStep) {
+        stepEntered(step)
         if step == .gestures { startPracticing() }
         if step == .permissions { refreshPermissions() } else { permissionsTimer?.invalidate() }
     }
@@ -144,13 +149,13 @@ final class TourModel: ObservableObject, TourPracticeSink {
     // MARK: - Permissions (step 4)
 
     private func refreshPermissions() {
-        cameraGranted = Permissions.cameraAllowed
+        cameraAccess = Permissions.cameraAccess
         accessibilityGranted = Permissions.accessibilityTrusted
         permissionsTimer?.invalidate()
         permissionsTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.step == .permissions else { return }
-                self.cameraGranted = Permissions.cameraAllowed
+                self.cameraAccess = Permissions.cameraAccess
                 self.accessibilityGranted = Permissions.accessibilityTrusted
             }
         }
