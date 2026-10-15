@@ -9,6 +9,10 @@ protocol AppCoordinating: AnyObject {
     /// Called once as the app quits; must finish within about two seconds and leave nothing recording.
     func shutdown()
     var cameraNames: [String] { get }
+    /// While the tour's gesture-practice step is open, real gesture intents and head readings go to `sink`
+    /// instead of acting on Claude. Ends any dictation in progress first, the same as `calibrate()` does.
+    func enterGesturePractice(_ sink: TourPracticeSink)
+    func exitGesturePractice()
 }
 
 /// The integrator replaces the body of this factory (in another file) with the real coordinator.
@@ -56,6 +60,8 @@ final class StubCoordinator: AppCoordinating {
 
     func shutdown() { stop(disarm: false) }
 
+    func enterGesturePractice(_ sink: TourPracticeSink) {}
+    func exitGesturePractice() {}
 
     func calibrate() {
         guard !state.calibrating else { return }

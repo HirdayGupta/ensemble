@@ -23,6 +23,8 @@ final class SettingsStore: ObservableObject {
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
         static let lastClaudeVersion = "lastClaudeVersion"
+        static let tourCompleted = "tourCompleted"
+        static let tourSkipped = "tourSkipped"
         static let setupProfiles = "setupProfiles"
     }
 
@@ -66,6 +68,10 @@ final class SettingsStore: ObservableObject {
     @Published var calibrationDisplays: String? { didSet { defaults.set(calibrationDisplays, forKey: Key.calibrationDisplays) } }
     /// The Claude version the last confirmed dictation ran on.
     @Published var lastClaudeVersion: String? { didSet { defaults.set(lastClaudeVersion, forKey: Key.lastClaudeVersion) } }
+    /// The first-run tour has played to the end once.
+    @Published var tourCompleted: Bool { didSet { defaults.set(tourCompleted, forKey: Key.tourCompleted) } }
+    /// The owner skipped the first-run tour; the menu bar panel offers it until this or `tourCompleted` is true.
+    @Published var tourSkipped: Bool { didSet { defaults.set(tourSkipped, forKey: Key.tourSkipped) } }
     /// Opaque blob written by the coordinator: an `EnsembleCore.SetupProfiles`, one calibration per camera,
     /// tagged per screen. `calibration`/`calibrationDisplays` above are the single setup this replaces;
     /// they stay for the one-time migration into this on first launch after the upgrade.
@@ -92,6 +98,8 @@ final class SettingsStore: ObservableObject {
         calibratedAt = store.object(forKey: Key.calibratedAt) as? Date
         calibrationDisplays = store.string(forKey: Key.calibrationDisplays)
         lastClaudeVersion = store.string(forKey: Key.lastClaudeVersion)
+        tourCompleted = bool(Key.tourCompleted, false)
+        tourSkipped = bool(Key.tourSkipped, false)
         setupProfiles = store.data(forKey: Key.setupProfiles)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
