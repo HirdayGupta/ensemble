@@ -75,8 +75,9 @@ public final class NosePointer {
     /// How much nearer (cm) another spot's calibration must be before a screen switches to it, so a head halfway
     /// between two spots does not flicker between their maps.
     static let spotHysteresis = 6.0
-    /// Each side of a calibrated range is widened by this share of the range. The calibration dots sit 8% in
-    /// from each screen edge, so about 10% reaches the edge itself.
+    /// Each side of a calibrated range is widened by this share of the range, so a reading at the screen's edge and
+    /// the bezel beside it still reads as that screen. The dots sit 4% in from each edge (`CalibrationTargets`; 8% in
+    /// calibrations saved before 2026-10-15, where about 10% is what reaches the edge), so this covers both.
     static let regionExpansion = 0.15
 
     /// Set only by the legacy single-model path (`fit(_:)`, or a pre-profile saved model).
