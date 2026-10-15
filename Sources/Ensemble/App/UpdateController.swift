@@ -25,12 +25,23 @@ enum UpdateConfig {
 @MainActor
 final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     @Published private(set) var availableVersion: String?
+    /// What the last check found: "Ensemble 0.5.0 is available" or "Up to date". Nil until a check has finished;
+    /// the latest version is only ever known from a check the user started or automatic checks they turned on.
+    @Published private(set) var checkResult: String?
     @Published private(set) var autoInstall = false
     /// True while installing would interrupt the user (dictating, calibrating, tour open); set by the app.
     var isBusy: () -> Bool = { false }
     static let checkInterval: TimeInterval = 6 * 3600
     private var pendingInstall: (() -> Void)?
     private var installTimer: Timer?
+
+    /// The installed version, read from the bundle (no network): "Version 0.4.2 (42)".
+    static var installedVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "Version \(short) (\(build))"
+    }
 
     private var controller: SPUStandardUpdaterController!
     let isConfigured = UpdateConfig.isConfigured
@@ -85,6 +96,15 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? { UpdateConfig.feedURL }
 
     nonisolated func updaterShouldPromptForPermissionToCheck(forUpdates updater: SPUUpdater) -> Bool { false }
+
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
+        Task { @MainActor in self.checkResult = "Ensemble \(version) is available" }
+    }
+
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        Task { @MainActor in self.checkResult = "Up to date" }
+    }
 
     nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock: @escaping () -> Void) -> Bool {
         Task { @MainActor in
