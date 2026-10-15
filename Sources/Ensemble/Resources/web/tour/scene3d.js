@@ -17,13 +17,14 @@
   var WOOD_RIM = new THREE.Color(0xffd29a);
 
   var DURATIONS = { welcome: 8, look: 8, calibrate: 12, dictate: 6.4, send: 5.2, scroll: 5.6 };
-  var STATIC_T = { welcome: 0.8, look: 0.8, calibrate: 3.0, dictate: 0.65, send: 2.0, scroll: 2.2 };
+  var STATIC_T = { welcome: 0.8, look: 0.8, calibrate: 3.0, dictate: 0.66, send: 1.5, scroll: 2.3 };
   var HAND_SCENES = { dictate: 1, send: 1, scroll: 1 };
 
   function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
   function smooth(x) { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
   function lerp(a, b, k) { return a + (b - a) * k; }
   var D2R = Math.PI / 180;
+  var HAND_SCALE = 12.5;   // scene units per metre of rig hand
 
   // ------------------------------------------------------------------
   // Stage: sky gradient, fading grid floor
@@ -299,24 +300,50 @@
 
     function paneCentre(i) { return panes[i].group.getWorldPosition(new THREE.Vector3()); }
 
-    function screenPoint(mon, u, v) {  // u,v in -1..1 across the screen, inset
-      var p = new THREE.Vector3(u * (mon.w / 2 - 0.2), v * (mon.h / 2 - 0.2), 0.07);
-      return mon.group.localToWorld(p);
+    // Calibration points exactly as the app places them: centre, left, right, top, bottom,
+    // each inset 8% of the screen width / height from its edge. u, v: -1..1 across the inset area.
+    var CAL_INSET = 0.08;
+    function screenLocal(mon, u, v) {
+      return new THREE.Vector3(u * (mon.w / 2 - CAL_INSET * mon.w), v * (mon.h / 2 - CAL_INSET * mon.h), 0.07);
     }
+    function screenPoint(mon, u, v) { return mon.group.localToWorld(screenLocal(mon, u, v)); }
 
-    // calibration dot
-    var dot = new THREE.Group();
-    root.add(dot);
-    var dotDisc = new THREE.Mesh(track(new THREE.CircleGeometry(0.095, 28)), track(new THREE.MeshBasicMaterial({ color: ACCENT })));
-    dot.add(dotDisc);
-    var ringBase = new THREE.Mesh(track(new THREE.RingGeometry(0.19, 0.205, 64)), track(new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.28 })));
-    dot.add(ringBase);
-    var ringGeo = track(new THREE.RingGeometry(0.175, 0.225, 64, 1, 0, Math.PI * 2));
-    var ringFill = new THREE.Mesh(ringGeo, track(new THREE.MeshBasicMaterial({ color: 0xbfe0ff })));
-    ringFill.position.z = 0.002;
-    dot.add(ringFill);
-    var ringIdx = 64 * 6;
-    dot.visible = false;
+    // one marker per point, parented to its monitor so it lies flat on the glass
+    var CAL_S = 0.72;   // marker scale: ring outer radius ~0.16, close to the 8% inset on both screens
+    var calDots = [];
+    function makeCalDot(mon, u, v) {
+      var g = new THREE.Group();
+      g.position.copy(screenLocal(mon, u, v));
+      g.scale.setScalar(CAL_S);
+      g.visible = false;
+      mon.group.add(g);
+      var disc = new THREE.Mesh(track(new THREE.CircleGeometry(0.095, 28)), track(new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.3, depthWrite: false })));
+      g.add(disc);
+      var base = new THREE.Mesh(track(new THREE.RingGeometry(0.19, 0.205, 64)), track(new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.1, depthWrite: false })));
+      g.add(base);
+      var fillGeo = track(new THREE.RingGeometry(0.175, 0.225, 64, 1, 0, Math.PI * 2));
+      var fill = new THREE.Mesh(fillGeo, track(new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 1, depthWrite: false })));
+      fill.position.z = 0.002;
+      g.add(fill);
+      fillGeo.setDrawRange(0, 0);
+      return { group: g, disc: disc, base: base, fill: fill, fillGeo: fillGeo };
+    }
+    // state: 0 dim (waiting), 1 active (prog 0..1 fills the ring), 2 done
+    function setCalDot(d, state, prog, pulse) {
+      if (state === 1) {
+        d.disc.material.opacity = 1; d.disc.material.color.setHex(ACCENT);
+        d.base.material.opacity = 0.34;
+        d.fill.visible = true;
+        d.fillGeo.setDrawRange(0, Math.max(0, Math.round(prog * 64)) * 6);
+        d.disc.scale.setScalar(pulse);
+      } else {
+        d.disc.material.opacity = state === 2 ? 0.6 : 0.3;
+        d.disc.material.color.setHex(ACCENT);
+        d.base.material.opacity = state === 2 ? 0.3 : 0.14;
+        d.fill.visible = false;
+        d.disc.scale.setScalar(1);
+      }
+    }
 
     function aimHead(target, k) {
       var d = target.clone().sub(HEAD_POS);
@@ -366,19 +393,24 @@
     }
 
     var CAL = [];
-    [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]].forEach(function (uv) { CAL.push({ mon: main, u: uv[0], v: uv[1] }); });
-    [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]].forEach(function (uv) { CAL.push({ mon: port, u: uv[0], v: uv[1] }); });
+    var CAL_ORDER = [[0, 0], [-1, 0], [1, 0], [0, 1], [0, -1]];   // centre, left, right, top, bottom
+    [main, port].forEach(function (mon) {   // main screen first, then the portrait screen to its left
+      CAL_ORDER.forEach(function (uv) { CAL.push({ mon: mon, u: uv[0], v: uv[1] }); });
+    });
+    CAL.forEach(function (c) { calDots.push(makeCalDot(c.mon, c.u, c.v)); });
+    root.updateMatrixWorld(true);
     var calPos = null;
     function calPoints() {
-      if (!calPos) calPos = CAL.map(function (c) {
-        return { p: screenPoint(c.mon, c.u, c.v), q: c.mon.group.getWorldQuaternion(new THREE.Quaternion()) };
-      });
+      if (!calPos) calPos = CAL.map(function (c) { return { p: screenPoint(c.mon, c.u, c.v) }; });
       return calPos;
     }
 
     function update(name, t) {
       var st = { dot: -1, progress: 0 };
-      if (name === 'calibrate') {
+      var isCal = name === 'calibrate';
+      calDots.forEach(function (d) { d.group.visible = isCal; });
+      panes.forEach(function (p) { p.group.visible = !isCal; });   // calibration shows the points only, no sessions
+      if (isCal) {
         var pts = calPoints();
         var slot = DURATIONS.calibrate / pts.length;   // 1.2 s
         var idx = clamp(Math.floor(t / slot), 0, pts.length - 1);
@@ -387,20 +419,16 @@
         var cur = pts[idx];
         var mv = smooth(lt / 0.34);
         var pos = idx === 0 && t < slot ? cur.p.clone() : prev.p.clone().lerp(cur.p, mv);
-        var q = prev.q.clone().slerp(cur.q, mv);
-        if (idx === 0) q = cur.q.clone();
-        dot.visible = true;
-        dot.position.copy(pos); dot.quaternion.copy(q);
         var prog = clamp((lt - 0.36) / 0.62, 0, 1);
-        ringGeo.setDrawRange(0, Math.max(0, Math.round(prog * 64)) * 6);
         var pulse = prog >= 1 ? 1 + 0.18 * Math.sin((lt - 0.98) * 18) * clamp((1.15 - lt) * 6, 0, 1) : 1;
-        dotDisc.scale.setScalar(pulse);
+        for (var ci = 0; ci < calDots.length; ci++) {
+          setCalDot(calDots[ci], ci === idx ? 1 : ci < idx ? 2 : 0, ci === idx ? prog : 0, ci === idx ? pulse : 1);
+        }
         var aim = aimHead(pos.clone(), 0.9);
         rig.rotation.y = aim.yaw; rig.rotation.x = aim.pitch;
         setPaneHighlights([0, 0, 0, 0], true);
         st.dot = idx; st.progress = prog;
       } else {
-        dot.visible = false;
         var r = lookAt(t % 8);
         rig.rotation.y = r.yaw; rig.rotation.x = r.pitch;
         setPaneHighlights(r.hl, false);
@@ -409,6 +437,276 @@
     }
 
     return { root: root, update: update };
+  }
+
+  // ------------------------------------------------------------------
+  // Gesture stage: one monitor, flat to the viewer, lit by a drawn Claude desktop session
+  // ------------------------------------------------------------------
+  var SCR = { W: 8.6, H: 4.8375, cx: 1.2, cy: 3.35, z: -9.0 };
+  var DRAFT_TEXT = 'Log each retry with its attempt number.';
+  var SANS = '-apple-system, "SF Pro Text", "Segoe UI", system-ui, Helvetica, Arial, sans-serif';
+  var MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  var C = {
+    bg: '#1f1e1d', side: '#181716', pane: '#262624', line: '#3a3935', text: '#eeece6', dim: '#a09e96', faint: '#6f6d66',
+    bubble: '#3a3935', code: '#171716', orange: '#d97757', blue: '#5aa0ff'
+  };
+
+  function makeScreen() {
+    var W = 1280, H = 720, S = 1.5;
+    var cv = document.createElement('canvas');
+    cv.width = W * S; cv.height = H * S;
+    var ctx = cv.getContext('2d');
+    var tex = new THREE.CanvasTexture(cv);
+    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+
+    function rr(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+    }
+    function wrap(text, maxW, font) {
+      ctx.font = font;
+      var words = text.split(' '), lines = [], cur = '';
+      words.forEach(function (w) {
+        var tryL = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(tryL).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tryL;
+      });
+      if (cur) lines.push(cur);
+      return lines;
+    }
+    var F = '21px ' + SANS, LH = 31;
+    var CODE = [
+      ['async function', ' drain', '(q: Queue) {'],
+      ['  for', ' (let n = 0; n < 5; n++) {', ''],
+      ['    try', ' { return await q.flush(); }', ''],
+      ['    catch', ' { await sleep(2 ** n * 100); }', ''],
+      ['  }', '', ''],
+      ['}', '', '']
+    ];
+    var X0 = 296, X1 = 1236;   // conversation column
+
+    // returns [{kind,h,draw(y)}]
+    function userBubble(text) {
+      var lines = wrap(text, 520, F), w = 0;
+      lines.forEach(function (l) { w = Math.max(w, ctx.measureText(l).width); });
+      var bw = w + 40, bh = lines.length * LH + 26;
+      return { h: bh, draw: function (y, a) {
+        ctx.globalAlpha = a === undefined ? 1 : a;
+        ctx.fillStyle = C.bubble; rr(X1 - bw, y, bw, bh, 18); ctx.fill();
+        ctx.fillStyle = C.text; ctx.font = F; ctx.textBaseline = 'alphabetic';
+        lines.forEach(function (l, i) { ctx.fillText(l, X1 - bw + 20, y + 13 + 22 + i * LH - 3); });
+        ctx.globalAlpha = 1;
+      } };
+    }
+    function asst(text) {
+      var lines = wrap(text, 880, F);
+      return { h: lines.length * LH + 4, draw: function (y) {
+        ctx.fillStyle = C.orange; ctx.font = '600 24px ' + SANS; ctx.fillText('✻', X0 - 30, y + 22);
+        ctx.fillStyle = C.text; ctx.font = F;
+        lines.forEach(function (l, i) { ctx.fillText(l, X0, y + 22 + i * LH); });
+      } };
+    }
+    function tool(label, arg) {
+      return { h: 44, draw: function (y) {
+        ctx.fillStyle = '#2d2c2a'; rr(X0, y, 430, 40, 10); ctx.fill();
+        ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = C.dim; ctx.font = '600 17px ' + SANS; ctx.fillText(label, X0 + 16, y + 26);
+        ctx.fillStyle = C.text; ctx.font = '17px ' + MONO; ctx.fillText(arg, X0 + 16 + ctx.measureText(label).width + 22, y + 26);
+      } };
+    }
+    function code() {
+      var h = CODE.length * 27 + 44;
+      return { h: h, draw: function (y) {
+        ctx.fillStyle = C.code; rr(X0, y, 760, h, 14); ctx.fill();
+        ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = C.faint; ctx.font = '600 14px ' + SANS; ctx.fillText('sync.ts', X0 + 20, y + 26);
+        ctx.font = '18px ' + MONO;
+        CODE.forEach(function (ln, i) {
+          var x = X0 + 20, yy = y + 56 + i * 27;
+          ctx.fillStyle = '#e8a47e'; ctx.fillText(ln[0], x, yy); x += ctx.measureText(ln[0]).width;
+          ctx.fillStyle = ln[1].indexOf(' drain') === 0 ? '#8ec0ff' : '#d9d7cf'; ctx.fillText(ln[1], x, yy); x += ctx.measureText(ln[1]).width;
+          ctx.fillStyle = '#d9d7cf'; ctx.fillText(ln[2], x, yy);
+        });
+      } };
+    }
+    var shortList = [
+      userBubble('The sync job drops events when the queue is full. Can you add retries with backoff?'),
+      asst('On it. I read the worker and wrapped the flush call in a retry loop.'),
+      code(),
+      asst('Done: up to 5 attempts, waiting 100 ms and doubling each time. The sync tests still pass.')
+    ];
+    var longList = shortList.concat([
+      userBubble('Log each retry with its attempt number.'),
+      asst('Added a debug line in the catch block. It prints the attempt and the wait.'),
+      tool('Edit', 'src/worker/sync.ts   +3 −1'),
+      asst('All 14 tests pass. Want a metric for the final failure as well?')
+    ]);
+    var newBubble = userBubble(DRAFT_TEXT);
+    var GAP = 24;
+    function total(list) { var h = 0; list.forEach(function (m) { h += m.h + GAP; }); return h - GAP; }
+
+    var CONV_T = 116, CONV_B = 584;
+
+    function capsule(st, t) {
+      var mode = 'ready';
+      if (st.gesture === 'dictate') mode = st.listening ? 'listen' : 'ready';
+      else if (st.gesture === 'send') mode = st.sent ? 'sent' : (st.hold > 0 ? 'hold' : 'ready');
+      else if (st.gesture === 'scroll') mode = st.scroll > 0.02 ? 'scroll' : 'ready';
+      var label = { ready: 'Ready', listen: 'Listening', hold: 'Hold to send', sent: 'Sent', scroll: 'Scrolling' }[mode];
+      var w = { ready: 150, listen: 252, hold: 300, sent: 150, scroll: 190 }[mode], h = 42, x = 640 - w / 2, y = 4;
+      ctx.fillStyle = '#000'; rr(x, y, w, h, 21); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.2; ctx.stroke();
+      var dot = { ready: '#6f6d66', listen: C.orange, hold: C.blue, sent: '#58c27d', scroll: C.blue }[mode];
+      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6, 0, 6.2832); ctx.fill();
+      if (mode === 'listen') { ctx.fillStyle = dot; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6 + 4 * (0.5 + 0.5 * Math.sin(t * 7)), 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
+      ctx.fillStyle = '#fff'; ctx.font = '600 19px ' + SANS; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(label, x + 44, y + h / 2 + 7);
+      if (mode === 'listen') {
+        for (var i = 0; i < 6; i++) {
+          var a = 0.5 + 0.5 * Math.sin(t * 9 + i * 1.7) * Math.sin(t * 4.3 + i * 0.9);
+          var bh = 6 + 18 * Math.abs(a);
+          ctx.fillStyle = C.orange; rr(x + 156 + i * 14, y + h / 2 - bh / 2, 7, bh, 3.5); ctx.fill();
+        }
+      } else if (mode === 'hold') {
+        var bx = x + 168, bw = 112;
+        ctx.fillStyle = 'rgba(255,255,255,0.16)'; rr(bx, y + h / 2 - 4, bw, 8, 4); ctx.fill();
+        ctx.fillStyle = C.blue; rr(bx, y + h / 2 - 4, Math.max(8, bw * st.hold), 8, 4); ctx.fill();
+      } else if (mode === 'sent') {
+        ctx.strokeStyle = dot; ctx.lineWidth = 0;
+      }
+    }
+
+    function draw(st, name, t) {
+      var ev = eventsFor(name);
+      ctx.setTransform(S, 0, 0, S, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+      // menu bar
+      ctx.fillStyle = '#121110'; ctx.fillRect(0, 0, W, 30);
+      ctx.fillStyle = C.dim; ctx.font = '600 15px ' + SANS; ctx.fillText('Claude', 22, 21);
+      ctx.font = '15px ' + SANS; ctx.fillStyle = C.faint;
+      ['File', 'Edit', 'View', 'Window', 'Help'].forEach(function (m, i) { ctx.fillText(m, 100 + i * 62, 21); });
+      ctx.textAlign = 'right'; ctx.fillText('Tue 9:41', W - 22, 21); ctx.textAlign = 'left';
+      // sidebar
+      ctx.fillStyle = C.side; ctx.fillRect(0, 30, 232, H - 30);
+      [['#ff5f57', 0], ['#febc2e', 1], ['#28c840', 2]].forEach(function (d) { ctx.fillStyle = d[0]; ctx.beginPath(); ctx.arc(24 + d[1] * 22, 56, 6, 0, 6.2832); ctx.fill(); });
+      ctx.fillStyle = C.text; ctx.font = '600 18px ' + SANS; ctx.fillText('Code', 22, 106);
+      ctx.fillStyle = C.faint; ctx.font = '600 13px ' + SANS; ctx.fillText('SESSIONS', 22, 146);
+      var sess = [['ensemble-tour', 1], ['billing-fix', 0], ['docs-cleanup', 0], ['eval-harness', 0]];
+      sess.forEach(function (s, i) {
+        var y = 160 + i * 52;
+        if (s[1]) { ctx.fillStyle = '#2b2a28'; rr(10, y, 212, 44, 10); ctx.fill(); }
+        ctx.fillStyle = s[1] ? C.orange : '#4b4a45'; ctx.beginPath(); ctx.arc(30, y + 22, 5, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = s[1] ? C.text : C.dim; ctx.font = '17px ' + SANS; ctx.fillText(s[0], 46, y + 28);
+      });
+      // main pane
+      var PX = 246, PY = 42, PW = W - PX - 10, PH = H - PY - 10;
+      ctx.fillStyle = C.pane; rr(PX, PY, PW, PH, 16); ctx.fill();
+      // header
+      ctx.fillStyle = C.text; ctx.font = '600 21px ' + SANS; ctx.fillText('ensemble-tour', PX + 30, PY + 46);
+      ctx.fillStyle = '#34332f'; rr(PX + 190, PY + 26, 192, 32, 16); ctx.fill();
+      ctx.fillStyle = C.dim; ctx.font = '15px ' + MONO; ctx.fillText('feature/onboarding', PX + 206, PY + 48);
+      ctx.fillStyle = C.faint; ctx.font = '16px ' + SANS; ctx.textAlign = 'right'; ctx.fillText('Local  ·  Opus', PX + PW - 28, PY + 46); ctx.textAlign = 'left';
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PX, PY + 74); ctx.lineTo(PX + PW, PY + 74); ctx.stroke();
+
+      // conversation (clipped)
+      ctx.save();
+      ctx.beginPath(); ctx.rect(PX + 4, CONV_T - 8, PW - 8, CONV_B - CONV_T + 8); ctx.clip();
+      var list, y0;
+      var sendK = 0, sendA = 0, push = 0;
+      if (name === 'scroll') {
+        list = longList;
+        var maxS = Math.max(0, total(list) - (CONV_B - CONV_T));
+        y0 = CONV_T - Math.min(maxS, 250) * st.scroll;
+      } else {
+        list = shortList;
+        var showNew = name === 'send' && t >= ev.sentAt;
+        if (showNew) {
+          sendK = sstep((t - ev.sentAt) / 0.55);
+          push = sendK * (newBubble.h + GAP) * (1 - sstep((t - ev.pushOff) / 0.5));
+        }
+        y0 = CONV_B - total(list) - push;
+        if (name === 'send' && showNew) sendA = 1;
+      }
+      var y = y0;
+      list.forEach(function (m) { m.draw(y); y += m.h + GAP; });
+      if (name === 'send' && sendA) {
+        // the draft travels up from the message box to the end of the conversation
+        var finalY = CONV_B - newBubble.h;
+        var startY = 640 - newBubble.h / 2;
+        var yy = startY + (finalY - startY) * sendK;
+        var fade = t > ev.fadeAt ? 1 - sstep((t - ev.fadeAt) / 0.4) : 1;
+        ctx.restore(); ctx.save();
+        ctx.beginPath(); ctx.rect(PX + 4, CONV_T - 8, PW - 8, 700); ctx.clip();
+        newBubble.draw(yy, fade);
+      }
+      ctx.restore();
+
+      // composer
+      var CX0 = PX + 30, CY0 = 596, CW = PW - 60, CH = 100;
+      ctx.fillStyle = '#30302d'; rr(CX0, CY0, CW, CH, 18); ctx.fill();
+      ctx.strokeStyle = '#4a4944'; ctx.lineWidth = 1.5; ctx.stroke();
+      var text = '', caret = false, textA = 1;
+      if (name === 'dictate') {
+        var words = DRAFT_TEXT.split(' '), n = Math.round(st.draft * words.length);
+        text = words.slice(0, n).join(' ');
+        // words clear at the loop end so the cycle restarts empty
+        if (t > ev.clearAt) text = '';
+        caret = st.listening && Math.floor(t * 2.4) % 2 === 0;
+      } else if (name === 'send') {
+        if (t < ev.sentAt || t > ev.textBack) text = DRAFT_TEXT;
+        if (t > ev.textBack) textA = sstep((t - ev.textBack) / 0.35);
+      }
+      ctx.font = F; ctx.textBaseline = 'alphabetic';
+      if (text) {
+        ctx.globalAlpha = textA; ctx.fillStyle = C.text; ctx.fillText(text, CX0 + 26, CY0 + 44); ctx.globalAlpha = 1;
+        if (caret) { var cw = ctx.measureText(text).width; ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 28 + cw, CY0 + 24, 2.5, 26); }
+      } else {
+        if (caret) { ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 28, CY0 + 24, 2.5, 26); }
+        ctx.fillStyle = C.faint; ctx.fillText(caret || st.listening ? '' : 'Reply to Claude…', CX0 + 26, CY0 + 44);
+      }
+      ctx.fillStyle = C.faint; ctx.font = '16px ' + SANS; ctx.fillText('Plan mode   ·   Opus   ·   Auto-accept off', CX0 + 26, CY0 + 82);
+      var sendOn = !!text;
+      ctx.fillStyle = sendOn ? C.orange : '#4a4944'; ctx.beginPath(); ctx.arc(CX0 + CW - 38, CY0 + CH / 2, 21, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = '#1f1e1d'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+      ctx.moveTo(CX0 + CW - 38, CY0 + CH / 2 + 8); ctx.lineTo(CX0 + CW - 38, CY0 + CH / 2 - 8);
+      ctx.moveTo(CX0 + CW - 46, CY0 + CH / 2 - 1); ctx.lineTo(CX0 + CW - 38, CY0 + CH / 2 - 9); ctx.lineTo(CX0 + CW - 30, CY0 + CH / 2 - 1); ctx.stroke();
+
+      // Ensemble focus: blue outline only, never filled
+      ctx.strokeStyle = C.blue; ctx.lineWidth = 4; rr(PX - 2, PY - 2, PW + 4, PH + 4, 18); ctx.stroke();
+      capsule(st, t);
+      tex.needsUpdate = true;
+    }
+    return { tex: tex, draw: draw, canvas: cv };
+  }
+
+  function buildGestureStage(scene, disposables) {
+    var g = new THREE.Group();
+    scene.add(g);
+    function track(o) { disposables.push(o); return o; }
+    var w = SCR.W, h = SCR.H;
+    var mon = new THREE.Group();
+    mon.position.set(SCR.cx, SCR.cy, SCR.z);
+    g.add(mon);
+    var boxGeo = track(new THREE.BoxGeometry(w + 0.34, h + 0.34, 0.2));
+    mon.add(new THREE.Mesh(boxGeo, track(new THREE.MeshBasicMaterial({ color: 0x0a1018 }))));
+    mon.add(new THREE.LineSegments(track(new THREE.EdgesGeometry(boxGeo)), track(lineMat(0x9db5d8, 1))));
+    var screen = makeScreen();
+    var sm = new THREE.Mesh(track(new THREE.PlaneGeometry(w, h)), track(new THREE.MeshBasicMaterial({ map: screen.tex })));
+    sm.position.z = 0.102;
+    mon.add(sm);
+    disposables.push(screen.tex);
+    var sf = new THREE.Mesh(track(frameGeometry(w + 0.03, h + 0.03, 0.03)), track(new THREE.MeshBasicMaterial({ color: 0x5c7298 })));
+    sf.position.z = 0.104; mon.add(sf);
+    // stand and base, floor level
+    var yb = -SCR.cy + 0.02;
+    var stand = [];
+    [-0.12, 0, 0.12].forEach(function (dx) { stand.push(new THREE.Vector3(dx, -h / 2 - 0.17, -0.12), new THREE.Vector3(dx, yb, -0.3)); });
+    mon.add(new THREE.LineSegments(track(new THREE.BufferGeometry().setFromPoints(stand)), track(lineMat(0x6f84a6, 1))));
+    g.visible = false;
+    return { group: g, screen: screen };
   }
 
   // ------------------------------------------------------------------
@@ -551,10 +849,10 @@
     // short forearm so the wrist is not cut off flat
     var mc = chains['middle-finger'][0].position.clone();   // wrist -> middle metacarpal, in wrist space
     var fdir = mc.clone().normalize().negate();
-    var armGeo = new THREE.CylinderGeometry(0.033, 0.03, 0.16, 24, 1, true);
-    armGeo.translate(0, 0.08, 0);
+    var armGeo = new THREE.CylinderGeometry(0.046, 0.031, 0.42, 24, 1, true);
+    armGeo.translate(0, 0.21, 0);
     var armMat = rimMaterial(WOOD_FILL, WOOD_RIM, 0.3, false, 0.8);
-    armMat.uniforms.uGrain.value = 1.0; armMat.uniforms.uFadeLen.value = 0.16;
+    armMat.uniforms.uGrain.value = 1.0; armMat.uniforms.uFadeLen.value = 0.42;
     var arm = new THREE.Mesh(armGeo, armMat);
     arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fdir);
     arm.position.copy(fdir.clone().multiplyScalar(0.004));
@@ -567,7 +865,7 @@
     var pivot = new THREE.Group();
     pivot.add(model);
     model.position.copy(P['wrist']).negate();
-    var scale = 11.5;
+    var scale = HAND_SCALE;
     pivot.scale.setScalar(scale);
     scene.add(pivot);
 
@@ -581,16 +879,50 @@
     hand.thumbDir0 = d0;
     hand.thumbUpDir = new THREE.Vector3(0.12, -0.34, -0.93).normalize();
     hand.qSwing = new THREE.Quaternion().setFromUnitVectors(d0, hand.thumbUpDir);
+
+    // --- data for retargeting recorded motion ---
+    // rest local rotation and child direction of every chained bone
+    hand.restLocal = {}; hand.childDir = {};
+    Object.keys(chains).forEach(function (f) {
+      var list = chains[f];
+      for (var i = 0; i < list.length; i++) {
+        var pq = i === 0 ? W['wrist'] : W[list[i - 1].name];
+        hand.restLocal[list[i].name] = pq.clone().invert().multiply(W[list[i].name]);
+        hand.childDir[list[i].name] = i < list.length - 1 ? list[i + 1].position.clone().normalize() : null;
+      }
+    });
+    // palm frame at rest: F wrist -> knuckle line midpoint, L index -> pinky, N toward the palm (-x in this rig)
+    var idxP = P['index-finger-phalanx-proximal'], pnkP = P['pinky-finger-phalanx-proximal'], wP = P['wrist'];
+    var Fr = idxP.clone().add(pnkP).multiplyScalar(0.5).sub(wP).normalize();
+    var L0 = pnkP.clone().sub(idxP);
+    var FxL = new THREE.Vector3().crossVectors(Fr, L0).normalize();
+    hand.chirality = FxL.dot(new THREE.Vector3(-1, 0, 0)) >= 0 ? 1 : -1;   // +1: right hand (F x L points to the palm)
+    var Nr = FxL.clone().multiplyScalar(hand.chirality);
+    var Lr = new THREE.Vector3().crossVectors(Nr, Fr).multiplyScalar(hand.chirality);
+    hand.rigF = Fr; hand.rigL = Lr; hand.rigN = Nr;
+    hand.rigQ = frameQuat(Fr, Nr);
+    hand.palmSize = P['middle-finger-phalanx-proximal'].distanceTo(wP);   // metres, wrist -> middle knuckle
     return hand;
+  }
+
+  // rotation taking the frame (x = F, y = N, z = F x N) to the world
+  function frameQuat(F, N) {
+    var X = new THREE.Vector3().crossVectors(F, N);
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(F, N, X));
   }
 
   var AX_CURL = new THREE.Vector3(0, 0, -1);   // curl toward the palm (palm faces -x, fingers point -y)
   var AX_SPREAD = new THREE.Vector3(1, 0, 0);  // spread about the palm normal
-  var qA = new THREE.Quaternion(), qB = new THREE.Quaternion(), qC = new THREE.Quaternion(), qD = new THREE.Quaternion();
+  var qA = new THREE.Quaternion(), qB = new THREE.Quaternion(), qC = new THREE.Quaternion();
+
+  // resting curvature (mcp, pip, dip) and full-fist angles per finger, degrees; hard joint limits below
+  var BASE_ANG = [[12, 20, 9], [16, 24, 11], [20, 28, 13], [24, 32, 15]];
+  var FULL_ANG = [[88, 102, 62], [88, 102, 64], [90, 104, 66], [90, 104, 66]];
+  var LIM_ANG = [96, 112, 80];
 
   function poseHand(hand, p) {
     var W = hand.W, ch = hand.chains;
-    hand.pivot.quaternion.copy(orthoBasisQuat(p.f, p.pn));
+    hand.pivot.quaternion.copy(p.q);
     hand.pivot.position.set(p.x, p.y, p.z);
     hand.model.updateMatrixWorld(true);
     var wristQ = W['wrist'];
@@ -599,10 +931,11 @@
     var spreadSign = [0.5, 0.12, -0.35, -1.0];
     for (var fi = 0; fi < 4; fi++) {
       var list = ch[FINGERS[fi]];
-      var c = curls[fi];
-      var tune = [1, 1, 1.08, 1.15][fi];
-      var ang = [0, c * 82 * D2R * tune, c * 98 * D2R * tune, c * 62 * D2R * tune, c * 62 * D2R * tune];
-      ang[0] = c * 4 * D2R * fi;   // slight cupping of ring/pinky metacarpals
+      var c = clamp(curls[fi], 0, 1.04), b = BASE_ANG[fi], fu = FULL_ANG[fi];
+      var a1 = Math.min(b[0] + c * (fu[0] - b[0]), LIM_ANG[0]);
+      var a2 = Math.min(b[1] + c * (fu[1] - b[1]), LIM_ANG[1]);
+      var a3 = Math.min(b[2] + c * (fu[2] - b[2]), LIM_ANG[2]);
+      var ang = [fi * 1.2 * (0.4 + c) * D2R, a1 * D2R, a2 * D2R, a3 * D2R, a3 * D2R];
       var cum = 0;
       var parentPose = wristQ;
       for (var i = 0; i < list.length; i++) {
@@ -621,137 +954,239 @@
     var tpose = wristQ;
     var flex = [0, p.tflex * 8 * D2R, p.tflex * 14 * D2R, 0];
     var tcum = 0;
+    if (!hand.thumbFlexAxis) hand.thumbFlexAxis = new THREE.Vector3(0.3, 0.2, -0.93).normalize();
     for (var j = 0; j < tl.length; j++) {
       tcum += flex[j];
       var tw = W[tl[j].name];
-      qA.setFromAxisAngle(hand.thumbFlexAxis || (hand.thumbFlexAxis = new THREE.Vector3(0.3, 0.2, -0.93).normalize()), tcum);
+      qA.setFromAxisAngle(hand.thumbFlexAxis, tcum);
       qC.copy(sw).multiply(qA).multiply(tw);
       tl[j].quaternion.copy(tpose).invert().multiply(qC);
       tpose = qC.clone();
     }
     hand.model.updateMatrixWorld(true);
-    // pinch via IK: thumb tip chases the index tip pad
-    if (p.pinch > 0.001) {
-      var names = ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal'];
-      var maxA = [hand.limits[0], hand.limits[1], hand.limits[2]];
-      var fk = names.map(function (n) { return hand.bones[n].quaternion.clone(); });
-      for (var it = 0; it < 16; it++) {
-        hand.solver.update();   // one CCD sweep (iteration: 1)
-        for (var m = 0; m < names.length; m++) {
-          var bq = hand.bones[names[m]].quaternion;
-          var ang = bq.angleTo(fk[m]);
-          if (ang > maxA[m]) bq.copy(fk[m]).slerp(bq, maxA[m] / ang);
-        }
-        hand.bones[names[0]].updateMatrixWorld(true);
-      }
-      var k = smooth(p.pinch);
-      for (var n2 = 0; n2 < names.length; n2++) {
-        var ik = hand.bones[names[n2]].quaternion.clone();
-        hand.bones[names[n2]].quaternion.copy(fk[n2]).slerp(ik, k);
-      }
-      hand.model.updateMatrixWorld(true);
-    }
+    // pinch via IK: thumb tip chases the index tip pad; weight blends FK thumb -> IK thumb
+    if (p.pinch > 0.001) pinchIK(hand, p.pinch);
   }
 
-  // ---- hand keyframes ----
-  function P0() {
-    return {
-      ci: 0.05, cm: 0.06, cr: 0.09, cp: 0.12, spread: 0.6, swing: 0, tflex: 0, pinch: 0,
-      f: new THREE.Vector3(0.18, 0.95, -0.2), pn: new THREE.Vector3(0.5, 0.08, 0.85),
-      x: 0, y: 0.7, z: 0
-    };
+  // the thumb chases the index pad (CCD IK, joint-limited); weight 0..1 blends from the current FK thumb
+  function pinchIK(hand, weight) {
+    var names = ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal'];
+    var maxA = [hand.limits[0], hand.limits[1], hand.limits[2]];
+    var fk = names.map(function (n) { return hand.bones[n].quaternion.clone(); });
+    for (var it = 0; it < 16; it++) {
+      hand.solver.update();
+      for (var m = 0; m < names.length; m++) {
+        var bq = hand.bones[names[m]].quaternion;
+        var an = bq.angleTo(fk[m]);
+        if (an > maxA[m]) bq.copy(fk[m]).slerp(bq, maxA[m] / an);
+      }
+      hand.bones[names[0]].updateMatrixWorld(true);
+    }
+    var k = clamp(weight, 0, 1);
+    for (var n2 = 0; n2 < names.length; n2++) {
+      var ik = hand.bones[names[n2]].quaternion.clone();
+      hand.bones[names[n2]].quaternion.copy(fk[n2]).slerp(ik, k);
+    }
+    hand.model.updateMatrixWorld(true);
   }
-  function pose(over) {
-    var p = P0();
-    Object.keys(over || {}).forEach(function (k) { p[k] = (over[k] && over[k].isVector3) ? over[k].clone() : over[k]; });
-    return p;
+
+  // ------------------------------------------------------------------
+  // Motion: keyed channels (smootherstep between keys) -> critically damped follower -> baked loop table.
+  // ------------------------------------------------------------------
+  function sstep(x) { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); }
+  function keyed(keys, t) {
+    if (t <= keys[0][0]) return keys[0][1];
+    for (var i = 0; i < keys.length - 1; i++) {
+      var a = keys[i], b = keys[i + 1];
+      if (t <= b[0]) return b[0] > a[0] ? lerp(a[1], b[1], sstep((t - a[0]) / (b[0] - a[0]))) : b[1];
+    }
+    return keys[keys.length - 1][1];
   }
-  function lerpPose(a, b, k) {
-    var o = {};
-    Object.keys(a).forEach(function (key) {
-      if (a[key].isVector3) o[key] = a[key].clone().lerp(b[key], k);
-      else o[key] = lerp(a[key], b[key], k);
-    });
+  function shiftKeys(keys, d) { return keys.map(function (k) { return [k[0] + d, k[1]]; }); }
+  function scaleKeys(keys, s) { return keys.map(function (k) { return [k[0], k[1] * s]; }); }
+  // pinch envelope: close, hold, open (seconds); extra = [start, close, hold, open] overrides
+  function pinchKeys(D, starts, close, hold, open) {
+    var k = [[0, 0]];
+    starts.forEach(function (s) { k.push([s, 0], [s + close, 1], [s + close + hold, 1], [s + close + hold + open, 0]); });
+    k.push([D, 0]);
+    return k;
+  }
+
+  var HZ = 120;
+  function bake(D, spec) {
+    var names = Object.keys(spec), n = Math.round(D * HZ), dt = 1 / HZ;
+    var st = {}, table = [];
+    names.forEach(function (nm) { var c = spec[nm]; st[nm] = { x: keyed(c.k, D), v: 0 }; });
+    for (var pass = 0; pass < 3; pass++) {
+      for (var i = 0; i < n; i++) {
+        var t = i * dt, row = {};
+        names.forEach(function (nm) {
+          var c = spec[nm], s = st[nm], tgt = keyed(c.k, t);
+          if (!c.w) { s.x = tgt; s.v = 0; }
+          else {
+            var steps = 2, h = dt / steps;
+            for (var q = 0; q < steps; q++) {
+              var a = c.w * c.w * (tgt - s.x) - 2 * c.w * s.v;
+              s.v += a * h; s.x += s.v * h;
+            }
+          }
+          row[nm] = s.x;
+        });
+        if (pass === 2) table.push(row);
+      }
+    }
+    return { D: D, n: n, names: names, rows: table };
+  }
+  function sampleTable(tb, t) {
+    var f = ((t % tb.D) + tb.D) % tb.D * HZ, i = Math.floor(f), k = f - i;
+    var a = tb.rows[i % tb.n], b = tb.rows[(i + 1) % tb.n], o = {};
+    for (var j = 0; j < tb.names.length; j++) { var nm = tb.names[j]; o[nm] = a[nm] + (b[nm] - a[nm]) * k; }
     return o;
   }
-  function sampleKeys(keys, t) {
-    if (t <= keys[0].t) return lerpPose(keys[0].p, keys[0].p, 0);
-    for (var i = 0; i < keys.length - 1; i++) {
-      if (t <= keys[i + 1].t) {
-        var s = keys[i + 1].t - keys[i].t;
-        return lerpPose(keys[i].p, keys[i + 1].p, s > 0 ? smooth((t - keys[i].t) / s) : 1);
-      }
-    }
-    return lerpPose(keys[keys.length - 1].p, keys[keys.length - 1].p, 0);
+
+  // ---- orientation bases (world: x right, y up, z toward the viewer; screen is at -z) ----
+  function basis(f, pn) { return orthoBasisQuat(new THREE.Vector3(f[0], f[1], f[2]), new THREE.Vector3(pn[0], pn[1], pn[2])); }
+  var AXY = new THREE.Vector3(0, 1, 0), AXX = new THREE.Vector3(1, 0, 0), AXZ = new THREE.Vector3(0, 0, 1);
+  var qE1 = new THREE.Quaternion(), qE2 = new THREE.Quaternion(), qE3 = new THREE.Quaternion();
+  function orient(qa, qb, k, pitch, yaw, roll) {
+    var q = new THREE.Quaternion().copy(qa).slerp(qb, k);
+    qE1.setFromAxisAngle(AXX, pitch); qE2.setFromAxisAngle(AXY, yaw); qE3.setFromAxisAngle(AXZ, roll);
+    return qE2.multiply(qE1).multiply(qE3).multiply(q);
   }
 
-  var V = function (x, y, z) { return new THREE.Vector3(x, y, z); };
-  var OPEN = pose({});
-  var PINCH = pose({ ci: 0.66, cm: 0.3, cr: 0.38, cp: 0.46, pinch: 1, spread: 0.5, f: V(0.1, 0.92, -0.05), pn: V(-0.6, 0.05, 0.8) });
-  var READY = pose({ ci: 0.2, cm: 0.15, cr: 0.2, cp: 0.26, pinch: 0.0, spread: 0.55, pn: V(-0.2, 0.05, 0.95) });
-  var FIST_UP = pose({
-    ci: 1, cm: 1, cr: 1, cp: 1, swing: 1, spread: 0, tflex: 0,
-    f: V(-0.75, 0.0, 0.66), pn: V(0.66, 0, 0.75), x: 0.2, y: 1.45, z: 0
-  });
-  // pn for the thumbs-up is re-derived so the thumb (hand -z) points world up: pn = f x l with l = down
-  (function () {
-    var f = FIST_UP.f.clone().normalize(), l = V(0, -1, 0);
-    FIST_UP.pn = new THREE.Vector3().crossVectors(f, l).normalize();
-  })();
+  var G = {};   // per-gesture tuning, filled below
+  // raised hand, palm toward the screen, back of the hand toward the viewer, fingers leaning forward
+  G.Q_UP = basis([0.0, 0.94, -0.34], [0.0, -0.34, -0.94]);
+  G.Q_UP2 = G.Q_UP;
+  // forearm forward, palm facing left (inward), thumb up (send)
+  G.Q_REST_S = basis([0.0, 0.30, -0.95], [-0.45, -0.75, -0.2]);
+  G.Q_THUMB = basis([-0.04, 0.10, -0.99], [-1.0, 0.0, 0.0]);
+  // finger cascade offset (s) per finger for the curls
+  var CASCADE = 0.04;
 
-  var HAND_KEYS = {
-    dictate: [
-      { t: 0.0, p: OPEN }, { t: 0.5, p: OPEN }, { t: 0.65, p: PINCH }, { t: 0.8, p: READY },
-      { t: 0.95, p: PINCH }, { t: 1.15, p: OPEN }, { t: 4.3, p: OPEN }, { t: 4.45, p: PINCH },
-      { t: 4.6, p: READY }, { t: 4.75, p: PINCH }, { t: 4.95, p: OPEN }, { t: 6.4, p: OPEN }
-    ],
-    send: [
-      { t: 0.0, p: OPEN }, { t: 1.0, p: FIST_UP }, { t: 3.2, p: FIST_UP }, { t: 4.2, p: OPEN }, { t: 5.2, p: OPEN }
-    ],
-    scroll: [
-      { t: 0.0, p: OPEN }, { t: 0.6, p: PINCH }, { t: 4.4, p: PINCH }, { t: 5.6, p: OPEN }
-    ]
-  };
+  var DUR = { dictate: 6.4, send: 5.2, scroll: 5.6 };
 
-  function smoothstep01(x) { return smooth(x); }
-  var STATE = {
-    dictate: function (t) {
-      return { listening: t >= 1.05 && t < 4.85, draft: t < 1.3 ? 0 : t > 4.3 ? 1 : smoothstep01((t - 1.3) / 3.0), hold: 0, sent: false, scroll: 0 };
-    },
-    send: function (t) {
-      return { listening: false, draft: 0, hold: t < 1.0 ? 0 : t > 1.75 ? 1 : smoothstep01((t - 1.0) / 0.75), sent: t >= 1.75 && t < 4.2, scroll: 0 };
-    },
-    scroll: function (t) {
-      var s;
-      if (t < 0.8) s = 0;
-      else if (t < 2.0) s = smoothstep01((t - 0.8) / 1.2);
-      else if (t < 2.6) s = 1;
-      else if (t < 3.8) s = 1 - smoothstep01((t - 2.6) / 1.2);
-      else s = 0;
-      return { listening: false, draft: 0, hold: 0, sent: false, scroll: s };
+  function specDictate() {
+    var D = DUR.dictate;
+    var pk = pinchKeys(D, [0.50, 1.07, 4.30, 4.87], 0.12, 0.10, 0.15);
+    var dips = [[0, 0]];
+    [0.50, 1.07, 4.30, 4.87].forEach(function (s) { dips.push([s, 0], [s + 0.10, 1], [s + 0.30, 0]); });
+    dips.push([D, 0]);
+    return {
+      pinch: { k: pk }, pinchM: { k: shiftKeys(pk, 0.025) }, pinchR: { k: shiftKeys(pk, 0.05) }, pinchP: { k: shiftKeys(pk, 0.075) },
+      dip: { k: dips, w: 0 },
+      lw: { k: [[0, 0], [1.50, 0], [2.10, 1], [3.60, 1], [4.10, 0], [D, 0]], w: 12 },
+      lift: { k: [[0, 0], [4.00, 0], [4.25, 1], [5.45, 1], [5.95, 0], [D, 0]], w: 12 }
+    };
+  }
+  function specSend() {
+    var D = DUR.send;
+    var up = [[0, 0], [0.60, 0], [0.95, 1], [1.95, 1], [2.45, 0], [D, 0]];
+    var o = { orient: { k: up, w: 14 }, swing: { k: [[0, 0], [0.72, 0], [0.97, 1], [1.95, 1], [2.35, 0], [D, 0]], w: 22 } };
+    ['ci', 'cm', 'cr', 'cp'].forEach(function (nm, i) {
+      o[nm] = { k: [[0, 0], [0.60 + i * CASCADE, 0], [0.60 + i * CASCADE + 0.24, 1], [1.95 + i * 0.03, 1], [2.40 + i * 0.03, 0], [D, 0]], w: 24 };
+    });
+    o.hold = { k: [[0, 0], [0.95, 0], [1.05, 1], [1.62, 1], [1.72, 0], [D, 0]], w: 0 };
+    return o;
+  }
+  var SCROLL_RISE = 1.15;
+  function specScroll() {
+    var D = DUR.scroll;
+    var pk = [[0, 0], [0.50, 0], [0.62, 1], [4.10, 1], [4.28, 0], [D, 0]];
+    var mv = [[0, 0], [0.95, 0], [2.15, 1], [2.55, 1], [3.75, 0], [D, 0]];
+    return {
+      pinch: { k: pk }, pinchM: { k: shiftKeys(pk, 0.025) }, pinchR: { k: shiftKeys(pk, 0.05) }, pinchP: { k: shiftKeys(pk, 0.075) },
+      mv: { k: mv, w: 15 },
+      tilt: { k: mv, w: 7 }
+    };
+  }
+  var TABLES = {};
+  function tableFor(name) {
+    if (!TABLES[name]) TABLES[name] = bake(DUR[name], name === 'dictate' ? specDictate() : name === 'send' ? specSend() : specScroll());
+    return TABLES[name];
+  }
+
+  var HAND_HOME = { dictate: [2.9, 2.5, -3.2], send: [3.0, 2.5, -3.2], scroll: [2.9, 2.35, -3.2] };
+
+  function breathe(D, t, amp) {
+    var w = 2 * Math.PI * t / D;
+    return { y: Math.sin(w * 2) * 0.03 * amp, x: Math.sin(w * 3 + 1.0) * 0.018 * amp, roll: Math.sin(w * 2 + 0.5) * 0.02 * amp, pitch: Math.sin(w * 3 + 2.0) * 0.012 * amp };
+  }
+
+  function handPose(name, t) {
+    var D = DUR[name], s = sampleTable(tableFor(name), t), h = HAND_HOME[name];
+    var b = breathe(D, t, 1);
+    var p = { x: h[0] + b.x, y: h[1] + b.y, z: h[2], spread: 0.55, swing: 0, tflex: 0, pinch: 0.14, ci: 0.1, cm: 0.12, cr: 0.16, cp: 0.2 };
+    var pitch = b.pitch, yaw = 0.5, roll = b.roll, qa = G.Q_UP, qb = G.Q_UP, ok = 0;
+    if (name === 'dictate') {
+      var rl = s.lw;
+      p.y += -0.30 * s.lw + 0.12 * s.lift - 0.05 * s.dip;
+      p.z += 0.05 * s.lw;
+      pitch += 0.07 * s.lw - 0.05 * s.lift - 0.07 * s.dip;
+      roll += 0.05 * s.lw;
+      p.spread = 0.6 + 0.35 * rl;
+      p.ci = 0.1 + 0.08 * rl * (1 - s.pinch) + 0.42 * s.pinch; p.cm = 0.12 + 0.12 * rl + 0.2 * s.pinchM; p.cr = 0.16 + 0.12 * rl + 0.3 * s.pinchR; p.cp = 0.2 + 0.12 * rl + 0.38 * s.pinchP;
+      p.pinch = 0.12 + 0.88 * s.pinch - 0.06 * rl * (1 - s.pinch);
+    } else if (name === 'scroll') {
+      p.y += SCROLL_RISE * s.mv;
+      p.z -= 0.15 * s.mv;
+      pitch += -0.02 + 0.10 * s.tilt - 0.0;
+      yaw += -0.05 * s.tilt;
+      roll += 0.07 * s.tilt;
+      p.ci = 0.1 + 0.42 * s.pinch; p.cm = 0.12 + 0.2 * s.pinchM; p.cr = 0.16 + 0.3 * s.pinchR; p.cp = 0.2 + 0.38 * s.pinchP;
+      p.pinch = 0.12 + 0.88 * s.pinch;
+      p.spread = 0.6 - 0.2 * s.pinch;
+    } else {
+      qa = G.Q_REST_S; qb = G.Q_THUMB; ok = s.orient;
+      p.ci = 0.12 + 0.88 * s.ci; p.cm = 0.14 + 0.86 * s.cm; p.cr = 0.18 + 0.82 * s.cr; p.cp = 0.2 + 0.8 * s.cp;
+      p.swing = s.swing; p.pinch = 0.3 * (1 - s.swing);
+      p.spread = 0.55 * (1 - s.orient);
+      p.y += 0.12 * s.orient;
+      var tr = s.hold;
+      p.y += Math.sin(t * 61) * 0.004 * tr; p.x += Math.sin(t * 47 + 1) * 0.003 * tr; roll += Math.sin(t * 53 + 2) * 0.006 * tr;
+      p.tflex = 0.0;
     }
+    if (window.__qo && name !== 'send') { qa = qb = basis(window.__qo.f, window.__qo.pn); }
+    if (window.__ovr) for (var ok2 in window.__ovr) p[ok2] = window.__ovr[ok2];
+    p.q = orient(qa, qb, ok, pitch, yaw, roll);
+    return p;
+  }
+
+  // ------------------------------------------------------------------
+  // state handed to onFrame (contract unchanged) and the screen
+  // ------------------------------------------------------------------
+  // Event times that drive the screen. Keyed defaults; a loaded capture replaces them per gesture.
+  var KEYED_EVENTS = {
+    dictate: { listen: [[1.38, 5.32]], draft0: 1.7, draft1: 3.9, clearAt: 6.05 },
+    send: { holdFrom: 0.97, sentAt: 1.72, sentOff: 4.2, fadeAt: 4.5, pushOff: 4.7, textBack: 4.8 },
+    scroll: {}
   };
+  function eventsFor(name) {
+    var tk = capTake(name);
+    return tk ? tk.events : (KEYED_EVENTS[name] || {});
+  }
+  function durOf(name) {
+    var tk = capTake(name);
+    return tk ? tk.D : DURATIONS[name];
+  }
+  function staticTOf(name) {
+    var tk = capTake(name);
+    return tk && tk.events.staticT !== undefined ? tk.events.staticT : STATIC_T[name];
+  }
   function stateFor(name, t) {
-    var f = STATE[name];
-    var s = f ? f(t) : { listening: false, draft: 0, hold: 0, sent: false, scroll: 0 };
+    var s = { listening: false, draft: 0, hold: 0, sent: false, scroll: 0 };
+    var tk = capTake(name), e = eventsFor(name);
+    if (name === 'dictate') {
+      s.listening = e.listen.some(function (iv) { return t >= iv[0] && t < iv[1]; });
+      s.draft = t < e.draft0 ? 0 : t > e.draft1 ? 1 : sstep((t - e.draft0) / (e.draft1 - e.draft0));
+    } else if (name === 'send') {
+      s.hold = t < e.holdFrom || t >= e.sentOff ? 0 : t >= e.sentAt ? 1 : (t - e.holdFrom) / (e.sentAt - e.holdFrom);
+      s.sent = t >= e.sentAt && t < e.sentOff;
+    } else if (name === 'scroll') {
+      s.scroll = tk ? clamp(capScalar(tk, tk.scroll, t), 0, 1) : clamp(sampleTable(tableFor('scroll'), t).mv, 0, 1);
+    }
     s.scene = name; s.gesture = name; s.t = t;
     return s;
-  }
-
-  function handPoseAt(name, t) {
-    var p = sampleKeys(HAND_KEYS[name], t);
-    var s = STATE[name](t);
-    if (name === 'scroll') {
-      p.y += -0.2 + s.scroll * 1.0;
-      p.f.x += s.scroll * 0.08;
-    }
-    // idle life: slow sway, tiny finger tremor so the hand never looks frozen
-    var sway = Math.sin(t * 1.7) * 0.035;
-    p.f.x += sway; p.pn.z += Math.cos(t * 1.3) * 0.03;
-    var wiggle = Math.sin(t * 3.1) * 0.03;
-    p.ci += wiggle * 0.5; p.cm += Math.sin(t * 2.6 + 1) * 0.03; p.cr += Math.sin(t * 2.9 + 2) * 0.03; p.cp += Math.sin(t * 3.3 + 3) * 0.035;
-    if (name === 'send') { p.y += Math.sin(t * 2) * 0.02; }
-    return p;
   }
 
   // ------------------------------------------------------------------
@@ -788,12 +1223,13 @@
     var disposables = [];
     var stage = buildStage(scene, disposables);
     var desk = buildDesk(scene, disposables);
+    var gstage = buildGestureStage(scene, disposables);
     var camera = new THREE.PerspectiveCamera(40, 1.6, 0.1, 500);
     var hand = null, handLoading = false, handFailed = false;
 
     var CAMS = {
       desk: { pos: new THREE.Vector3(1.2, 3.6, 4.3), look: new THREE.Vector3(-0.25, 1.45, -1.2), fov: 48 },
-      hand: { pos: new THREE.Vector3(4.4, 2.5, 3.4), look: new THREE.Vector3(0.0, 1.95, 0.0), fov: 36 }
+      hand: { pos: new THREE.Vector3(1.2, 4.0, 1.4), look: new THREE.Vector3(1.2, 3.3, -9.0), fov: 33 }
     };
 
     function loadHand() {
@@ -846,9 +1282,13 @@
       if (isHand) {
         loadHand();
         desk.root.visible = false;
-        if (hand) { hand.pivot.visible = true; poseHand(hand, handPoseAt(name, t)); }
+        gstage.group.visible = true;
+        var gst = stateFor(name, t);
+        gstage.screen.draw(gst, name, t);
+        if (hand) { hand.pivot.visible = true; poseHand(hand, handPose(name, t)); }
       } else {
         desk.root.visible = true;
+        gstage.group.visible = false;
         if (hand) hand.pivot.visible = false;
         extra = desk.update(name, t);
       }
