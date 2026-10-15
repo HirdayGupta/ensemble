@@ -1,4 +1,5 @@
 import SwiftUI
+import QuartzCore
 import EnsembleCore
 
 enum AppStatus: Equatable {
@@ -40,7 +41,8 @@ struct ScreenChoice: Identifiable, Hashable {
 @MainActor
 final class AppState: ObservableObject {
     @Published var status: AppStatus = .off
-    @Published var lastRefusal: String?
+    /// The last refusal, while it still describes the moment (`RefusalNotice`); the status above it is always live.
+    @Published private(set) var lastRefusal: String?
     @Published var listening = false
     @Published var muted = false
     @Published var fps = 0
@@ -54,6 +56,34 @@ final class AppState: ObservableObject {
     @Published var spotInUse: String?
     /// The connected screens, for recalibrating just one of them.
     @Published var screenChoices: [ScreenChoice] = []
+
+    private var refusal: RefusalNotice?
+    private var refusalExpiry: Task<Void, Never>?
+
+    func showRefusal(_ text: String, resolves: RefusalNotice.Resolves = .byTime) {
+        refusal = RefusalNotice(text: text, shownAt: CACurrentMediaTime(), resolves: resolves)
+        set(\.lastRefusal, text)
+        // The camera loop may be off (Ensemble switched off, screen locked), so the lifetime has its own timer.
+        refusalExpiry?.cancel()
+        refusalExpiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(RefusalNotice.lifetime * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.clearRefusal()
+        }
+    }
+
+    /// Called on every tick: drops the refusal as soon as what it described no longer holds.
+    func clearRefusalIfStale(now: TimeInterval, lastInputAt: TimeInterval, dictating: Bool, onSession: Bool) {
+        guard let refusal, refusal.isStale(now: now, lastInputAt: lastInputAt, dictating: dictating, onSession: onSession) else { return }
+        clearRefusal()
+    }
+
+    func clearRefusal() {
+        refusal = nil
+        refusalExpiry?.cancel()
+        refusalExpiry = nil
+        set(\.lastRefusal, nil)
+    }
 
     /// `@Published` announces a change on every write, even of an equal value; the camera loop writes several
     /// of these on every frame, so those writes go through here and only real changes reach the views.
