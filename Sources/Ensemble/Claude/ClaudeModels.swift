@@ -22,6 +22,8 @@ enum ClaudeLabels {
     static let stop = "Stop"
     static let transcript = "Chat messages"
     static let composer = "Prompt"
+    /// The left navigation group; it also holds the window top bar buttons.
+    static let sidebar = "Sidebar"
     /// The pane header's title button reads "<session name>, rename session".
     static let renameSuffix = ", rename session"
     static let allModes: Set<String> = ["Manual", "Accept edits", "Plan", "Auto", "Bypass permissions", "Don't ask"]
