@@ -175,9 +175,7 @@ final class SetupController {
     @discardableResult
     func storeFullCalibration(_ results: [ScreenCalibrationResult]) -> Bool {
         guard let cameraID, let cameraName else { return false }
-        let allSamples = results.flatMap(\.samples)
-        guard ctx.pointer.fit(allSamples) else { return false }
-        ctx.pointer.resetFilter()
+        guard ctx.pointer.fit(screens: results.map { PointerScreen(id: $0.screenID, frame: $0.frame, samples: $0.samples) }) else { return false }
         let now = Date()
         var profile = CameraProfile(cameraID: cameraID, cameraName: cameraName)
         profile.merge(results.map { ScreenCalibration(screenID: $0.screenID, frame: $0.frame, samples: $0.samples, calibratedAt: now) })
@@ -198,11 +196,11 @@ final class SetupController {
         let now = Date()
         profile.merge(results.map { ScreenCalibration(screenID: $0.screenID, frame: $0.frame, samples: $0.samples, calibratedAt: now) })
         let newValid = validScreenIDs.union(results.map(\.screenID))
-        let combined = profile.samples(for: newValid)
-        // Fewer than 5 samples: nothing meaningful to fit yet (should not happen once any calibration has run);
-        // leave the pointer as it was rather than fit an unusable model.
-        guard combined.count < 5 || ctx.pointer.fit(combined) else { return false }
-        if combined.count >= 5 { ctx.pointer.resetFilter() }
+        // Every valid screen keeps its own model; only the screens just done are new. No screen with samples:
+        // nothing meaningful to fit yet (should not happen once any calibration has run), so leave the pointer
+        // as it was rather than fit an unusable model.
+        let screens = profile.pointerScreens(for: newValid)
+        guard screens.isEmpty || ctx.pointer.fit(screens: screens) else { return false }
         profiles.setProfile(profile)
         save()
         validScreenIDs = newValid
@@ -237,10 +235,10 @@ final class SetupController {
     /// migrated model when the profile came from the old single calibration.
     private func refitPointer() {
         guard let cameraID, !validScreenIDs.isEmpty, let profile = profiles.profile(forCameraID: cameraID) else { return }
-        let samples = profile.samples(for: validScreenIDs)
-        if !profile.hasModelOnly(validScreenIDs), ctx.pointer.fit(samples) {
-            ctx.pointer.resetFilter()
-        } else if let legacy = profile.legacyModel {
+        if !profile.hasModelOnly(validScreenIDs), ctx.pointer.fit(screens: profile.pointerScreens(for: validScreenIDs)) {
+            return
+        }
+        if let legacy = profile.legacyModel {
             ctx.pointer.calibration = legacy
         } else {
             // Nothing usable to fit: pointing off rather than the previous camera's or screen set's model.

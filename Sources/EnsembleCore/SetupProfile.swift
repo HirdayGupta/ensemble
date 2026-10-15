@@ -49,9 +49,15 @@ public struct CameraProfile: Codable, Equatable, Sendable {
         }
     }
 
-    /// Every sample tagged to one of `screenIDs`, for one combined pointer fit.
+    /// Every sample tagged to one of `screenIDs`.
     public func samples(for screenIDs: Set<String>) -> [CalibrationSample] {
         screens.filter { screenIDs.contains($0.screenID) }.flatMap(\.samples)
+    }
+
+    /// The per-screen inputs for the pointer fit: each of `screenIDs` that has samples, with its frame.
+    public func pointerScreens(for screenIDs: Set<String>) -> [PointerScreen] {
+        screens.filter { screenIDs.contains($0.screenID) && !$0.samples.isEmpty }
+            .map { PointerScreen(id: $0.screenID, frame: $0.frame, samples: $0.samples) }
     }
 }
 
