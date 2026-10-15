@@ -9,8 +9,11 @@ public struct PointerScreen: Equatable, Sendable {
     /// The screen's physical size in centimetres, when the caller knows it; otherwise the pointer asks
     /// `NosePointer.screenSizeProvider`. Without a size the screen is not corrected for head position.
     public var physicalSize: CGSize?
-    public init(id: String, frame: CGRect, samples: [CalibrationSample], physicalSize: CGSize? = nil) {
-        self.id = id; self.frame = frame; self.samples = samples; self.physicalSize = physicalSize
+    /// The spot (sitting, standing, ...) these samples were taken from. A screen calibrated from several spots
+    /// comes once per spot, and the pointer uses the one nearest where the head is.
+    public var spotID: String?
+    public init(id: String, frame: CGRect, samples: [CalibrationSample], physicalSize: CGSize? = nil, spotID: String? = nil) {
+        self.id = id; self.frame = frame; self.samples = samples; self.physicalSize = physicalSize; self.spotID = spotID
     }
 }
 
@@ -60,19 +63,39 @@ public final class NosePointer {
         var region: AngleRegion
         /// Nil for a calibration without head positions (saved by an older version) or one that did not fit.
         var geometry: PositionGeometry?
+        /// The spot these samples came from, and the mean head position over them (nil when any sample had none).
+        var spotID: String?
+        var spotPosition: HeadPosition?
     }
 
     private struct Stored: Codable { var screens: [ScreenModel] }
 
     /// How far (in angle units) the head must be past a shared edge before the pointer changes screen.
     static let switchHysteresis = 0.02
+    /// How much nearer (cm) another spot's calibration must be before a screen switches to it, so a head halfway
+    /// between two spots does not flicker between their maps.
+    static let spotHysteresis = 6.0
     /// Each side of a calibrated range is widened by this share of the range. The calibration dots sit 8% in
     /// from each screen edge, so about 10% reaches the edge itself.
     static let regionExpansion = 0.15
 
     /// Set only by the legacy single-model path (`fit(_:)`, or a pre-profile saved model).
     private var model: Model?
-    private var screenModels: [ScreenModel] = []
+    private var screenModels: [ScreenModel] = [] {
+        didSet {
+            var groups: [[Int]] = [], at: [String: Int] = [:]
+            for (i, s) in screenModels.enumerated() {
+                if let g = at[s.id] { groups[g].append(i) } else { at[s.id] = groups.count; groups.append([i]) }
+            }
+            screenGroups = groups
+            chosenSpot = [:]
+        }
+    }
+    /// Indices into `screenModels`, one list per screen in calibration order: more than one when the screen was
+    /// calibrated from several spots.
+    private var screenGroups: [[Int]] = []
+    /// For a screen with several spots, the model in use now (screen id to index).
+    private var chosenSpot: [String: Int] = [:]
     private var currentScreen: Int?
     private var filterX = OneEuroFilter(minCutoff: 0.6, beta: 3, dCutoff: 1)
     private var filterY = OneEuroFilter(minCutoff: 0.6, beta: 3, dCutoff: 1)
@@ -97,6 +120,10 @@ public final class NosePointer {
     /// (legacy) model, or when uncalibrated.
     public var activeScreenID: String? { currentScreen.map { screenModels[$0].id } }
 
+    /// The spot whose calibration the aimed screen uses now, or nil before the first reading or when the
+    /// calibration carries no spots.
+    public var activeSpotID: String? { currentScreen.flatMap { screenModels[$0].spotID } }
+
     /// Least-squares fit of two affine maps. Returns false when there are fewer than 5 samples or the
     /// head angles do not span two independent directions. A single map over all the samples, with no
     /// notion of screens: the path a calibration from before profiles takes, and what one-off callers use.
@@ -110,9 +137,10 @@ public final class NosePointer {
         return true
     }
 
-    /// Fits one map per screen. All-or-nothing: if any screen's samples cannot be fitted the old
-    /// calibration is kept and this returns false. With exactly one screen the pointer behaves as a single
-    /// map would (no clamping, no gap rule), so a one-screen desk points as it always did.
+    /// Fits one map per screen, and per spot when a screen comes once for each spot it was calibrated from.
+    /// All-or-nothing: if any screen's samples cannot be fitted the old calibration is kept and this returns
+    /// false. With exactly one screen (from any number of spots) the pointer behaves as a single map would (no
+    /// clamping, no gap rule), so a one-screen desk points as it always did.
     @discardableResult
     public func fit(screens: [PointerScreen]) -> Bool {
         guard !screens.isEmpty else { return false }
@@ -124,9 +152,15 @@ public final class NosePointer {
             let geometry = size.flatMap {
                 PositionGeometry.fit(samples: s.samples, frame: s.frame, sizeCm: $0, slopeX: m.a, slopeY: m.e)
             }
+            let positions = s.samples.compactMap(\.position).filter(\.isFinite)
+            let n = Double(positions.count)
+            let spotPosition = positions.count == s.samples.count
+                ? HeadPosition(x: positions.map(\.x).reduce(0, +) / n, y: positions.map(\.y).reduce(0, +) / n,
+                               z: positions.map(\.z).reduce(0, +) / n)
+                : nil
             out.append(ScreenModel(id: s.id, frame: s.frame, model: m,
                                    region: AngleRegion(samples: s.samples, expand: Self.regionExpansion),
-                                   geometry: geometry))
+                                   geometry: geometry, spotID: s.spotID, spotPosition: spotPosition))
         }
         screenModels = out
         model = nil
@@ -186,25 +220,59 @@ public final class NosePointer {
         return g.equivalentAngles(position: position, yaw: h.yaw, pitch: h.pitch)
     }
 
-    /// The screen to use for this reading, with the angles to use on it. Closest calibrated angle range
-    /// wins; the screen already in use keeps it unless another is clearly closer, so the pointer does not
-    /// flicker along a shared edge.
-    private func chooseScreen(for h: HeadObservation, position: HeadPosition?) -> (index: Int, yaw: Double, pitch: Double)? {
-        var scored: [(d: Double, c: Double, yaw: Double, pitch: Double)] = []
-        for i in screenModels.indices {
+    /// One model per screen for this reading. A screen calibrated from several spots uses the spot nearest where
+    /// the head is, keeping the one in use unless another is nearer by `spotHysteresis`; with no position to go
+    /// by it keeps the one in use (the first spot to begin with). `commit` remembers the choice.
+    private func spotModels(position: HeadPosition?, yaw: Double, pitch: Double, commit: Bool) -> [Int] {
+        screenGroups.map { group in
+            guard group.count > 1 else { return group[0] }
+            let id = screenModels[group[0]].id
+            let current = chosenSpot[id].flatMap { group.contains($0) ? $0 : nil } ?? group[0]
+            var pick = current
+            if let position {
+                let gaps = group.map { spotGap($0, position: position, yaw: yaw, pitch: pitch) }
+                if let best = gaps.indices.min(by: { gaps[$0] < gaps[$1] }), gaps[best].isFinite,
+                   let mine = group.firstIndex(of: current),
+                   !gaps[mine].isFinite || gaps[best] < gaps[mine] - Self.spotHysteresis {
+                    pick = group[best]
+                }
+            }
+            if commit { chosenSpot[id] = pick }
+            return pick
+        }
+    }
+
+    /// Distance (cm) from the head to where it was when model `i` was calibrated, at this aim when the model has
+    /// a fitted geometry (turning swings the head), else to the mean position of its samples.
+    private func spotGap(_ i: Int, position: HeadPosition, yaw: Double, pitch: Double) -> Double {
+        let s = screenModels[i]
+        guard let ref = s.geometry?.referencePosition(yaw: yaw, pitch: pitch) ?? s.spotPosition else { return .infinity }
+        let dx = position.x - ref.x, dy = position.y - ref.y, dz = position.z - ref.z
+        return (dx * dx + dy * dy + dz * dz).squareRoot()
+    }
+
+    /// The screen to use for this reading among `candidates` (one model per screen), with the angles to use on
+    /// it. Closest calibrated angle range wins; the screen already in use keeps it unless another is clearly
+    /// closer, so the pointer does not flicker along a shared edge.
+    private func chooseScreen(for h: HeadObservation, position: HeadPosition?, among candidates: [Int]) -> (index: Int, yaw: Double, pitch: Double)? {
+        guard !candidates.isEmpty else { return nil }
+        var scored: [(i: Int, d: Double, c: Double, yaw: Double, pitch: Double)] = []
+        for i in candidates {
             if let a = angles(for: i, h, position: position) {
-                scored.append((screenModels[i].region.distance(yaw: a.yaw, pitch: a.pitch),
+                scored.append((i, screenModels[i].region.distance(yaw: a.yaw, pitch: a.pitch),
                                screenModels[i].region.centreness(yaw: a.yaw, pitch: a.pitch), a.yaw, a.pitch))
             } else {
-                scored.append((.infinity, .infinity, h.yaw, h.pitch))
+                scored.append((i, .infinity, .infinity, h.yaw, h.pitch))
             }
         }
         var best = 0
-        for i in 1..<scored.count where (scored[i].d, scored[i].c) < (scored[best].d, scored[best].c) { best = i }
+        for k in scored.indices.dropFirst() where (scored[k].d, scored[k].c) < (scored[best].d, scored[best].c) { best = k }
         guard scored[best].d.isFinite else { return nil }
-        if let cur = currentScreen, cur < scored.count, cur != best,
-           scored[cur].d <= scored[best].d + Self.switchHysteresis { best = cur }
-        return (best, scored[best].yaw, scored[best].pitch)
+        // Compared by screen: the screen in use may have just changed to another spot's model.
+        if let cur = currentScreen, cur < screenModels.count,
+           let k = scored.firstIndex(where: { screenModels[$0.i].id == screenModels[cur].id }), k != best,
+           scored[k].d <= scored[best].d + Self.switchHysteresis { best = k }
+        return (scored[best].i, scored[best].yaw, scored[best].pitch)
     }
 
     /// The map's point on screen `index`, or nil when it lands in the gap beyond the screen's edge: a point
@@ -212,7 +280,8 @@ public final class NosePointer {
     private func resolve(_ index: Int, yaw: Double, pitch: Double) -> CGPoint? {
         let s = screenModels[index]
         guard let local = Self.apply(s.model, yaw: yaw, pitch: pitch) else { return nil }
-        if screenModels.count == 1 { return CGPoint(x: local.x + s.frame.minX, y: local.y + s.frame.minY) }
+        // One screen, however many spots it was calibrated from.
+        if screenGroups.count == 1 { return CGPoint(x: local.x + s.frame.minX, y: local.y + s.frame.minY) }
         let w = s.frame.width, ht = s.frame.height
         let cx = min(max(local.x, 0), w), cy = min(max(local.y, 0), ht)
         let margin = max(40, 0.08 * min(w, ht))
@@ -220,9 +289,9 @@ public final class NosePointer {
         return CGPoint(x: cx + s.frame.minX, y: cy + s.frame.minY)
     }
 
-    /// The position to correct with, or nil when correction is off or the reading has none worth using.
-    private func usablePosition(_ h: HeadObservation, smoothed: Bool) -> HeadPosition? {
-        guard correctsForPosition else { return nil }
+    /// The head position worth using for this reading, or nil when it has none. It picks the spot whatever the
+    /// setting; the angles are corrected with it only while `correctsForPosition` is on.
+    private func trackedPosition(_ h: HeadObservation, smoothed: Bool) -> HeadPosition? {
         if smoothed { return positionTracker.update(h.position, at: h.t) }
         return h.position.flatMap { HeadPositionTracker.isPlausible($0) ? $0 : nil }
     }
@@ -230,7 +299,10 @@ public final class NosePointer {
     public func raw(for h: HeadObservation) -> CGPoint? {
         guard h.yaw.isFinite, h.pitch.isFinite else { return nil }
         if let m = model { return Self.apply(m, yaw: h.yaw, pitch: h.pitch) }
-        guard !screenModels.isEmpty, let c = chooseScreen(for: h, position: usablePosition(h, smoothed: false)) else { return nil }
+        guard !screenModels.isEmpty else { return nil }
+        let position = trackedPosition(h, smoothed: false)
+        let candidates = spotModels(position: position, yaw: h.yaw, pitch: h.pitch, commit: false)
+        guard let c = chooseScreen(for: h, position: correctsForPosition ? position : nil, among: candidates) else { return nil }
         return resolve(c.index, yaw: c.yaw, pitch: c.pitch)
     }
 
@@ -246,10 +318,16 @@ public final class NosePointer {
             return CGPoint(x: u * m.width + m.minX, y: v * m.height + m.minY)
         }
         guard !screenModels.isEmpty else { return nil }
-        let position = usablePosition(h, smoothed: true)
-        guard let c = chooseScreen(for: h, position: position), let r = resolve(c.index, yaw: c.yaw, pitch: c.pitch) else { return nil }
+        let position = trackedPosition(h, smoothed: true)
+        let candidates = spotModels(position: position, yaw: h.yaw, pitch: h.pitch, commit: true)
+        guard let c = chooseScreen(for: h, position: correctsForPosition ? position : nil, among: candidates),
+              let r = resolve(c.index, yaw: c.yaw, pitch: c.pitch) else { return nil }
         let index = c.index
-        if index != currentScreen { filterX.reset(); filterY.reset(); currentScreen = index }
+        if index != currentScreen {
+            // The same screen through another spot's map keeps the filter: both maps aim at the same box.
+            if currentScreen.map({ screenModels[$0].id }) != screenModels[index].id { filterX.reset(); filterY.reset() }
+            currentScreen = index
+        }
         let s = screenModels[index], m = s.model
         let lx = r.x - s.frame.minX, ly = r.y - s.frame.minY
         let u = filterX.filter((lx - m.minX) / m.width, at: h.t)

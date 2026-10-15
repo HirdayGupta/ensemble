@@ -46,7 +46,8 @@ final class AppEnvironment {
     }
     private(set) lazy var settingsWindow = SettingsWindowController { [unowned self] in
         AnyView(SettingsView(state: state, settings: settings, updates: updates,
-                              calibrate: { [weak self] in self?.coordinator.calibrate() },
+                              calibrate: { [weak self] request in self?.coordinator.calibrate(request) },
+                              removeSpot: { [weak self] id in self?.coordinator.removeCalibrationSpot(id) },
                               replayTour: { [weak self] step in
                                   if let step { self?.tourWindow.show(startAt: step, singleStep: true) } else { self?.tourWindow.show() }
                               }))

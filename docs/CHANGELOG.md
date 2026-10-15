@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- Settings, Calibration can recalibrate one screen: pick it under Screens and press Calibrate this screen; every other screen keeps its calibration. Add position calibrates again from another place, such as standing or leaning back, and keeps it beside the ones you have; Ensemble uses, screen by screen, the saved position nearest where your head is (switching only once another is clearly nearer), Calibrate redoes the position in use, and Remove forgets one. Calibrations saved before this version become Position 1, nothing lost.
 - Next to every Check for Updates button (menu bar panel, Option-Command-K panel, Settings) Ensemble shows the version you have installed, and after a check it says "Ensemble 0.5.0 is available" or "Up to date". The latest version is learned only from a check you start or the automatic checks you turned on; nothing is fetched otherwise.
 - With one chat session open in Claude, the highlight, focus and edge warnings cover just that session, not the whole window with its top bar and left navigation. Two or more sessions side by side are unchanged.
 - Calibrate puts its full-screen window up at once, even when Ensemble was off or the camera is still starting; it says what it is waiting for ("Starting the camera...", "Looking for your face...") and shows the first dot only after a face reading arrives. The log records the time from click to window and from click to first face reading.

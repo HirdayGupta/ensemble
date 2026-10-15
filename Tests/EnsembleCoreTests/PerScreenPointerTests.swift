@@ -171,7 +171,9 @@ import Testing
         let s = Self.screens()
         profile.merge(s.map { ScreenCalibration(screenID: $0.id, frame: $0.frame, samples: $0.samples, calibratedAt: Date()) })
         profile.merge([ScreenCalibration(screenID: "empty", frame: .zero, samples: [], calibratedAt: Date())])
-        #expect(profile.pointerScreens(for: ["main", "portrait", "empty"]) == s)
+        let handed = profile.pointerScreens(for: ["main", "portrait", "empty"])
+        #expect(handed.map { PointerScreen(id: $0.id, frame: $0.frame, samples: $0.samples) } == s)
+        #expect(handed.allSatisfy { $0.spotID == "spot-1" })
         #expect(profile.pointerScreens(for: ["portrait"]).map(\.id) == ["portrait"])
     }
 }
