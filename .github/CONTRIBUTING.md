@@ -150,7 +150,6 @@ SwiftPM package with two targets plus a separate benchmark package.
 | `Tools/PerfBench` | Separate package of camera-free micro-benchmarks (synthetic frames and head paths). |
 | `scripts/` | `bundle.sh`, `release.sh`, `appcast.sh`, `dev-install.sh`, `dev-update.sh`, `make-icon.swift`. |
 | `docs/` | Guides and references: [gestures](../docs/gestures.md), [safety](../docs/safety.md), [workflows](../docs/workflows.md), [performance](../docs/performance.md), [gotchas](../docs/gotchas.md), [RELEASING.md](../docs/RELEASING.md) and the [changelog](../docs/CHANGELOG.md). |
-| `practice/` | Exercise changes only; never built into the app or shipped. |
 | `.github/workflows` | `ci.yml` (build, test, workflow and secrets checks, coverage, dead code, and the `gate` job), `release.yml` (tag-triggered release, disabled until Developer ID signing exists). |
 
 ### How the pieces fit
