@@ -27,6 +27,10 @@ final class PaneWidthController {
     var keyWatchOn: () -> Bool = { false }
     /// The session frames were read again: the highlight is moved to them.
     var framesChanged: () -> Void = {}
+    /// The session the nose is on now, nil when none: a fit stops when you look at another session.
+    var focusedID: () -> String? = { nil }
+    /// The session a running fit widens; nil for maximize and even out, which you asked for by hand.
+    private var fitting: String?
     private(set) var isRunning = false
     private var cancelled = false
     /// When this resize began, for the hand-on-the-keyboard-or-mouse check, and whether it has pressed any key.
@@ -107,42 +111,42 @@ final class PaneWidthController {
         }
     }
 
-    /// Focus has settled on `target`: widen it to Claude's chat column if it is narrower, taking the width equally
-    /// from the other panes in its row. Silent: it is not something you asked for, so it never shows a refusal;
-    /// anything in the way (a dictation, a send, your hands on the keyboard or mouse, another app in front) skips it,
-    /// and so do the fit hold (`SessionFit.Hold`: a pane a recent fit narrowed, a fit that would undo a recent one)
-    /// and the seconds after a calibration (`calibratedAt`, when one last ran).
-    func autoFit(_ target: ClaudeSession, calibratedAt: TimeInterval) {
-        guard !isRunning else { return }
-        if let why = ctx.commonRefusal() ?? blocker() { EnsembleLog.write("pane widths: no fit (\(why))"); return }
-        if let why = hold.refusal(target.id, now: CACurrentMediaTime(), calibratedAt: calibratedAt) {
-            EnsembleLog.write("pane widths: no fit of \(place(of: target)) (\(why))")
-            return
-        }
-        if ClaudeBridge.secondsSincePhysicalInput() < CoordinatorContext.inputQuiet {
-            EnsembleLog.write("pane widths: no fit (the keyboard or mouse is in use)")
-            return
+    /// Why a fit did not start: the reason, for the log (fixed words and numbers only), and whether to try again
+    /// while the nose still rests on the session.
+    struct FitSkip: Equatable {
+        let why: String
+        let retry: Bool
+    }
+
+    /// The nose has rested on `target`: widen it to Claude's chat column if it is narrower, taking the width equally
+    /// from the other panes in its row (`SessionFit.restingFit`). Silent: it is not something you asked for, so it
+    /// never shows a refusal; anything in the way (a dictation, a send, your hands on the keyboard or mouse, another
+    /// app in front, the seconds after a calibration) skips it and says why. nil when it started. If you look at
+    /// another session while it runs, it stops there and the caller fits that one instead.
+    func autoFit(_ target: ClaudeSession, calibratedAt: TimeInterval) -> FitSkip? {
+        guard !isRunning else { return FitSkip(why: "another resize is running", retry: true) }
+        if let why = ctx.commonRefusal() ?? blocker() { return FitSkip(why: why, retry: ctx.bridge.claudeIsFrontmost() && ctx.settings.enabled) }
+        if let why = hold.refusal(now: CACurrentMediaTime(), calibratedAt: calibratedAt) { return FitSkip(why: why, retry: true) }
+        let idle = ClaudeBridge.secondsSincePhysicalInput()
+        if idle < CoordinatorContext.inputQuiet {
+            return FitSkip(why: "the keyboard or mouse was used \(String(format: "%.1f", idle)) s ago", retry: true)
         }
         let row = PaneWidths.row(of: target, in: ctx.sessions)
-        guard row.count >= 2 else { return }
+        guard row.count >= 2 else { return FitSkip(why: "one session in its row", retry: false) }
         begin()
+        fitting = target.id
         Task { @MainActor in
             let readings = await self.ctx.bridge.chatColumns(in: row)
             self.column.note(row.map { readings[$0.id]?.column }, panes: row.map { Double($0.frame.width) })
             let column = self.column.width
             var fit: (ids: [String], from: [Double], to: [Double], k: Int)?
-            var heldBack = false
             // Exact width: Shift steps for the bulk and a few arrows, never a jump to a limit and back.
             let outcome = await self.run(target: target, goal: .widths(jumps: false) { widths, k, minimum, row in
                 let want = ChatColumn.paneWidth(column: column, pane: row[k].frame, transcript: readings[target.id]?.transcript)
                 let ids = row.map(\.id)
                 let floors = self.hold.floors(ids, focus: k, now: CACurrentMediaTime())
-                guard let planned = SessionFit.widths(current: widths, focus: k, width: want,
-                                                      minimum: max(PaneWidths.narrowWidth, minimum), floors: floors) else { return nil }
-                guard SessionFit.Hold.allows(planned: planned, focus: k, width: want, floors: floors) else {
-                    heldBack = true
-                    return nil
-                }
+                guard let planned = SessionFit.restingFit(current: widths, focus: k, width: want,
+                                                          minimum: max(PaneWidths.narrowWidth, minimum), floors: floors) else { return nil }
                 if fit == nil { fit = (ids, widths, planned, k) }
                 return planned
             })
@@ -151,14 +155,14 @@ final class PaneWidthController {
                 let narrowed = f.ids.indices.filter { $0 != f.k && f.to[$0] < f.from[$0] - PaneWidths.tolerance }.map { f.ids[$0] }
                 self.hold.noteFit(target.id, width: f.to[f.k], narrowed: narrowed, at: CACurrentMediaTime())
             }
-            if heldBack {
-                EnsembleLog.write("pane widths: no fit of \(self.place(of: target)) (it would undo a recent fit)")
+            if case .done(presses: 0) = outcome {
+                EnsembleLog.write("pane widths: \(self.place(of: target)) already fits the chat column (\(Int(column)) pt)")
                 return
             }
-            if case .done(presses: 0) = outcome { return }
             EnsembleLog.write("pane widths: fit \(self.place(of: target)) to the chat column "
                               + "(\(Int(column)) pt, \(self.column.measured == nil ? "default" : "measured")): \(outcome)")
         }
+        return nil
     }
 
     private enum Outcome: CustomStringConvertible {
@@ -182,6 +186,7 @@ final class PaneWidthController {
         askedDivider = false
         askedDividers = []
         pendingRefocus = nil
+        fitting = nil
         startedAt = CACurrentMediaTime()
     }
 
@@ -221,6 +226,7 @@ final class PaneWidthController {
         }
         ctx.overlay.glide(false)
         pressedAny = false
+        fitting = nil
         isRunning = false
         cancelled = false
     }
@@ -302,6 +308,7 @@ final class PaneWidthController {
         let since = startedAt
         func safe() -> String? {
             if let why = blocker() { return why }
+            if let id = fitting, let now = focusedID(), now != id { return "you looked at another session" }
             // Hardware input only: the keys Ensemble posts never count, the owner's own hand always does.
             if ClaudeBridge.secondsSincePhysicalInput() < CACurrentMediaTime() - since { return "the keyboard or mouse was used" }
             return nil

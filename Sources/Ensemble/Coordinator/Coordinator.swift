@@ -26,6 +26,10 @@ final class Coordinator: AppCoordinating {
     private var fitTrigger = SessionFit.Trigger()
     /// The last tick a calibration was running: no fit for a few seconds after it (`SessionFit.Hold`).
     private var lastCalibratingAt: TimeInterval = -.infinity
+    /// The last nose reading focus used, nil without one: a fit waits for the nose to rest inside the session.
+    private var focusNose: CGPoint?
+    /// The last reason a fit was skipped, so each reason is logged once per rest, not on every tick.
+    private var lastFitSkip: String?
     /// Hands on the keyboard, mouse or trackpad: Ensemble steps back until they rest. See `updateHandsBusy`.
     private var handsBusy = HandsBusy()
     private var pausedSince: TimeInterval = 0
@@ -91,6 +95,7 @@ final class Coordinator: AppCoordinating {
         ctx.wake = { [weak self] in self?.armTickTimer() }
         panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
         panes.keyWatchOn = { [weak self] in self?.keyTap.isActive ?? true }
+        panes.focusedID = { [weak self] in self?.focus.target?.id }
         panes.framesChanged = { [weak self] in
             guard let self else { return }
             self.focus.refreshFrames()
@@ -430,6 +435,7 @@ final class Coordinator: AppCoordinating {
                 // the keyboard or mouse, the target still follows the nose (gestures act on the session you look at)
                 // while keyboard focus and the windows stay put.
                 let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive, paused: ctx.handsBusy)
+                focusNose = p
                 dot.follow(nose: p, at: head.t, onSession: under != nil)
                 EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t))\(ctx.handsBusy ? " paused" : "") faces=\(head.faceCount)")
             }
@@ -438,6 +444,7 @@ final class Coordinator: AppCoordinating {
         } else {
             dot.clear()
             focus.forgetTarget()
+            focusNose = nil
         }
         dot.place(target: focus.target)
         pushOverlay()
@@ -552,19 +559,34 @@ final class Coordinator: AppCoordinating {
                                             || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)))
     }
 
-    /// Focus that has rested on one session for `SessionFit.settle` widens it to Claude's chat column, once per
-    /// focus change. Never while away, paused for the keyboard or mouse, in the tour, dictating, sending, mid-gesture
-    /// or mid-resize; the controller adds the checks every action on Claude makes (Claude in front, no recent input).
+    /// The nose resting inside one session for `SessionFit.settle`, with focus on it throughout, widens it to
+    /// Claude's chat column, once per focus change; a nose passing over a session never does. Something in the way
+    /// (paused for the keyboard or mouse, dictating, sending, mid-gesture, another resize) is logged once with its
+    /// reason, and the fit runs as soon as it clears while the nose still rests there. A fit running when focus moves
+    /// on stops (`PaneWidthController`), and the session focus moved to is fitted once the nose rests on it.
     private func fitFocusedSession(now: TimeInterval) {
         if state.calibrating { lastCalibratingAt = now }
-        // While paused the target can move with the nose; the trigger sees that move only after the pause, so a session
-        // looked at meanwhile is fitted once you resume, and one you stayed on is not fitted again.
-        guard !ctx.handsBusy else { return }
-        guard let id = fitTrigger.observe(focus.target?.id, at: now), let target = focus.target, target.id == id else { return }
+        let target = focus.target
+        let inside = target.map { t in focusNose.map { t.frame.contains($0) } ?? false } ?? false
+        guard let id = fitTrigger.observe(target?.id, inside: inside, at: now), let target, target.id == id else { return }
         guard settings.fitFocusedSession, health.running, !awayState.isAway, !tourOpen, practiceSink == nil,
-              ctx.listening == nil, !ctx.busy, !send.inFlight, !send.afterStop, !send.earlyArmed,
-              gestures.progress == nil, !panes.isRunning, !focus.userLeftClaude else { return }
-        panes.autoFit(target, calibratedAt: lastCalibratingAt)
+              !focus.userLeftClaude else { return }
+        let skip: PaneWidthController.FitSkip?
+        if ctx.handsBusy {
+            skip = .init(why: "paused while you type or use the mouse", retry: true)
+        } else if ctx.listening != nil || ctx.busy || send.inFlight || send.afterStop || send.earlyArmed {
+            skip = .init(why: "a dictation or send is in progress", retry: true)
+        } else if gestures.progress != nil {
+            skip = .init(why: "a gesture is in progress", retry: true)
+        } else {
+            skip = panes.autoFit(target, calibratedAt: lastCalibratingAt)
+        }
+        guard let skip else { lastFitSkip = nil; return }
+        if skip.retry { fitTrigger.retry() }
+        if id + skip.why != lastFitSkip {
+            lastFitSkip = id + skip.why
+            EnsembleLog.write("pane widths: no fit yet (\(skip.why))\(skip.retry ? "; fitting once it clears" : "")")
+        }
     }
 
     /// While dictating the full session scan is off (see `refreshSessions`), so a Claude window moved or resized

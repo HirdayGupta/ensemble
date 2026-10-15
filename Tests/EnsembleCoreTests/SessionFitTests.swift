@@ -44,32 +44,57 @@ import Testing
         #expect(abs(fit.reduce(0, +) - 2520) < 0.001)
     }
 
-    @Test func theTriggerFiresOnceAfterFocusSettles() {
+    @Test func theTriggerFiresOnceAfterTheNoseRests() {
         var t = SessionFit.Trigger()
-        #expect(t.observe("a", at: 0) == nil)
-        #expect(t.observe("a", at: 0.5) == nil)
-        #expect(t.observe("a", at: 0.6) == "a")
-        #expect(t.observe("a", at: 2) == nil)
+        #expect(t.observe("a", inside: true, at: 0) == nil)
+        #expect(t.observe("a", inside: true, at: 0.7) == nil)
+        #expect(t.observe("a", inside: true, at: 0.8) == "a")
+        #expect(t.observe("a", inside: true, at: 2) == nil)
     }
 
     @Test func passingOverASessionNeverFitsIt() {
         var t = SessionFit.Trigger()
-        #expect(t.observe("a", at: 0) == nil)
-        #expect(t.observe("b", at: 0.3) == nil)
-        #expect(t.observe("a", at: 0.7) == nil)
-        #expect(t.observe(nil, at: 1.0) == nil)
-        #expect(t.observe(nil, at: 5) == nil)
-        #expect(t.observe("b", at: 5.1) == nil)
-        #expect(t.observe("b", at: 5.7) == "b")
+        #expect(t.observe("a", inside: true, at: 0) == nil)
+        #expect(t.observe("b", inside: true, at: 0.3) == nil)
+        #expect(t.observe("a", inside: true, at: 0.7) == nil)
+        #expect(t.observe(nil, inside: false, at: 1.0) == nil)
+        #expect(t.observe(nil, inside: false, at: 5) == nil)
+        #expect(t.observe("b", inside: true, at: 5.1) == nil)
+        #expect(t.observe("b", inside: true, at: 5.9) == "b")
+    }
+
+    @Test func focusHeldWithTheNoseOutsideIsNoRest() {
+        // The focus stays on a while the nose crosses its edge into the next session: the wait starts again once
+        // the nose is back inside, so a session the nose is leaving is not fitted.
+        var t = SessionFit.Trigger()
+        #expect(t.observe("a", inside: true, at: 0) == nil)
+        #expect(t.observe("a", inside: false, at: 0.5) == nil)
+        #expect(t.observe("a", inside: false, at: 1.5) == nil)
+        #expect(t.observe("a", inside: true, at: 1.6) == nil)
+        #expect(t.observe("a", inside: true, at: 2.3) == nil)
+        #expect(t.observe("a", inside: true, at: 2.5) == "a")
+    }
+
+    @Test func aFitThatCouldNotRunIsAskedForAgainOnlyWhileTheNoseRests() {
+        var t = SessionFit.Trigger()
+        _ = t.observe("a", inside: true, at: 0)
+        #expect(t.observe("a", inside: true, at: 1) == "a")
+        t.retry()
+        #expect(t.waiting(for: "a"))
+        #expect(t.observe("a", inside: true, at: 1.05) == "a")
+        t.retry()
+        // Focus moved on: the old session is never fitted, the new one after its own rest.
+        #expect(t.observe("b", inside: true, at: 1.1) == nil)
+        #expect(t.observe("b", inside: true, at: 2.0) == "b")
     }
 
     @Test func theTriggerWaitsUntilItHasAnsweredForTheFocus() {
         var t = SessionFit.Trigger()
         #expect(!t.waiting(for: nil))
         #expect(t.waiting(for: "a"))
-        _ = t.observe("a", at: 0)
+        _ = t.observe("a", inside: true, at: 0)
         #expect(t.waiting(for: "a"))
-        _ = t.observe("a", at: 1)
+        _ = t.observe("a", inside: true, at: 1)
         #expect(!t.waiting(for: "a"))
         #expect(t.waiting(for: "b"))
         #expect(!t.waiting(for: nil))
@@ -77,11 +102,11 @@ import Testing
 
     @Test func comingBackToASessionIsANewFocusChange() {
         var t = SessionFit.Trigger()
-        _ = t.observe("a", at: 0)
-        #expect(t.observe("a", at: 1) == "a")
-        _ = t.observe("b", at: 2)
-        _ = t.observe("a", at: 3)
-        #expect(t.observe("a", at: 3.6) == "a")
+        _ = t.observe("a", inside: true, at: 0)
+        #expect(t.observe("a", inside: true, at: 1) == "a")
+        _ = t.observe("b", inside: true, at: 2)
+        _ = t.observe("a", inside: true, at: 3)
+        #expect(t.observe("a", inside: true, at: 3.9) == "a")
     }
 }
 
@@ -159,50 +184,52 @@ import Testing
         #expect(abs(w[1] - 434) < 0.001 && abs(w[3] - 422) < 0.001)
     }
 
-    @Test func fitsNoLongerUndoEachOtherOnARowTooNarrowForAll() throws {
-        // Four 630 pt panes in 2520 pt cannot all reach 832.
+    @Test func aRecentFitIsKeptWhileTheOthersCanGiveTheWidth() throws {
         var hold = SessionFit.Hold()
         let ids = ["a", "b", "c", "d"]
-        var row = [630.0, 630, 630, 630]
-        let first = try #require(SessionFit.widths(current: row, focus: 0, width: 832,
-                                                   floors: hold.floors(ids, focus: 0, now: 10)))
-        #expect(SessionFit.Hold.allows(planned: first, focus: 0, width: 832, floors: hold.floors(ids, focus: 0, now: 10)))
+        let row = [630.0, 630, 630, 630]
+        let first = try #require(SessionFit.restingFit(current: row, focus: 0, width: 832, floors: hold.floors(ids, focus: 0, now: 10)))
+        #expect(abs(first[0] - 832) < 0.001)
         hold.noteFit("a", width: 832, narrowed: ["b", "c", "d"], at: 10)
-        row = first
-        // A glance at b, c or d a moment later: each was narrowed by that fit, so it is left alone.
-        for id in ["b", "c", "d"] { #expect(hold.refusal(id, now: 20, calibratedAt: never) != nil) }
-        // After the hold, fitting d keeps a at its fit; the others can give enough, so it goes ahead.
-        let floors = hold.floors(ids, focus: 3, now: 200)
-        #expect(floors == [0, 0, 0, 0])
-        hold.noteFit("b", width: 832, narrowed: ["c", "d"], at: 200)
-        // c, freshly narrowed, waits; a fit of a now keeps b's fit as a floor and cannot reach 832: skipped.
-        let f = hold.floors(ids, focus: 0, now: 210)
-        #expect(f == [0, 832, 0, 0])
-        let plan = try #require(SessionFit.widths(current: [600, 832, 300, 500], focus: 0, width: 832, floors: f))
-        #expect(!SessionFit.Hold.allows(planned: plan, focus: 0, width: 832, floors: f))
+        // Resting on d a moment later: a keeps its fit, b and c give the width.
+        let f = hold.floors(ids, focus: 3, now: 20)
+        #expect(f == [832, 0, 0, 0])
+        let second = try #require(SessionFit.restingFit(current: first, focus: 3, width: 832, floors: f))
+        #expect(abs(second[0] - 832) < 0.001 && abs(second[3] - 832) < 0.001)
+    }
+
+    @Test func theSessionYouRestOnIsFittedEvenWhenARecentFitHeldIt() throws {
+        // b was narrowed by a's fit a few seconds ago and the others cannot give enough without undoing a's fit:
+        // resting on b still fits it, every other pane giving its share (0.2.18 refused it for three minutes).
+        var hold = SessionFit.Hold()
+        let ids = ["a", "b", "c"]
+        hold.noteFit("a", width: 1000, narrowed: ["b", "c"], at: 10)
+        #expect(hold.refusal(now: 15, calibratedAt: never) == nil)
+        let f = hold.floors(ids, focus: 1, now: 15)
+        #expect(f == [1000, 0, 0])
+        let w = try #require(SessionFit.restingFit(current: [1000, 400, 400], focus: 1, width: 832, floors: f))
+        #expect(abs(w[1] - 832) < 0.001)
+        #expect(w[0] < 1000 && abs(w.reduce(0, +) - 1800) < 0.001)
     }
 
     @Test func nothingIsFittedJustAfterCalibration() {
         let hold = SessionFit.Hold()
-        #expect(hold.refusal("a", now: 103, calibratedAt: 100) != nil)
-        #expect(hold.refusal("a", now: 106, calibratedAt: 100) == nil)
-        #expect(hold.refusal("a", now: 106, calibratedAt: -.infinity) == nil)
+        #expect(hold.refusal(now: 103, calibratedAt: 100) != nil)
+        #expect(hold.refusal(now: 106, calibratedAt: 100) == nil)
+        #expect(hold.refusal(now: 106, calibratedAt: -.infinity) == nil)
     }
 
     @Test func anAskedForLayoutClearsTheHold() {
         var hold = SessionFit.Hold()
         hold.noteFit("a", width: 832, narrowed: ["b"], at: 10)
         hold.reset()
-        #expect(hold.refusal("b", now: 11, calibratedAt: -.infinity) == nil)
         #expect(hold.floors(["a", "b"], focus: 1, now: 11) == [0, 0])
     }
 
-    @Test func aPaneFittedAgainIsNoLongerHeldNarrow() {
+    @Test func aPaneNarrowedByALaterFitNoLongerKeepsItsFit() {
         var hold = SessionFit.Hold()
         hold.noteFit("a", width: 832, narrowed: ["b"], at: 10)
         hold.noteFit("b", width: 832, narrowed: ["a"], at: 300)
-        #expect(hold.refusal("b", now: 301, calibratedAt: -.infinity) == nil)
-        #expect(hold.refusal("a", now: 301, calibratedAt: -.infinity) != nil)
         #expect(hold.floors(["a", "b"], focus: 0, now: 301) == [0, 832])
     }
 }
