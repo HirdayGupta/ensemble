@@ -4,6 +4,7 @@ Each release and what changed. Back to the [README](../README.md).
 
 ## Unreleased
 
+- While Ensemble is paused for the keyboard or mouse, a gesture or headphone press acts on the session your nose is on, not the one focused before you started typing. The target keeps following your look through the pause (no window is raised and keyboard focus stays put until you resume), the highlight comes back on that session as soon as a gesture starts, and with your nose off every session the gesture is refused with the usual "Your nose is not on a Claude session". Before, the target froze at the pause and the highlight was hidden, so a pinch could start dictation in a session you were no longer looking at.
 - The log names a camera by its model id, never its device name (which can carry the owner's name, such as "Akshay's iPhone Camera").
 - Gestures and headphone presses work while Ensemble is paused for the keyboard or mouse: the pause now only holds focus, the highlight and resizes. Before, a double pinch made right after typing landed inside the 2-second quiet time and did nothing, and each pause began or ended by resetting a half-made gesture.
 - Holding an open hand no longer asks for a cancel that nothing acted on: a resting open hand does nothing, and Settings, Actions drops the Cancel row. Saved settings keep their Send and scroll gestures.

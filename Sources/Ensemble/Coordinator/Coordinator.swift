@@ -376,16 +376,16 @@ final class Coordinator: AppCoordinating {
         guard !state.calibrating else { return }
         if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head), ctx.setup.isUsable(p) {
             state.set(\.spotInUse, ctx.setup.spotInUseID)
-            if ctx.handsBusy {
-                // Hands on the keyboard or mouse: focus and the highlight stay where they are. The faded dot keeps
-                // up with the nose so it comes back where you look; while dictating the edge warnings hold still.
-                if ctx.listening == nil { dot.follow(nose: p, at: head.t, onSession: false) }
+            if ctx.handsBusy, ctx.listening != nil {
+                // Hands on the keyboard or mouse while dictating: the dictating session and its edge warnings hold still.
                 EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) paused faces=\(head.faceCount)")
             } else {
-                // A pinch or scroll in progress holds everything still: the hand is in front of the face.
-                let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
+                // A pinch or scroll in progress holds everything still: the hand is in front of the face. Paused for
+                // the keyboard or mouse, the target still follows the nose (gestures act on the session you look at)
+                // while keyboard focus and the windows stay put.
+                let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive, paused: ctx.handsBusy)
                 dot.follow(nose: p, at: head.t, onSession: under != nil)
-                EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")
+                EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t))\(ctx.handsBusy ? " paused" : "") faces=\(head.faceCount)")
             }
         } else if head.faceCount != 1 && head.t - ctx.lastOneFaceT <= 1.5 {
             // A hand in front of the face hides it or reads as a second face for a moment: keep the last target and dot.
@@ -469,8 +469,11 @@ final class Coordinator: AppCoordinating {
     /// focus change. Never while away, paused for the keyboard or mouse, in the tour, dictating, sending, mid-gesture
     /// or mid-resize; the controller adds the checks every action on Claude makes (Claude in front, no recent input).
     private func fitFocusedSession(now: TimeInterval) {
+        // While paused the target can move with the nose; the trigger sees that move only after the pause, so a session
+        // looked at meanwhile is fitted once you resume, and one you stayed on is not fitted again.
+        guard !ctx.handsBusy else { return }
         guard let id = fitTrigger.observe(focus.target?.id, at: now), let target = focus.target, target.id == id else { return }
-        guard settings.fitFocusedSession, health.running, !awayState.isAway, !ctx.handsBusy, !tourOpen, practiceSink == nil,
+        guard settings.fitFocusedSession, health.running, !awayState.isAway, !tourOpen, practiceSink == nil,
               ctx.listening == nil, !ctx.busy, !send.inFlight, !send.afterStop, !send.earlyArmed,
               gestures.progress == nil, !panes.isRunning, !focus.userLeftClaude else { return }
         panes.autoFit(target)
@@ -507,7 +510,6 @@ final class Coordinator: AppCoordinating {
                                     pointer: NSEvent.mouseLocation,
                                     ownKeyAt: max(lastHeldBackKeyAt, HeadphoneRemote.lastSyntheticKeyAt),
                                     ownPointerAt: ownPointerAt)
-        ctx.overlay.setHandsOnInput(busy)
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
         EnsembleLog.write(busy ? "paused: keyboard or mouse in use" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
@@ -519,9 +521,17 @@ final class Coordinator: AppCoordinating {
             panes.cancel()
             if send.earlyArmed { send.dropEarly() }
             if send.afterStop, !send.returnSendPending { send.afterStop = false }
+        } else {
+            focus.resumed()
         }
         health.update()
         pushOverlay()
+    }
+
+    /// A gesture or headphone press is acting through a pause: the highlight comes back on the session it acts on.
+    private var actingThroughPause: Bool {
+        ctx.busy || ctx.headphoneActive || send.inFlight || send.afterStop || send.earlyArmed || gestures.pinchHeld
+            || gestures.progress != nil || gestures.peaceOpen || scroll.isActive || scroll.isCoasting
     }
 
     /// Every hand frame is needed while dictating, calibrating, or a gesture is in progress.
@@ -753,6 +763,7 @@ final class Coordinator: AppCoordinating {
         let acting = ctx.listening ?? (gestures.progress?.action == .send ? send.lastSpoken?.session : nil) ?? focus.target
         ctx.overlay.setSession(name: acting.map(ctx.name(of:)), switching: focus.switching())
         ctx.overlay.setEdge(dot.overlayEdge(focus: focus))
+        ctx.overlay.setHandsOnInput(ctx.handsBusy && !actingThroughPause)
         ctx.overlay.update(target: ctx.targetFrame, nose: ctx.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()
