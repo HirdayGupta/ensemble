@@ -112,6 +112,13 @@ public enum SessionFit {
             fired = true
             return id
         }
+
+        /// True while `observe` may still answer for `focused`: a focus it has not seen yet, or one still settling.
+        /// The tick runs on a timer only while this or another time-based step waits.
+        public func waiting(for focused: String?) -> Bool {
+            guard let focused else { return false }
+            return focused != session || !fired
+        }
     }
 }
 

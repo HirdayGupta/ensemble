@@ -38,6 +38,39 @@ final class FrameAnalyzer: @unchecked Sendable {
         return FrameLight(t: t, meanLuma: mean, lumaStdDev: max(0, sumSquares / n - mean * mean).squareRoot())
     }
 
+    /// Mean luma (0 to 255) of each cell of a 32 by 24 grid over a BGRA frame, from 8 by 8 pixels spread over the
+    /// cell: enough samples that camera noise moves a cell by about a level, for `StillFace`. About 49,000 reads,
+    /// a small fraction of the frame preparation and tracker pass it can save.
+    func lumaGrid(from pixels: CVPixelBuffer) -> [Float] {
+        CVPixelBufferLockBaseAddress(pixels, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixels) else { return [] }
+        let width = CVPixelBufferGetWidth(pixels), height = CVPixelBufferGetHeight(pixels)
+        let stride = CVPixelBufferGetBytesPerRow(pixels)
+        let columns = 32, rows = 24, samples = 8
+        guard width >= columns * samples, height >= rows * samples else { return [] }
+        var grid = [Float](repeating: 0, count: columns * rows)
+        for r in 0..<rows {
+            for sy in 0..<samples {
+                let y = (r * samples + sy) * height / (rows * samples)
+                let row = base.advanced(by: y * stride).assumingMemoryBound(to: UInt8.self)
+                for c in 0..<columns {
+                    var sum: UInt32 = 0
+                    for sx in 0..<samples {
+                        let x = (c * samples + sx) * width / (columns * samples)
+                        let px = row + x * 4
+                        // Integer Rec. 709 weights (out of 256) on B, G, R.
+                        sum += 18 * UInt32(px[0]) + 183 * UInt32(px[1]) + 55 * UInt32(px[2])
+                    }
+                    grid[r * columns + c] += Float(sum) / 256
+                }
+            }
+        }
+        let n = Float(samples * samples)
+        for i in grid.indices { grid[i] /= n }
+        return grid
+    }
+
     /// The frame for the face tracker: scaled to `FaceFrameSlot.size` and swapped from BGRA to RGBA, tightly packed,
     /// ready to become the page's ImageData. Nil when the frame cannot be read.
     func facePixels(from pixels: CVPixelBuffer) -> (bytes: Data, width: Int, height: Int)? {

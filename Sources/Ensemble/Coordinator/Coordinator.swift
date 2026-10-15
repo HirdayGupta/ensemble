@@ -3,8 +3,10 @@ import Combine
 import EnsembleCore
 
 /// Wires the camera engine, the gesture rules, the nose pointer and the Claude bridge together. Each job has
-/// its own controller; this routes camera readings and gesture intents to them, runs the 20 Hz tick, and keeps
-/// the steps that cut across controllers (interrupting, refreshing the overlay).
+/// its own controller; this routes camera readings and gesture intents to them, runs the tick, and keeps the steps
+/// that cut across controllers (interrupting, refreshing the overlay). The tick runs on events (a camera reading, a
+/// key, a headphone press, a session scan, an app switch) and on a 20 Hz timer only while something time-based is
+/// pending (`tickPending`), so an idle Ensemble does not wake 20 times a second.
 @MainActor
 final class Coordinator: AppCoordinating {
     private let ctx: CoordinatorContext
@@ -37,6 +39,13 @@ final class Coordinator: AppCoordinating {
 
     private var tickTimer: Timer?
     private var refreshTimer: Timer?
+    private var lastTickAt: TimeInterval = -.infinity
+    private var inTick = false
+    /// The timer keeps running this long after the last pending step ends, so a step's own trailing checks (the
+    /// pointer put back after a scroll, the key watch switching off) still run at 20 Hz.
+    private var tickTailUntil: TimeInterval = -.infinity
+    private static let tickInterval = 1.0 / 20.0
+    private static let tickTail = 0.5
     private var cancellables = Set<AnyCancellable>()
     private var headStats: (since: TimeInterval, n: Int, faces: [Int]) = (0, 0, [0, 0, 0])
     private var refreshInFlight = false
@@ -77,8 +86,9 @@ final class Coordinator: AppCoordinating {
         dictation = DictationController(ctx: ctx, focus: focus, send: send)
         headphone = HeadphoneRemote(settingOn: { [weak settings] in (settings?.headphonePresses ?? false) && (settings?.enabled ?? false) },
                                     claudeRunning: { [weak ctx] in ctx?.bridge.claudeIsRunning() ?? false })
-        headphone.onAction = { [weak self] in self?.apply(headphone: $0) }
+        headphone.onAction = { [weak self] in self?.apply(headphone: $0); self?.wake() }
         ctx.changed = { [weak self] in self?.pushOverlay() }
+        ctx.wake = { [weak self] in self?.armTickTimer() }
         panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
         panes.keyWatchOn = { [weak self] in self?.keyTap.isActive ?? true }
         panes.framesChanged = { [weak self] in
@@ -88,10 +98,13 @@ final class Coordinator: AppCoordinating {
             self.pushOverlay()
         }
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
+        focus.frontAppChanged = { [weak self] in self?.wake() }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
         dictation.stopResolved = { [weak self] confirmed in self?.stopResolved(confirmed: confirmed) }
         keyTap.onKey = { [weak self] isReturn, modified, isRepeat in
-            self?.handleKey(isReturn: isReturn, modified: modified, isRepeat: isRepeat) ?? false
+            guard let self else { return false }
+            defer { self.wake() }
+            return self.handleKey(isReturn: isReturn, modified: modified, isRepeat: isRepeat)
         }
         keyTap.onReturnUp = { [weak self] in self?.returnKeys.returnReleased() }
         keyTap.onUnseenKeys = { [weak self] in self?.returnKeys.noteUnseenKeys(now: CACurrentMediaTime()) }
@@ -164,8 +177,9 @@ final class Coordinator: AppCoordinating {
         reconcileAway()
         health.away = awayState.isAway
         if !awayState.isAway { engine.start(cameraName: settings.cameraName) }
-        tickTimer?.invalidate()
-        tickTimer = commonModeTimer(1.0 / 20.0) { [weak self] in self?.tick() }
+        tickTimer?.invalidate(); tickTimer = nil
+        lastTickAt = -.infinity
+        tick()
         refreshTimer?.invalidate()
         refreshTimer = commonModeTimer(1.0) { [weak self] in self?.refreshSessions() }
         ctx.bridge.watcher.startWorkspaceWatch()
@@ -337,6 +351,7 @@ final class Coordinator: AppCoordinating {
                                 + "Follow the dot on \(setup.name(ofScreenID: screen)), or recalibrate every screen if the camera moved")
             }
             self.health.update()
+            self.wake()
         }
         // Calibration owns the hands and the head: end any dictation first, because
         // gesture events are ignored while it runs and a held talk pose would never be seen released.
@@ -344,6 +359,7 @@ final class Coordinator: AppCoordinating {
         gestures.reset()
         scroll.cancel()
         if ctx.listening != nil { dictation.endWhenIdle(reason: "calibrating") }
+        wake()
     }
 
     /// While the tour practices gestures, real intents and head readings go to `sink` instead of acting on
@@ -355,12 +371,14 @@ final class Coordinator: AppCoordinating {
         scroll.cancel()
         if ctx.listening != nil { dictation.endWhenIdle(reason: "tour practice") }
         practiceSink = sink
+        wake()
     }
 
     func exitGesturePractice() {
         practiceSink = nil
         gestures.reset()
         scroll.cancel()
+        wake()
     }
 
     func enterTour() {
@@ -381,6 +399,7 @@ final class Coordinator: AppCoordinating {
         if settings.enabled, !Permissions.accessibilityTrusted { promptAccessibilityOnce() }
         gestures.reset()
         scroll.cancel()
+        wake()
     }
 
     // MARK: - Inputs
@@ -388,6 +407,8 @@ final class Coordinator: AppCoordinating {
     private func handle(head: HeadObservation) {
         // A reading already in flight when the camera went off for the lock: nothing acts on it.
         if awayState.isAway { return }
+        // First, so the reading meets a fresh keyboard-and-mouse pause.
+        wake()
         ctx.latestHead = head
         // Head readings are not practised in the tour, but they must not act on Claude while it is open.
         if practiceSink != nil || tourOpen { return }
@@ -431,6 +452,7 @@ final class Coordinator: AppCoordinating {
 
     private func handle(hand: HandObservation) {
         dictation.heartbeat()
+        wake()
         guard !state.calibrating else { return }
         let intents = gestures.push(hand)
         practiceSink?.tourPractice(hand: hand)
@@ -450,6 +472,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func handle(light: FrameLight) {
+        wake()
         guard let covered = ctx.cover.push(light) else { return }
         if covered {
             if ctx.listening != nil { dictation.end(reason: "camera covered") }
@@ -461,7 +484,46 @@ final class Coordinator: AppCoordinating {
         health.update()
     }
 
+    /// An event happened: tick now unless the timer is running or a tick ran within the last 45 ms (head and hand
+    /// readings together arrive up to 60 times a second), and start or stop the timer for what is pending now.
+    private func wake() {
+        guard health.running, !inTick else { return }
+        if tickTimer == nil, CACurrentMediaTime() - lastTickAt >= Self.tickInterval - 0.005 { tick() } else { armTickTimer() }
+    }
+
+    /// The 20 Hz timer runs only while `tickPending`, and for `tickTail` after. Starting it also applies the face
+    /// rate at once, so a gesture, dictation or send that needs every frame gets it without waiting for a tick.
+    private func armTickTimer() {
+        let now = CACurrentMediaTime()
+        if health.running, tickPending(now: now) { tickTailUntil = now + Self.tickTail }
+        let want = health.running && now < tickTailUntil
+        if want, tickTimer == nil {
+            tickTimer = commonModeTimer(Self.tickInterval) { [weak self] in self?.tick() }
+            if !inTick { updateFaceRate(now: now) }
+        } else if !want, let timer = tickTimer {
+            timer.invalidate()
+            tickTimer = nil
+        }
+    }
+
+    /// Something in the tick that runs against the clock: the dictation checks (input, no face, the microphone, the
+    /// dictating pane's frame), a start, stop or send in flight, a gesture or hold, a scroll, a resize, calibration,
+    /// a deferred focus, the Return windows, a refusal to expire, a fit waiting for focus to settle. Everything else
+    /// in the tick changes only with an event, and the 1 s session refresh ticks too (stale readings, a camera
+    /// that stopped). The dictation safety's own deadman and standing check run on their own timer regardless.
+    private func tickPending(now: TimeInterval) -> Bool {
+        needsFullRate || send.inFlight || send.returnSendPending || send.earlyHoldPending || gestures.talking
+            || scroll.isRunning || focus.hasDeferred || keyTap.isActive
+            || returnKeys.wantsKeys(now: now, returnSendPending: send.returnSendPending)
+            || state.lastRefusal != nil || ctx.headphoneActive
+            || (settings.fitFocusedSession && !ctx.handsBusy && fitTrigger.waiting(for: focus.target?.id))
+    }
+
     private func tick() {
+        guard !inTick else { return }
+        inTick = true
+        defer { inTick = false; armTickTimer() }
+        lastTickAt = CACurrentMediaTime()
         dropStaleReadings()
         updateHandsBusy(now: CACurrentMediaTime())
         // Away: a deferred focus move must not land behind the lock screen.
@@ -561,7 +623,8 @@ final class Coordinator: AppCoordinating {
     }
 
     /// The face runs at 10 Hz while nothing follows the nose closely (`FrameRatePlanner.wantsSlowFace`) and at full rate
-    /// again on the next tick once that ends or a gesture, dictation or send needs every frame.
+    /// again on the next tick once that ends (the next reading, or the app switch itself), or at once when a gesture,
+    /// dictation or send needs every frame (`armTickTimer`).
     private func updateFaceRate(now: TimeInterval) {
         let full = needsFullRate
         engine.setForceFullRate(full)
@@ -595,6 +658,7 @@ final class Coordinator: AppCoordinating {
     /// The 1 s check, and `notified` when Claude reported a window or pane change (`ClaudeWatcher`). A notified refresh
     /// skips the idle slowdown (a change is worth reading at once) and, when one is in flight, runs after it.
     private func refreshSessions(notified: Bool = false) {
+        wake()
         health.checkPermissions()
         let claudeUp = ctx.bridge.claudeIsRunning()
         dictation.dropIfClaudeGone(running: claudeUp)
@@ -637,6 +701,8 @@ final class Coordinator: AppCoordinating {
             self.ctx.sessions = found
             self.health.sessionsScanned = true
             self.health.update()
+            // The face rate depends on whether any session is on screen.
+            self.wake()
         }
     }
 
@@ -809,6 +875,7 @@ final class Coordinator: AppCoordinating {
         scroll.cancel()
         focus.forgetTarget()
         health.update()
+        wake()
     }
 
     private func pushOverlay() {
@@ -820,5 +887,6 @@ final class Coordinator: AppCoordinating {
         ctx.overlay.update(target: ctx.targetFrame, nose: ctx.nosePoint, listening: state.listening,
                            showNoseDot: settings.showNoseDot, showHighlight: settings.showHighlight)
         health.update()
+        armTickTimer()
     }
 }

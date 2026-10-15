@@ -63,6 +63,18 @@ import Testing
         #expect(t.observe("b", at: 5.7) == "b")
     }
 
+    @Test func theTriggerWaitsUntilItHasAnsweredForTheFocus() {
+        var t = SessionFit.Trigger()
+        #expect(!t.waiting(for: nil))
+        #expect(t.waiting(for: "a"))
+        _ = t.observe("a", at: 0)
+        #expect(t.waiting(for: "a"))
+        _ = t.observe("a", at: 1)
+        #expect(!t.waiting(for: "a"))
+        #expect(t.waiting(for: "b"))
+        #expect(!t.waiting(for: nil))
+    }
+
     @Test func comingBackToASessionIsANewFocusChange() {
         var t = SessionFit.Trigger()
         _ = t.observe("a", at: 0)

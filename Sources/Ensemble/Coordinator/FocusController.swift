@@ -27,6 +27,8 @@ final class FocusController {
     /// Measured 2026-10-14: a covered-session raise pulled Claude back over a full-screen app twice in 7 s.
     private(set) var userLeftClaude: Bool
     private var activationObserver: NSObjectProtocol?
+    /// You switched to or from Claude: the face rate and the tick follow at once (wired by the Coordinator).
+    var frontAppChanged: () -> Void = {}
 
     init(ctx: CoordinatorContext) {
         self.ctx = ctx
@@ -52,6 +54,7 @@ final class FocusController {
         EnsembleLog.write(left ? "you switched to another app; Claude stays where you put it until you return to it"
                                : "Claude is frontmost again; focus follows the nose")
         if left { pending = nil; tracker.clearCovered() }
+        frontAppChanged()
     }
 
     var target: ClaudeSession? { tracker.target }
@@ -156,6 +159,8 @@ final class FocusController {
     }
 
     var hasTargetOrCandidate: Bool { tracker.target != nil || tracker.candidate != nil }
+    /// A deferred focus is waiting to retry from the tick.
+    var hasDeferred: Bool { pending != nil }
     func forgetTarget() { tracker.forgetTarget(); owedFocus = false }
     func forgetTargetAndCandidate() { tracker.forgetTargetAndCandidate(); owedFocus = false }
     func forgetAll() { tracker.forgetAll(); owedFocus = false }

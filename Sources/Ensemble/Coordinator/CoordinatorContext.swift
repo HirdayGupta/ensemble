@@ -53,6 +53,8 @@ final class CoordinatorContext {
     var headphoneActive: Bool { CACurrentMediaTime() < headphoneUntil }
     /// Redraws the overlay from the current facts.
     var changed: () -> Void = {}
+    /// Something time-based may have started (a refusal to expire): the Coordinator's tick timer checks whether to run.
+    var wake: () -> Void = {}
 
     private var calibratedCache: (value: Bool, at: TimeInterval)?
 
@@ -109,6 +111,7 @@ final class CoordinatorContext {
             }
         }
         EnsembleLog.write("refused: \(why)")
+        wake()
     }
 
     /// The session's name as Claude shows it now, for the island.
