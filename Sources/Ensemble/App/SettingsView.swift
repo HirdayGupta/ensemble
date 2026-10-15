@@ -81,7 +81,7 @@ private struct GeneralSettings: View {
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Checks soon after launch and then every hour; the button shows a new version as soon as one is found. A new version installs only while you are not dictating, calibrating or in the tour, and Ensemble then restarts on its own. Off: nothing is checked until you press Check for Updates.")
+                Text("On: checks soon after launch and then every hour, and installs a new version by itself once you have been idle for 30 seconds (not dictating, sending, calibrating or in the tour); Ensemble reopens on its own. Off: nothing is checked until you press Check for Updates, which asks once before installing. \"Update to\" installs in one press.")
             }
             Section("Tour") {
                 Button("Replay tour") { replayTour(nil) }
