@@ -49,16 +49,16 @@ mkdir -p build/appcast
 [ ! -f "$PAGES/appcast.xml" ] || cp "$PAGES/appcast.xml" build/appcast/appcast.xml
 ENSEMBLE_DOWNLOAD_PREFIX="https://github.com/$REPO/releases/download/$TAG/" scripts/appcast.sh "$DMG" build/appcast 2>&1 | tee -a "$LOG"
 [ -s build/appcast/appcast.xml ] || { log "error: no appcast was produced; nothing was tagged or published"; exit 1; }
-cp build/appcast/appcast.xml "$PAGES/appcast.xml"
-git -C "$PAGES" add appcast.xml
-git -C "$PAGES" commit --quiet -m "Appcast: Ensemble $VERSION"
+PAGES_SHA="$(gh api "repos/$REPO/contents/appcast.xml?ref=gh-pages" --jq .sha 2>/dev/null || true)"
 
-git tag -a "$TAG" -m "Ensemble $VERSION"
-git push --quiet origin "$TAG"
+# The tag and the appcast go through GitHub's API, not git push: the production Mac's job service lets a job push
+# only its own branch, and a release touches neither main nor any branch's history except gh-pages' appcast file.
 # Ensemble.dmg, the same file under a fixed name, is what the website's Download buttons fetch directly:
 # https://github.com/<repo>/releases/latest/download/Ensemble.dmg always resolves to the newest release.
 cp "$DMG" build/Ensemble.dmg
-gh release create "$TAG" "$DMG" "$DMG.sha256" build/Ensemble.dmg --title "Ensemble $VERSION" --notes-file "$NOTES" | tee -a "$LOG"
+gh release create "$TAG" "$DMG" "$DMG.sha256" build/Ensemble.dmg --target "$(git rev-parse HEAD)" \
+  --title "Ensemble $VERSION" --notes-file "$NOTES" | tee -a "$LOG"
 
-git -C "$PAGES" push --quiet origin HEAD:gh-pages
+gh api -X PUT "repos/$REPO/contents/appcast.xml" -f branch=gh-pages -f message="Appcast: Ensemble $VERSION" \
+  -f content="$(base64 < build/appcast/appcast.xml | tr -d '\n')" ${PAGES_SHA:+-f sha="$PAGES_SHA"} --jq .commit.sha | tee -a "$LOG"
 log "done: $TAG released; installed copies see it within their next update check"
