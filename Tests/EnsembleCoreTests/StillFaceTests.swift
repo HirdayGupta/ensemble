@@ -42,7 +42,8 @@ struct StillFaceTests {
 
     @Test func aChangeAtTheThresholdCountsAsMovement() {
         var s = StillFace()
-        let d = run(&s, changes: Array(repeating: s.threshold, count: 10))
+        let threshold = s.threshold
+        let d = run(&s, changes: Array(repeating: threshold, count: 10))
         #expect(sends(d) == 10)
     }
 
@@ -97,7 +98,8 @@ struct StillFaceTests {
 
     @Test func noReadingYetSends() {
         var s = StillFace()
-        #expect(s.decide(change: 0, now: 1, forceFull: false, lastReadingAt: nil) == .send)
+        let d = s.decide(change: 0, now: 1, forceFull: false, lastReadingAt: nil)
+        #expect(d == .send)
     }
 
     @Test func changeIsTheLargestCellDifference() {
