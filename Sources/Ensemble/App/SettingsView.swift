@@ -163,6 +163,11 @@ private struct DisplaySettings: View {
                         Text("Steady").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Toggle("Correct for where I sit", isOn: $settings.correctForPosition)
+                Text(settings.correctForPosition
+                     ? "Pointing follows your nose even after you slide along the desk. Needs a calibration made with this version; older ones keep pointing by angle alone until you recalibrate."
+                     : "Pointing uses only the angle of your head, so recalibrate after you move your seat.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Listening indicator") {
                 Toggle("Live sound bars (asks for microphone access)", isOn: Binding(get: { settings.liveSoundBars }, set: { on in

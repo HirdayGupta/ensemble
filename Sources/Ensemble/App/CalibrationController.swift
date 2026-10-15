@@ -128,6 +128,7 @@ final class CalibrationController {
     private func average(headSource: () -> HeadObservation?, target: CGPoint) async -> Averaging {
         var yaws: [Double] = []
         var pitches: [Double] = []
+        var positions: [HeadPosition] = []
         var lastT: TimeInterval = -1
         let start = ContinuousClock.now
         while true {
@@ -140,6 +141,7 @@ final class CalibrationController {
                 lastT = head.t
                 yaws.append(head.yaw)
                 pitches.append(head.pitch)
+                if let position = head.position { positions.append(position) }
             }
             try? await Task.sleep(nanoseconds: 16_000_000)
         }
@@ -147,8 +149,15 @@ final class CalibrationController {
         return .sample(CalibrationSample(
             yaw: yaws.reduce(0, +) / Double(yaws.count),
             pitch: pitches.reduce(0, +) / Double(pitches.count),
-            target: target
+            target: target,
+            // Only when every reading had one: a sample with a partly missing position is not trusted.
+            position: positions.count == yaws.count ? Self.mean(of: positions) : nil
         ))
+    }
+
+    private static func mean(of ps: [HeadPosition]) -> HeadPosition {
+        let n = Double(ps.count)
+        return HeadPosition(x: ps.map(\.x).reduce(0, +) / n, y: ps.map(\.y).reduce(0, +) / n, z: ps.map(\.z).reduce(0, +) / n)
     }
 
     private func pause(seconds: Double) async -> Bool {
