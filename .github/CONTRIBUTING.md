@@ -146,7 +146,7 @@ SwiftPM package with two targets plus a separate benchmark package.
 | `Sources/Ensemble/App` | The shell: menu bar, settings, calibration, status capsule and overlay, hotkey, notifications, Sparkle updater. |
 | `Sources/Ensemble/Resources/web` | The bundled MediaPipe runtime, WebAssembly, model and tracker page. |
 | `Tests/EnsembleCoreTests` | Swift Testing tests and the recorded gesture fixtures. |
-| `Tools/PerfBench` | Separate package of camera-free micro-benchmarks (synthetic frames). |
+| `Tools/PerfBench` | Separate package of camera-free micro-benchmarks (synthetic frames and head paths). |
 | `scripts/` | `bundle.sh`, `release.sh`, `appcast.sh`, `dev-install.sh`, `dev-update.sh`, `make-icon.swift`. |
 | `docs/` | Guides and references: [gestures](../docs/gestures.md), [safety](../docs/safety.md), [workflows](../docs/workflows.md), [performance](../docs/performance.md), [gotchas](../docs/gotchas.md), [RELEASING.md](../docs/RELEASING.md) and the [changelog](../docs/CHANGELOG.md). |
 | `.github/workflows` | `ci.yml` (build and test), `hygiene.yml` (workflow and secrets checks), `release.yml` (tag-triggered release, disabled until Developer ID signing exists). |

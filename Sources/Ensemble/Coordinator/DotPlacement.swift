@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import EnsembleCore
 
 /// Where the nose dot sits. While dictating: hidden, and instead the edge warning for the side the nose is
@@ -7,8 +8,9 @@ import EnsembleCore
 @MainActor
 final class DotPlacement {
     private let ctx: CoordinatorContext
-    /// The drawn dot: follows the filtered nose on a leash so small head wobble never moves it.
-    private var dot: CGPoint?
+    /// The drawn dot: rests through small head wobble and follows the filtered nose once it moves (`NoseDot`).
+    private var rest = NoseDot()
+    private var dot: CGPoint? { rest.dot }
     /// The latest smoothed nose point, wherever it is (also off Claude): drives the edge warning while listening.
     private var lastNose: CGPoint?
     /// While dictating: what the nose is approaching beyond the dictating session's edge.
@@ -20,14 +22,14 @@ final class DotPlacement {
 
     var hasDot: Bool { dot != nil }
 
-    func follow(nose p: CGPoint, onSession: Bool) {
+    func follow(nose p: CGPoint, at t: TimeInterval, onSession: Bool) {
         lastNose = p
-        dot = onSession ? NoseDot.follow(dot, nose: p) : nil
+        if onSession { rest.follow(nose: p, at: t) } else { rest.reset() }
     }
 
     var hasEdgeWarning: Bool { edgeWarning != nil }
 
-    func clear() { dot = nil; lastNose = nil }
+    func clear() { rest.reset(); lastNose = nil }
 
     func place(target: ClaudeSession?) {
         if let session = ctx.listening {

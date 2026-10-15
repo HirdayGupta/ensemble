@@ -278,7 +278,7 @@ final class Coordinator: AppCoordinating {
             // A pinch or scroll in progress holds everything still: the hand is in front of the face.
             state.set(\.spotInUse, ctx.setup.spotInUseID)
             let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
-            dot.follow(nose: p, onSession: under != nil)
+            dot.follow(nose: p, at: head.t, onSession: under != nil)
             EnsembleTrace.write(head.t, "head nose=\(Int(p.x)),\(Int(p.y)) under=\(under?.id ?? "-") \(focus.traceState(at: head.t)) faces=\(head.faceCount)")
         } else if head.faceCount != 1 && head.t - ctx.lastOneFaceT <= 1.5 {
             // A hand in front of the face hides it or reads as a second face for a moment: keep the last target and dot.

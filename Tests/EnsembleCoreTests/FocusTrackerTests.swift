@@ -97,17 +97,51 @@ import Testing
 
 @Suite struct NoseDotTests {
     @Test func firstReadingPlacesTheDotOnTheNose() {
-        #expect(NoseDot.follow(nil, nose: CGPoint(x: 5, y: 6)) == CGPoint(x: 5, y: 6))
+        var d = NoseDot()
+        #expect(d.follow(nose: CGPoint(x: 5, y: 6), at: 0) == CGPoint(x: 5, y: 6))
     }
 
-    @Test func wobbleInsideTheLeashDoesNotMoveIt() {
-        let d = CGPoint(x: 100, y: 100)
-        #expect(NoseDot.follow(d, nose: CGPoint(x: 110, y: 110)) == d)
+    @Test func wobbleInsideTheWakeRadiusDoesNotMoveIt() {
+        var d = NoseDot()
+        d.follow(nose: CGPoint(x: 100, y: 100), at: 0)
+        for i in 1...30 {
+            let wobble = CGFloat(i % 2 == 0 ? 12 : -12)
+            #expect(d.follow(nose: CGPoint(x: 100 + wobble, y: 100 - wobble), at: Double(i) / 30) == CGPoint(x: 100, y: 100))
+        }
     }
 
-    @Test func beyondTheLeashTheDotTrailsByExactlyTheLeash() {
-        let p = NoseDot.follow(CGPoint(x: 0, y: 0), nose: CGPoint(x: 100, y: 0))
-        #expect(abs(p.x - 76) < 1e-9 && p.y == 0)
+    @Test func oneNoisyReadingBeyondTheRadiusDoesNotWakeIt() {
+        var d = NoseDot()
+        d.follow(nose: CGPoint(x: 100, y: 100), at: 0)
+        #expect(d.follow(nose: CGPoint(x: 160, y: 100), at: 1.0 / 30) == CGPoint(x: 100, y: 100))
+        #expect(d.follow(nose: CGPoint(x: 101, y: 100), at: 2.0 / 30) == CGPoint(x: 100, y: 100))
+        #expect(!d.moving)
+    }
+
+    @Test func onceMovingTheDotIsExactlyOnTheNoseAndRestsWhereItStopped() {
+        var d = NoseDot()
+        d.follow(nose: .zero, at: 0)
+        var t = 0.0
+        var p = CGPoint.zero
+        for _ in 0..<15 {
+            t += 1.0 / 30
+            p.x += 20
+            d.follow(nose: p, at: t)
+        }
+        #expect(d.moving)
+        #expect(d.dot == p)
+        // The nose stops at 300: no trailing gap, and after the settle time the dot rests there.
+        for _ in 0..<10 { t += 1.0 / 30; d.follow(nose: CGPoint(x: p.x + 1, y: 0), at: t) }
+        #expect(!d.moving)
+        #expect(abs(d.dot!.x - p.x) <= 1)
+    }
+
+    @Test func resetForgetsTheDot() {
+        var d = NoseDot()
+        d.follow(nose: CGPoint(x: 5, y: 5), at: 0)
+        d.reset()
+        #expect(d.dot == nil)
+        #expect(d.follow(nose: CGPoint(x: 50, y: 50), at: 0.1) == CGPoint(x: 50, y: 50))
     }
 }
 
