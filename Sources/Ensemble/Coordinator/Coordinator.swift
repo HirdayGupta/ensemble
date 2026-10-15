@@ -426,7 +426,7 @@ final class Coordinator: AppCoordinating {
         EnsembleTrace.write(hand.t, "hand present=\(hand.present ? 1 : 0) pose=\(hand.pose?.rawValue ?? "-") pinch=\(hand.pinch.map { String(format: "%.3f", $0) } ?? "-") palm=\(hand.palmCenter.map { String(format: "%.3f,%.3f", $0.x, $0.y) } ?? "-") \(gestures.traceState)\(intents.isEmpty ? "" : " -> \(intents)")")
         for intent in intents { apply(intent) }
         let onClaude = focus.target != nil || ctx.listening != nil
-        let progress = ctx.cover.covered || !settings.enabled || !onClaude || ctx.handsBusy ? nil : gestures.progress
+        let progress = ctx.cover.covered || !settings.enabled || !onClaude ? nil : gestures.progress
         ctx.gestureShowing = progress != nil
         ctx.overlay.setGesture(progress)
         dot.place(target: focus.target)
@@ -519,19 +519,14 @@ final class Coordinator: AppCoordinating {
         guard busy != ctx.handsBusy else { return }
         ctx.handsBusy = busy
         EnsembleLog.write(busy ? "paused: keyboard or mouse in use" : "resumed: no keyboard or mouse use for \(settings.pauseAfterInputSeconds) s")
-        // A gesture half made on either side of the pause never completes across it; a running dictation keeps its
-        // place in the machine, so a double pinch afterwards still stops it.
-        let talking = gestures.talking
-        gestures.reset()
-        if talking { gestures.beginTalkExternally() }
+        // Gestures are deliberate and keep working through a pause (a hand raised from the keyboard to pinch would
+        // otherwise land inside the quiet time and do nothing): the pause only holds focus, the highlight and resizes.
         if busy {
             focus.clearDeferred()
             scroll.cancel()
             panes.cancel()
             if send.earlyArmed { send.dropEarly() }
             if send.afterStop, !send.returnSendPending { send.afterStop = false }
-            ctx.gestureShowing = false
-            ctx.overlay.setGesture(nil)
         }
         health.update()
         pushOverlay()
@@ -597,16 +592,6 @@ final class Coordinator: AppCoordinating {
         case .scroll, .dragScroll: break
         default: EnsembleLog.write("gesture: \(intent)")
         }
-        if ctx.handsBusy {
-            // Paused: nothing a gesture asks for is done, except stopping a dictation, which only ever turns the
-            // microphone off. The machine forgets a start it announced, so the next double pinch starts again.
-            switch intent {
-            case .talkBegan: gestures.abortTalk()
-            case .talkEnded(let reason): if ctx.listening != nil { dictation.end(reason: reason.rawValue) }
-            default: break
-            }
-            return
-        }
         if intent == .talkBegan || intent == .sendRequested { ctx.overlay.clearBanner() }
         switch intent {
         case .talkBegan: dictation.begin()
@@ -625,7 +610,6 @@ final class Coordinator: AppCoordinating {
             if ctx.setup.isPromptShowing { send.dropEarly(); ctx.setup.start(); return }
             if send.earlyArmed { send.earlyHoldCompleted(); return }
             if ctx.listening != nil || ctx.busy { send.sendAfterStop(in: ctx.listening); EnsembleLog.write("send after stop") } else { requestSend() }
-        case .cancelRequested: break
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
         case .dragScrollEnded: scroll.released()
         case .dragScroll(let handDy): scroll.drag(handDy: handDy, target: focus.target)
@@ -642,8 +626,6 @@ final class Coordinator: AppCoordinating {
         guard practiceSink == nil, !tourOpen else { return }
         ctx.headphoneUntil = CACurrentMediaTime() + 5
         ctx.overlay.clearBanner()
-        // Paused for the keyboard or mouse: only a press that stops a running dictation is acted on.
-        if ctx.handsBusy, !(action == .press && ctx.listening != nil) { ctx.refuse("Paused while you type or use the mouse"); return }
         switch action {
         case .press:
             guard !ctx.busy else { ctx.refuse("A step is still in flight"); return }

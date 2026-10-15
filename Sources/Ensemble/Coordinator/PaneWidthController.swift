@@ -30,6 +30,8 @@ final class PaneWidthController {
 
     init(ctx: CoordinatorContext) { self.ctx = ctx }
 
+    /// Stops the running resize only: each run clears it as it ends, or `blocker` would refuse every later fit and
+    /// peace sign as "interrupted" until Ensemble restarts.
     func cancel() { if isRunning { cancelled = true } }
 
     func request(_ maximize: Bool, target: ClaudeSession?) {
@@ -48,6 +50,7 @@ final class PaneWidthController {
             defer {
                 if self.posted, let saved { CGWarpMouseCursorPosition(saved) }
                 self.isRunning = false
+                self.cancelled = false
             }
             let outcome = await self.run(target: target) { _, _, k in maximize ? .maximize(k) : .evenOut }
             EnsembleLog.write("pane widths: \(outcome)")
@@ -76,6 +79,7 @@ final class PaneWidthController {
             defer {
                 if self.posted, let saved { CGWarpMouseCursorPosition(saved) }
                 self.isRunning = false
+                self.cancelled = false
             }
             let readings = await self.ctx.bridge.chatColumns(in: row)
             self.column.note(row.map { readings[$0.id]?.column })
