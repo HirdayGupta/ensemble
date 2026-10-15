@@ -20,6 +20,14 @@ struct FrameRatePlannerTests {
         return counts
     }
 
+    /// The tour's gesture practice forces full rate, so the skeleton inset gets a reading on every camera frame even
+    /// when no hand is in view yet and no face has been seen for longer than the idle slowdown.
+    @Test func forcedFullRateRunsHandPoseOnEveryFrameWithNoHandAndNoFace() {
+        var p = FrameRatePlanner()
+        let c = simulate(&p, seconds: 10, face: false, force: true)
+        #expect(c.hand == 300)
+    }
+
     @Test func facePresentNoHandProbesHandAtAboutEightHz() {
         var p = FrameRatePlanner()
         let c = simulate(&p, seconds: 10, face: true)
