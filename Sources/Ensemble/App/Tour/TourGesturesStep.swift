@@ -19,27 +19,28 @@ struct TourGesturesStep: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .tint(Color.ensembleBlue)
             .frame(maxWidth: 460)
 
             TabIllustration(model: model)
 
             Text(model.activeTab.explanation)
                 .font(.callout)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Color.tourMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
 
             // Fixed height: success shows inside the canvas, so nothing here changes size when a gesture is done.
             HStack(spacing: 10) {
                 Label(model.activeTab.practicePrompt, systemImage: "hand.wave")
-                    .foregroundStyle(Color.ensembleBlue)
+                    .foregroundStyle(Color.ensembleBlueInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Spacer()
                 if let next = TourGestureTab(rawValue: model.activeTab.rawValue + 1) {
                     Button("Skip this step") { model.selectTab(next) }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Color.tourMuted)
                 }
             }
             .frame(maxWidth: 480, minHeight: 22, maxHeight: 22)
@@ -106,14 +107,15 @@ private struct TourSuccessBadge: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            Text(text).foregroundStyle(.white)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color(red: 0.13, green: 0.62, blue: 0.33))
+            Text(text).foregroundStyle(Color.tourInk)
         }
         .font(.caption.weight(.semibold))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Capsule().fill(Color.black.opacity(0.7)))
-        .overlay(Capsule().strokeBorder(Color.green.opacity(0.6), lineWidth: 1))
+        .background(Capsule().fill(Color.white))
+        .overlay(Capsule().strokeBorder(Color(red: 0.13, green: 0.62, blue: 0.33).opacity(0.55), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
         .accessibilityLabel(text)
     }
 }

@@ -12,13 +12,14 @@
 (function () {
   'use strict';
 
-  var ACCENT = 0x5aa0ff;
-  var LINE = 0x8ea6c8;      // outline colour for the desk objects
-  var LINE_DIM = 0x42536f;
-  var BG_TOP = new THREE.Color(0x04070c);
-  var BG_HORIZON = new THREE.Color(0x14233b);
-  var WOOD_FILL = new THREE.Color(0xc98a4b);
-  var WOOD_RIM = new THREE.Color(0xffd29a);
+  var ACCENT = 0x5294ff;      // the app's blue (the website's --e-blue)
+  var ACCENT_INK = 0x2d6ae0;  // the same blue darkened to read on white
+  var LINE = 0x2a3140;      // outline colour for the desk objects
+  var LINE_DIM = 0xa4abb8;
+  var BG_TOP = new THREE.Color(0xffffff);
+  var BG_HORIZON = new THREE.Color(0xf0f3f8);
+  var WOOD_FILL = new THREE.Color(0xd9a469);
+  var WOOD_RIM = new THREE.Color(0x6b3d14);
 
   var DURATIONS = { welcome: 8, look: 8, calibrate: 12, dictate: 6.4, send: 5.2, scroll: 5.6 };
   var STATIC_T = { welcome: 0.8, look: 0.8, calibrate: 3.0, dictate: 0.66, send: 1.5, scroll: 2.3 };
@@ -57,8 +58,8 @@
       transparent: true, depthWrite: false,
       uniforms: {
         uCam: { value: new THREE.Vector3() },
-        uCol: { value: new THREE.Color(0x5b7fb3) },
-        uMajor: { value: new THREE.Color(0x8fb2e6) }
+        uCol: { value: new THREE.Color(0xaab6cb) },
+        uMajor: { value: new THREE.Color(0x6f84a6) }
       },
       extensions: { derivatives: true },
       vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -184,12 +185,12 @@
     neck.add(rig);
 
     var skullGeo = track(new THREE.SphereGeometry(0.42, 40, 28));
-    var skullMat = track(rimMaterial(new THREE.Color(0x1b2638), new THREE.Color(0xa9c2e6), 0.5, false, 0.72));
+    var skullMat = track(rimMaterial(new THREE.Color(0xeef2f8), new THREE.Color(0x3b4558), 0.5, false, 0.72));
     var skull = new THREE.Mesh(skullGeo, skullMat);
     skull.scale.set(0.9, 1.1, 1.0);
     rig.add(skull);
 
-    var lm = track(lineMat(0x7f9cc4, 0.55));
+    var lm = track(lineMat(0x5a6679, 0.55));
     [-0.3, 0.0, 0.3].forEach(function (yy) {
       var rr = Math.sqrt(1 - Math.pow(yy / 0.462, 2)) * 0.42;
       var g = track(new THREE.BufferGeometry().setFromPoints(circlePts(rr, 48, 'xz')));
@@ -201,7 +202,7 @@
     var mer = track(new THREE.BufferGeometry().setFromPoints(circlePts(0.42, 56, 'yz')));
     var merL = new THREE.Line(mer, lm); merL.scale.set(1, 1.1, 1.0); rig.add(merL);
 
-    var noseMat = track(rimMaterial(new THREE.Color(0x24334d), new THREE.Color(0xd3e3ff), 0.85, false, 0.45));
+    var noseMat = track(rimMaterial(new THREE.Color(0xe3e9f3), new THREE.Color(0x2a3140), 0.85, false, 0.45));
     var noseGeo = track(new THREE.ConeGeometry(0.1, 0.28, 4));
     var nose = new THREE.Mesh(noseGeo, noseMat);
     nose.rotation.x = -Math.PI / 2 - 0.12;   // tip toward -z
@@ -217,7 +218,7 @@
     });
     // brow marker so facing reads even at a distance
     var browGeo = track(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.2, 0.1, -0.4), new THREE.Vector3(-0.1, 0.14, -0.42), new THREE.Vector3(0.1, 0.14, -0.42), new THREE.Vector3(0.2, 0.1, -0.4)]));
-    rig.add(new THREE.Line(browGeo, track(lineMat(0xbcd2f0, 0.9))));
+    rig.add(new THREE.Line(browGeo, track(lineMat(0x2a3140, 0.9))));
 
     var gazeMat = track(new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.55 }));
     var gaze = new THREE.Line(track(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -0.62), new THREE.Vector3(0, 0, -2.4)])), gazeMat);
@@ -238,11 +239,11 @@
       g.rotation.y = yaw;
       root.add(g);
       var boxGeo = track(new THREE.BoxGeometry(w + 0.1, h + 0.1, 0.07));
-      var body = new THREE.Mesh(boxGeo, track(new THREE.MeshBasicMaterial({ color: 0x0a1018, transparent: true, opacity: 0.92 })));
+      var body = new THREE.Mesh(boxGeo, track(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.96 })));
       g.add(body);
       var edges = new THREE.LineSegments(track(new THREE.EdgesGeometry(boxGeo)), track(lineMat(LINE, 1)));
       g.add(edges);
-      var screen = new THREE.Mesh(track(new THREE.PlaneGeometry(w, h)), track(new THREE.MeshBasicMaterial({ color: 0x0f1a2b })));
+      var screen = new THREE.Mesh(track(new THREE.PlaneGeometry(w, h)), track(new THREE.MeshBasicMaterial({ color: 0xf4f6fa })));
       screen.position.z = 0.037;
       g.add(screen);
       var sf = new THREE.Mesh(track(frameGeometry(w, h, 0.012)), track(new THREE.MeshBasicMaterial({ color: LINE_DIM })));
@@ -271,7 +272,7 @@
       var g = new THREE.Group();
       g.position.set(cx, cy, 0.045);
       mon.group.add(g);
-      var dimFrame = new THREE.Mesh(track(frameGeometry(w, h, 0.012)), track(new THREE.MeshBasicMaterial({ color: 0x3a4b66, transparent: true, opacity: 1 })));
+      var dimFrame = new THREE.Mesh(track(frameGeometry(w, h, 0.012)), track(new THREE.MeshBasicMaterial({ color: 0xcdd2dc, transparent: true, opacity: 1 })));
       g.add(dimFrame);
       var hiFrame = new THREE.Mesh(track(frameGeometry(w + 0.012, h + 0.012, 0.03)), track(new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0 })));
       hiFrame.position.z = 0.004;
@@ -289,7 +290,7 @@
         var len = (0.35 + 0.55 * ((i * 37 % 7) / 7)) * (w - 0.14);
         pts.push(new THREE.Vector3(-w / 2 + 0.07, yy, 0), new THREE.Vector3(-w / 2 + 0.07 + len, yy, 0));
       }
-      var textMat = track(lineMat(0x5d7394, 0.85));
+      var textMat = track(lineMat(0xb3bccb, 0.85));
       g.add(new THREE.LineSegments(track(new THREE.BufferGeometry().setFromPoints(pts)), textMat));
       return { group: g, dimFrame: dimFrame, hiFrame: hiFrame, hiFill: hiFill, textMat: textMat, hl: 0 };
     }
@@ -326,7 +327,7 @@
       var base = new THREE.Mesh(track(new THREE.RingGeometry(0.19, 0.205, 64)), track(new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.1, depthWrite: false })));
       g.add(base);
       var fillGeo = track(new THREE.RingGeometry(0.175, 0.225, 64, 1, 0, Math.PI * 2));
-      var fill = new THREE.Mesh(fillGeo, track(new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 1, depthWrite: false })));
+      var fill = new THREE.Mesh(fillGeo, track(new THREE.MeshBasicMaterial({ color: ACCENT_INK, transparent: true, opacity: 1, depthWrite: false })));
       fill.position.z = 0.002;
       g.add(fill);
       fillGeo.setDrawRange(0, 0);
@@ -372,7 +373,7 @@
         p.hiFill.material.opacity = 0.13 * v;
         p.dimFrame.material.opacity = 1 - 0.85 * v;
         p.textMat.opacity = (dim ? 0.35 : 0.55) + 0.4 * v;
-        p.textMat.color.setHex(v > 0.5 ? 0x8fbcff : 0x5d7394);
+        p.textMat.color.setHex(v > 0.5 ? ACCENT_INK : 0xb3bccb);
       }
     }
 
@@ -452,8 +453,9 @@
   var SANS = '-apple-system, "SF Pro Text", "Segoe UI", system-ui, Helvetica, Arial, sans-serif';
   var MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
   var C = {
-    bg: '#1f1e1d', side: '#181716', pane: '#262624', line: '#3a3935', text: '#eeece6', dim: '#a09e96', faint: '#6f6d66',
-    bubble: '#3a3935', code: '#171716', orange: '#d97757', blue: '#5aa0ff', bone: '#33322e', bone2: '#2d2c2a'
+    bg: '#faf9f5', side: '#faf9f5', pane: '#ffffff', line: '#e8e6dc', text: '#3d3d3a', dim: '#83827d', faint: '#9a9892',
+    bubble: '#f0eee6', code: '#f4f2eb', orange: '#d97757', blue: '#5294ff', bone: '#e6e4dc', bone2: '#edebe4',
+    skelPane: '#f3f2ee', head: '#f0eee6', strong: '#141413', composer: '#ffffff', composerLine: '#dedad0', send: '#d9d6cc'
   };
   // The window is laid out in a 960 x 600 design space and scaled to the canvas. The right 18% is where the page
   // and the app overlay the hand column, so the last session sits under it.
@@ -506,7 +508,7 @@
       return { h: bh, draw: function (y, a) {
         ctx.globalAlpha = a === undefined ? 1 : a;
         ctx.fillStyle = C.bubble; rr(X1 - bw, y, bw, bh, 14); ctx.fill();
-        ctx.fillStyle = C.text; ctx.font = F; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = C.strong; ctx.font = F; ctx.textBaseline = 'alphabetic';
         lines.forEach(function (l, i) { ctx.fillText(l, X1 - bw + 16, y + 10 + 17 + i * LH - 2); });
         ctx.globalAlpha = 1;
       } };
@@ -521,10 +523,10 @@
     }
     function tool(label, arg) {
       return { h: 34, draw: function (y) {
-        ctx.fillStyle = '#2d2c2a'; rr(X0, y, 330, 30, 8); ctx.fill();
+        ctx.fillStyle = C.bubble; rr(X0, y, 330, 30, 8); ctx.fill();
         ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
         ctx.fillStyle = C.dim; ctx.font = '600 13px ' + SANS; ctx.fillText(label, X0 + 12, y + 20);
-        ctx.fillStyle = C.text; ctx.font = '13px ' + MONO; ctx.fillText(arg, X0 + 12 + ctx.measureText(label).width + 16, y + 20);
+        ctx.fillStyle = C.strong; ctx.font = '13px ' + MONO; ctx.fillText(arg, X0 + 12 + ctx.measureText(label).width + 16, y + 20);
       } };
     }
     function code() {
@@ -536,9 +538,9 @@
         ctx.font = '13.5px ' + MONO;
         CODE.forEach(function (ln, i) {
           var x = X0 + 14, yy = y + 46 + i * 21;
-          ctx.fillStyle = '#e8a47e'; ctx.fillText(ln[0], x, yy); x += ctx.measureText(ln[0]).width;
-          ctx.fillStyle = ln[1].indexOf(' drain') === 0 ? '#8ec0ff' : '#d9d7cf'; ctx.fillText(ln[1], x, yy); x += ctx.measureText(ln[1]).width;
-          ctx.fillStyle = '#d9d7cf'; ctx.fillText(ln[2], x, yy);
+          ctx.fillStyle = '#b8502a'; ctx.fillText(ln[0], x, yy); x += ctx.measureText(ln[0]).width;
+          ctx.fillStyle = ln[1].indexOf(' drain') === 0 ? '#2d6ae0' : '#3d3d3a'; ctx.fillText(ln[1], x, yy); x += ctx.measureText(ln[1]).width;
+          ctx.fillStyle = '#3d3d3a'; ctx.fillText(ln[2], x, yy);
         });
       } };
     }
@@ -570,8 +572,8 @@
       ctx.save();
       ctx.translate(PX + PW / 2 - 640 * Q, 0); ctx.scale(Q, Q);
       ctx.fillStyle = '#000'; rr(x, y, w, h, 21); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1.2; ctx.stroke();
-      var dot = { ready: '#6f6d66', listen: C.orange, hold: C.blue, sent: '#58c27d', scroll: C.blue }[mode];
+      ctx.strokeStyle = 'rgba(10,10,10,0.2)'; ctx.lineWidth = 1.2; ctx.stroke();
+      var dot = { ready: '#8a8984', listen: C.orange, hold: C.blue, sent: '#58c27d', scroll: C.blue }[mode];
       ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6, 0, 6.2832); ctx.fill();
       if (mode === 'listen') { ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(x + 25, y + h / 2, 6 + 4 * (0.5 + 0.5 * Math.sin(t * 7)), 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
       ctx.fillStyle = '#fff'; ctx.font = '600 19px ' + SANS; ctx.textBaseline = 'alphabetic';
@@ -599,7 +601,7 @@
     ];
     function skeleton(p, variant) {
       var x = p.x, y = PANE_Y, w = p.w, h = PANE_H;
-      ctx.fillStyle = C.pane; rr(x, y, w, h, 12); ctx.fill();
+      ctx.fillStyle = C.skelPane; rr(x, y, w, h, 12); ctx.fill();
       ctx.fillStyle = C.bone; rr(x + 14, y + 20, w * 0.42, 9, 4.5); ctx.fill();
       ctx.fillStyle = C.bone2; rr(x + w - 14 - w * 0.2, y + 20, w * 0.2, 9, 4.5); ctx.fill();
       ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y + 50); ctx.lineTo(x + w, y + 50); ctx.stroke();
@@ -614,13 +616,13 @@
           for (var i = 0; i < arg; i++) { rr(x + 14, yy + i * 15, (w - 28) * (i === arg - 1 ? 0.55 : 0.92), 8, 4); ctx.fill(); }
           yy += arg * 15 + 18;
         } else {
-          ctx.fillStyle = '#1b1a19'; rr(x + 14, yy, w - 28, 84, 9); ctx.fill();
+          ctx.fillStyle = C.code; rr(x + 14, yy, w - 28, 84, 9); ctx.fill();
           ctx.fillStyle = C.bone2;
           for (var j = 0; j < 4; j++) { rr(x + 26, yy + 16 + j * 16, (w - 52) * (0.4 + 0.5 * ((j * 5 % 4) / 4)), 7, 3.5); ctx.fill(); }
           yy += 102;
         }
       });
-      ctx.fillStyle = '#30302d'; rr(x + 10, y + h - 14 - 62, w - 20, 62, 14); ctx.fill();
+      ctx.fillStyle = C.composer; rr(x + 10, y + h - 14 - 62, w - 20, 62, 14); ctx.fill();
       ctx.fillStyle = C.bone; rr(x + 24, y + h - 14 - 62 + 18, (w - 20) * 0.45, 8, 4); ctx.fill();
       ctx.fillStyle = C.bone; ctx.beginPath(); ctx.arc(x + w - 28, y + h - 14 - 31, 12, 0, 6.2832); ctx.fill();
     }
@@ -628,8 +630,8 @@
     function focused(st, name, t) {
       var ev = eventsFor(name);
       ctx.fillStyle = C.pane; rr(PX, PY, PW, PH, 12); ctx.fill();
-      ctx.fillStyle = C.text; ctx.font = '600 17px ' + SANS; ctx.fillText('ensemble-tour', PX + 20, PY + 34);
-      ctx.fillStyle = '#34332f'; rr(PX + 148, PY + 16, 156, 26, 13); ctx.fill();
+      ctx.fillStyle = C.strong; ctx.font = '600 17px ' + SANS; ctx.fillText('ensemble-tour', PX + 20, PY + 34);
+      ctx.fillStyle = C.bubble; rr(PX + 148, PY + 16, 156, 26, 13); ctx.fill();
       ctx.fillStyle = C.dim; ctx.font = '12px ' + MONO; ctx.fillText('feature/onboarding', PX + 162, PY + 34);
       ctx.fillStyle = C.faint; ctx.font = '13px ' + SANS; ctx.textAlign = 'right'; ctx.fillText('Opus', PX + PW - 20, PY + 34); ctx.textAlign = 'left';
       ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PX, PY + 50); ctx.lineTo(PX + PW, PY + 50); ctx.stroke();
@@ -665,8 +667,8 @@
       ctx.restore();
 
       // composer
-      ctx.fillStyle = '#30302d'; rr(CX0, CY0, CW, CH, 16); ctx.fill();
-      ctx.strokeStyle = '#4a4944'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = C.composer; rr(CX0, CY0, CW, CH, 16); ctx.fill();
+      ctx.strokeStyle = C.composerLine; ctx.lineWidth = 1.2; ctx.stroke();
       var text = '', caret = false, textA = 1;
       if (name === 'dictate') {
         var words = DRAFT_TEXT.split(' '), n = Math.round(st.draft * words.length);
@@ -679,7 +681,7 @@
       }
       ctx.font = F; ctx.textBaseline = 'alphabetic';
       if (text) {
-        ctx.globalAlpha = textA; ctx.fillStyle = C.text; ctx.fillText(text, CX0 + 20, CY0 + 38); ctx.globalAlpha = 1;
+        ctx.globalAlpha = textA; ctx.fillStyle = C.strong; ctx.fillText(text, CX0 + 20, CY0 + 38); ctx.globalAlpha = 1;
         if (caret) { var cw = ctx.measureText(text).width; ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 22 + cw, CY0 + 21, 2, 22); }
       } else {
         if (caret) { ctx.fillStyle = C.orange; ctx.fillRect(CX0 + 22, CY0 + 21, 2, 22); }
@@ -687,8 +689,8 @@
       }
       ctx.fillStyle = C.faint; ctx.font = '12.5px ' + SANS; ctx.fillText('Plan mode  ·  Opus  ·  Auto-accept off', CX0 + 20, CY0 + 68);
       var bx = CX0 + CW - 30, by = CY0 + CH / 2;
-      ctx.fillStyle = text ? C.orange : '#4a4944'; ctx.beginPath(); ctx.arc(bx, by, 17, 0, 6.2832); ctx.fill();
-      ctx.strokeStyle = '#1f1e1d'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath();
+      ctx.fillStyle = text ? C.orange : C.send; ctx.beginPath(); ctx.arc(bx, by, 17, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath();
       ctx.moveTo(bx, by + 6.5); ctx.lineTo(bx, by - 6.5);
       ctx.moveTo(bx - 6.5, by - 1); ctx.lineTo(bx, by - 7.5); ctx.lineTo(bx + 6.5, by - 1); ctx.stroke();
     }
@@ -698,7 +700,8 @@
       ctx.clearRect(0, 0, FW, FH);
       ctx.fillStyle = C.side; ctx.fillRect(0, 0, FW, FH);
       // title bar
-      ctx.fillStyle = '#121110'; ctx.fillRect(0, 0, FW, 38);
+      ctx.fillStyle = C.head; ctx.fillRect(0, 0, FW, 38);
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, 38.5); ctx.lineTo(FW, 38.5); ctx.stroke();
       [['#ff5f57', 0], ['#febc2e', 1], ['#28c840', 2]].forEach(function (d) { ctx.fillStyle = d[0]; ctx.beginPath(); ctx.arc(20 + d[1] * 18, 19, 5, 0, 6.2832); ctx.fill(); });
       ctx.fillStyle = C.dim; ctx.font = '600 13px ' + SANS; ctx.textBaseline = 'alphabetic'; ctx.fillText('Claude', 82, 23);
       PANES.forEach(function (p, i) { if (!p.focus) skeleton(p, i); });
@@ -821,8 +824,8 @@
     armature.add(hullMesh);
     hullMesh.bind(sk, skinned.bindMatrix);
 
-    var jointMat = new THREE.LineBasicMaterial({ color: 0xffe2b8, transparent: true, opacity: 0.8 });
-    var boneMat = new THREE.LineBasicMaterial({ color: 0xffc98a, transparent: true, opacity: 0.55 });
+    var jointMat = new THREE.LineBasicMaterial({ color: 0x7a4515, transparent: true, opacity: 0.8 });
+    var boneMat = new THREE.LineBasicMaterial({ color: 0x9a5a22, transparent: true, opacity: 0.55 });
     disposables.push(jointMat, boneMat);
     var radii = { thumb: 0.0085, 'index-finger': 0.0075, 'middle-finger': 0.0078, 'ring-finger': 0.0072, 'pinky-finger': 0.0062 };
     Object.keys(chains).forEach(function (f) {
@@ -1713,11 +1716,11 @@
     } catch (e) {
       var msg = document.createElement('p');
       msg.textContent = '3D preview needs WebGL, which this browser has turned off.';
-      msg.style.cssText = 'margin:0;padding:24px;font:14px/1.4 system-ui,sans-serif;color:#9db0cc;text-align:center';
+      msg.style.cssText = 'margin:0;padding:24px;font:14px/1.4 system-ui,sans-serif;color:#737373;text-align:center';
       container.appendChild(msg);
       return noop();
     }
-    renderer.setClearColor(0x04070c, frameMode ? 0 : 1);
+    renderer.setClearColor(0xffffff, frameMode ? 0 : 1);
     renderer.domElement.style.cssText = 'display:block;width:100%;height:100%';
     if (!container.style.position) container.style.position = 'relative';
     var sizeBox = container, frameView = null, frameCanvas = null, column = null;
@@ -1730,7 +1733,7 @@
       column = document.createElement('div');
       column.style.cssText = 'position:absolute;top:0;right:0;bottom:0;width:' + COLUMN * 100 + '%;box-sizing:border-box;padding:8px;display:flex;flex-direction:column;gap:8px;pointer-events:none';
       var panel = document.createElement('div');
-      panel.style.cssText = 'flex:1 1 0;min-height:0;position:relative;overflow:hidden;border-radius:12px;box-sizing:border-box;border:1px solid rgba(255,255,255,0.12);background:linear-gradient(180deg,rgba(18,30,50,0.86),rgba(4,7,12,0.9))';
+      panel.style.cssText = 'flex:1 1 0;min-height:0;position:relative;overflow:hidden;border-radius:12px;box-sizing:border-box;border:1px solid #e5e5e5;background:linear-gradient(180deg,#ffffff,#f1f4f9);box-shadow:0 8px 24px rgba(10,10,10,0.08)';
       var spacer = document.createElement('div');
       spacer.style.cssText = 'flex:1 1 0;min-height:0';
       panel.appendChild(renderer.domElement);

@@ -45,7 +45,7 @@ final class TourSceneController: NSObject, ObservableObject, WKScriptMessageHand
         container.wantsLayer = true
         container.layer?.cornerRadius = 16
         container.layer?.masksToBounds = true
-        container.layer?.backgroundColor = NSColor(red: 0.016, green: 0.027, blue: 0.047, alpha: 1).cgColor
+        container.layer?.backgroundColor = NSColor.white.cgColor
     }
 
     func start() {
@@ -169,12 +169,12 @@ struct TourSceneStage<Overlay: View>: View {
         ZStack {
             TourSceneHost(controller: controller)
             if controller.failed {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.black.opacity(0.45))
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white)
                 VStack(spacing: 10) {
-                    Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(Color.ensembleBlue)
+                    Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(Color.ensembleBlueInk)
                     Text(caption)
                         .font(.callout)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(Color.tourMuted)
                         .multilineTextAlignment(.center)
                 }
                 .padding(20)
@@ -182,7 +182,7 @@ struct TourSceneStage<Overlay: View>: View {
             overlay
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color(red: 0.898, green: 0.898, blue: 0.898), lineWidth: 1))
         .onAppear { controller.start() }
         .onDisappear { controller.stop() }
         .accessibilityElement(children: .ignore)

@@ -30,7 +30,7 @@ final class TourHandInsetModel: ObservableObject {
 }
 
 /// The bottom half of the gestures canvas's right-hand column: the owner's hand as Vision sees it, 21 joints as
-/// dots and bones as lines, in the app's blue, on a translucent dark backing, with the gesture the system reads
+/// dots and bones as lines, in the app's blue, on a white backing, with the gesture the system reads
 /// under it. It fills whatever rectangle it is given (`TourGestureColumn` gives it the page's empty half).
 struct TourHandInset: View {
     @ObservedObject var model: TourHandInsetModel
@@ -44,7 +44,7 @@ struct TourHandInset: View {
                     if points.allSatisfy({ $0 == nil }) {
                         Text("Raise a hand to the camera")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(Color.tourMuted)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 6)
                     }
@@ -54,7 +54,7 @@ struct TourHandInset: View {
 
             Text(model.readout)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Color.tourInk)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
                 .multilineTextAlignment(.center)
@@ -62,8 +62,8 @@ struct TourHandInset: View {
                 .padding(.bottom, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.55)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(red: 0.898, green: 0.898, blue: 0.898), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Your hand as the camera sees it: \(model.readout)")
@@ -81,13 +81,13 @@ struct TourHandInset: View {
             bones.move(to: place(a))
             bones.addLine(to: place(b))
         }
-        context.stroke(bones, with: .color(Color.ensembleBlue.opacity(0.85)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        context.stroke(bones, with: .color(Color.ensembleBlue), style: StrokeStyle(lineWidth: 2, lineCap: .round))
         let tips: Set<Int> = [4, 8, 12, 16, 20]
         for (i, p) in points.enumerated() {
             guard let p else { continue }
             let r: CGFloat = tips.contains(i) ? 4 : 2.8
             let c = place(p)
-            context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(Color.ensembleBlue))
+            context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(Color.ensembleBlueInk))
         }
     }
 }
