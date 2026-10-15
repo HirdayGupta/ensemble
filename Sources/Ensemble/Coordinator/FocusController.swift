@@ -137,7 +137,6 @@ final class FocusController {
     func forgetTarget() { tracker.forgetTarget() }
     func forgetTargetAndCandidate() { tracker.forgetTargetAndCandidate() }
     func forgetAll() { tracker.forgetAll() }
-    func clearPending() { pending = nil }
     func clearAfterStop() { afterStop = nil }
     func clearDeferred() { pending = nil; afterStop = nil }
 

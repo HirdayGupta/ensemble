@@ -2,7 +2,7 @@
   "scope": {
     "summary": "Ensemble is a macOS menu bar app, written in Swift, that drives Claude desktop sessions hands-free with a webcam; no data leaves the Mac.",
     "not_applicable": {
-      "pyproject, ruff, ty, uv, pytest, coverage floor": "The repository has no Python. The equivalents are Package.swift, swift build -c release and swift test in ci.yml. Swift has no coverage gate here; the 142 tests run on every pull request.",
+      "pyproject, ruff, ty, uv, pytest, coverage floor": "The repository has no Python. The equivalents are Package.swift, swift build -c release and swift test in ci.yml. Swift has no coverage gate here; the unit tests run on every pull request.",
       "pip-audit scheduled workflow": "Swift Package Manager dependencies (Sparkle only) are covered by the dependabot.yml swift entry."
     }
   },

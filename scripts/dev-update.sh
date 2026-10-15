@@ -14,6 +14,7 @@ elif [ -d /Applications/Ensemble.app ]; then APP_DEST="/Applications/Ensemble.ap
 else APP_DEST="$HOME/Applications/Ensemble.app"; fi
 BUNDLE_ID="dev.ensemble.app"
 LOCK="$ROOT/.build/dev-update.lock"
+PENDING="$ROOT/.build/dev-update.pending"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 
 mkdir -p "$LOG_DIR" "$ROOT/.build"
@@ -35,11 +36,13 @@ FORCE="${1:-}"
 if ! git fetch --quiet origin main 2>>"$LOG"; then log "fetch failed; retrying next run"; exit 0; fi
 HERE="$(git rev-parse HEAD)"
 THERE="$(git rev-parse origin/main)"
-if [ "$HERE" = "$THERE" ] && [ "$FORCE" != "--force" ] && [ -d "$APP_DEST" ]; then exit 0; fi
+if [ "$HERE" = "$THERE" ] && [ "$FORCE" != "--force" ] && [ -d "$APP_DEST" ] && [ ! -f "$PENDING" ]; then exit 0; fi
 
 # Never swap the app while Claude is listening: the safety record exists only during dictation.
 # A build from before the rename keeps its record in the old folder until it quits, so both are checked.
-if { [ -f "$HOME/Library/Application Support/Ensemble/episode.json" ] || [ -f "$HOME/Library/Application Support/Clutch/episode.json" ]; } && [ "$FORCE" != "--force" ]; then
+# Checked here to skip a pointless build, and again right before quitting the app, because the build takes minutes.
+dictating() { [ -f "$HOME/Library/Application Support/Ensemble/episode.json" ] || [ -f "$HOME/Library/Application Support/Clutch/episode.json" ]; }
+if dictating && [ "$FORCE" != "--force" ]; then
   log "dictation in progress; update deferred"; exit 0
 fi
 
@@ -66,11 +69,21 @@ fi
 
 if ! scripts/bundle.sh >> "$LOG" 2>&1; then log "build failed at $(git rev-parse --short HEAD); the installed app is unchanged"; exit 0; fi
 
+# Dictation may have started during the build, which takes minutes. A record now defers the install; the pending
+# mark makes the next run retry even though main has not moved.
+if dictating; then
+  touch "$PENDING"; log "dictation started during the build; install deferred"; exit 0
+fi
 # Quit the running copy cleanly (quitting stops dictation first), swap it, relaunch.
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do pgrep -f "$APP_DEST/Contents/MacOS/" >/dev/null || break; sleep 0.5; done
-pkill -f "$APP_DEST/Contents/MacOS/" 2>/dev/null || true
+# Force-kill only a copy that did not quit, and never while a record says Claude may still be listening.
+if pgrep -f "$APP_DEST/Contents/MacOS/" >/dev/null; then
+  if dictating; then touch "$PENDING"; log "dictation in progress and the app did not quit; install deferred"; exit 0; fi
+  pkill -f "$APP_DEST/Contents/MacOS/" 2>/dev/null || true
+fi
 mkdir -p "$(dirname "$APP_DEST")"
 rm -rf "$APP_DEST.new" && ditto build/Ensemble.app "$APP_DEST.new" && rm -rf "$APP_DEST" && mv "$APP_DEST.new" "$APP_DEST"
+rm -f "$PENDING"
 open "$APP_DEST"
 log "installed $(git rev-parse --short HEAD) at $APP_DEST and relaunched"
