@@ -450,6 +450,8 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         case .handOverToLoginAgent:
             EnsembleLog.write("update: relaunched as \(installed) outside the login agent; handing over to launchd")
             defaults.set(true, forKey: handedOverKey)
+            // This copy exits at once; the mark must be on disk or a failed hand-over could loop.
+            defaults.synchronize()
             return true
         }
         defaults.removeObject(forKey: pendingVersionKey)

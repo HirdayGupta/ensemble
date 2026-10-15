@@ -4,13 +4,15 @@
 # The peace-sign session widths (gesture rules, divider drag) took it from 8,400,000 to 8,450,000. Pausing while the
 # keyboard or mouse is in use took the app to 8,427,506 bytes; fitting the focused session to the chat column adds
 # 36,752 bytes of stripped release binary (2,037,256 to 2,074,008, measured 2026-10-15), so the budget rose to 8,480,000.
+# Ensemble's own update interface (one Install / Later alert, the idle gate, the relaunch record and watchdog) adds
+# 56,416 bytes of stripped release binary (2,337,672 to 2,394,088, measured 2026-10-15), so the budget rose to 8,540,000.
 # Raise BUDGET_BYTES in the same change that adds a heavier dependency or asset, and say why in the commit message.
 #
 # Usage: scripts/check-size.sh [path to Ensemble.app]
 set -u
 cd "$(dirname "$0")/.."
 
-BUDGET_BYTES=8480000
+BUDGET_BYTES=8540000
 APP="${1:-build/Ensemble.app}"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
