@@ -13,6 +13,7 @@ final class SettingsStore: ObservableObject {
         static let mapping = "mapping"
         static let sendCountdownSeconds = "sendCountdownSeconds"
         static let pointerSmoothing = "pointerSmoothing"
+        static let correctForPosition = "correctForPosition"
         static let reverseScroll = "reverseScroll"
         static let liveSoundBars = "liveSoundBars"
         static let warnWhenLeavingClaude = "warnWhenLeavingClaude"
@@ -39,6 +40,9 @@ final class SettingsStore: ObservableObject {
     @Published var cameraName: String? { didSet { defaults.set(cameraName, forKey: Key.cameraName) } }
     @Published var mapping: GestureMapping { didSet { saveMapping() } }
     @Published var pointerSmoothing: Double { didSet { defaults.set(pointerSmoothing, forKey: Key.pointerSmoothing) } }
+    /// On by default: pointing accounts for where you sit, so moving along the desk keeps the nose on target.
+    /// Off is the angle-only pointer that needs recalibrating when you move.
+    @Published var correctForPosition: Bool { didSet { defaults.set(correctForPosition, forKey: Key.correctForPosition) } }
     /// Flips pinch-and-drag scrolling relative to the Mac's own scroll direction.
     @Published var reverseScroll: Bool { didSet { defaults.set(reverseScroll, forKey: Key.reverseScroll) } }
     /// Off by default: the listening sign is a blinking microphone dot and Ensemble never asks for the microphone.
@@ -103,6 +107,7 @@ final class SettingsStore: ObservableObject {
         setupProfiles = store.data(forKey: Key.setupProfiles)
 
         pointerSmoothing = store.object(forKey: Key.pointerSmoothing) as? Double ?? 0.7
+        correctForPosition = bool(Key.correctForPosition, true)
         reverseScroll = store.bool(forKey: Key.reverseScroll)
         liveSoundBars = store.bool(forKey: Key.liveSoundBars)
         warnWhenLeavingClaude = bool(Key.warnWhenLeavingClaude, true)

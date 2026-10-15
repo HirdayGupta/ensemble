@@ -55,6 +55,8 @@ final class Coordinator: AppCoordinating {
         focus.stopDictation = { [weak self] reason in self?.dictation.end(reason: reason) }
         dictation.interrupt = { [weak self] reason in self?.interrupt(reason) }
 
+        ctx.pointer.correctsForPosition = settings.correctForPosition
+        ctx.pointer.screenSizeProvider = { ScreenGeometry.physicalSizeCm(ofScreenID: $0) }
         if let data = settings.calibration { ctx.pointer.calibration = data }
         ctx.setup.startFullCalibration = { [weak self] in self?.calibrate() }
         ctx.setup.startSubsetCalibration = { [weak self] screens in self?.runCalibration(screens: screens, replacingAll: false) }
@@ -64,6 +66,7 @@ final class Coordinator: AppCoordinating {
 
         settings.$mapping.dropFirst().sink { [weak self] m in self?.gestures.mapping = m; self?.gestures.reset() }.store(in: &cancellables)
         settings.$sendCountdownSeconds.dropFirst().sink { [weak self] v in self?.gestures.sendHold = v }.store(in: &cancellables)
+        settings.$correctForPosition.dropFirst().sink { [weak self] on in self?.ctx.pointer.correctsForPosition = on }.store(in: &cancellables)
         settings.$pointerSmoothing.dropFirst().sink { [weak self] k in self?.ctx.pointer.setSmoothing(k) }.store(in: &cancellables)
         settings.$enabled.removeDuplicates().dropFirst().sink { [weak self] on in
             guard let self else { return }

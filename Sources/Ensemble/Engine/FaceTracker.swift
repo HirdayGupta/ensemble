@@ -126,10 +126,17 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
             }
             consecutiveFrameErrors = 0
             let faces = (m["faces"] as? NSNumber)?.intValue ?? 0
+            var position: HeadPosition?
+            if let x = (m["x"] as? NSNumber)?.doubleValue, let y = (m["y"] as? NSNumber)?.doubleValue,
+               let z = (m["z"] as? NSNumber)?.doubleValue {
+                let p = HeadPosition(x: x, y: y, z: z)
+                if p.isFinite { position = p }
+            }
             onHead?(HeadObservation(t: t,
                                     yaw: (m["yaw"] as? NSNumber)?.doubleValue ?? 0,
                                     pitch: (m["pitch"] as? NSNumber)?.doubleValue ?? 0,
-                                    faceCount: faces))
+                                    faceCount: faces,
+                                    position: position))
         } else if let note = m["log"] as? String {
             onDiagnostic?(note)
         }

@@ -49,6 +49,7 @@ function detect(bitmap, t) {
 }
 
 // Column-major 4x4 head transform: yaw from the forward axis, pitch from the up axis' z component.
+// The same matrix carries the head position in m[12], m[13], m[14] (centimetres, camera space).
 function angles(m) {
   const yaw = Math.atan2(m[8], m[10]);
   const pitch = Math.asin(Math.max(-1, Math.min(1, m[9])));
@@ -78,8 +79,10 @@ async function processFrame(b64, t) {
     const faces = widths.filter(w => w >= biggest * 0.5).length;
     const mats = result.facialTransformationMatrixes;
     if (faces > 0 && mats && mats.length > 0) {
-      const { yaw, pitch } = angles(mats[0].data);
-      post({ t, yaw, pitch, faces });
+      const m = mats[0].data;
+      const { yaw, pitch } = angles(m);
+      // Translation is the head position in centimetres; the pointer uses it to correct for where you sit.
+      post({ t, yaw, pitch, faces, x: m[12], y: m[13], z: m[14] });
     } else {
       post({ t, faces });
     }

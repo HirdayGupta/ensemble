@@ -231,6 +231,8 @@ final class CalibrationController {
 
     private func capture(rule: AimRule, requirement: AimRequirement, feed: CalibrationFeed, spot: CGPoint, number: Int, of total: Int) async -> Capture {
         var gate = AimGate(rule: rule, requirement: requirement, startedAt: CACurrentMediaTime())
+        // Head positions over the last moments, averaged into the sample when it is captured (where you sat).
+        var positions: [(t: TimeInterval, p: HeadPosition?)] = []
         var lastT: TimeInterval = -1
         let pointLine = "Point \(number) of \(total)"
         var loggedMovement = false
@@ -241,6 +243,8 @@ final class CalibrationController {
             if let head = feed.head(), head.faceCount == 1, head.t != lastT {
                 lastT = head.t
                 gate.push(AimReading(t: head.t, yaw: head.yaw, pitch: head.pitch))
+                positions.append((head.t, head.position))
+                positions.removeAll { $0.t < head.t - 1.0 }
             }
             let faceLost = now - lastT > 1.0
             model.faceMissing = faceLost
@@ -257,7 +261,11 @@ final class CalibrationController {
             case .captured(let yaw, let pitch):
                 model.sampling = 1
                 EnsembleLog.write(String(format: "calibration point %d of %d captured (yaw %.3f, pitch %.3f)", number, total, yaw, pitch))
-                return .sample(CalibrationSample(yaw: yaw, pitch: pitch, target: spot))
+                let recent = positions.filter { $0.t >= lastT - 0.4 }
+                // Only when every recent reading had one: a sample with a partly missing position is not trusted.
+                let known = recent.compactMap(\.p)
+                let position = !known.isEmpty && known.count == recent.count ? Self.mean(of: known) : nil
+                return .sample(CalibrationSample(yaw: yaw, pitch: pitch, target: spot, position: position))
             case .timedOut:
                 if !loggedMovement {
                     loggedMovement = true
@@ -275,6 +283,11 @@ final class CalibrationController {
             }
             try? await Task.sleep(nanoseconds: 16_000_000)
         }
+    }
+
+    private static func mean(of ps: [HeadPosition]) -> HeadPosition {
+        let n = Double(ps.count)
+        return HeadPosition(x: ps.map(\.x).reduce(0, +) / n, y: ps.map(\.y).reduce(0, +) / n, z: ps.map(\.z).reduce(0, +) / n)
     }
 
     /// Centre, left, right, top, bottom, in global top-left coordinates.
