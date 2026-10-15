@@ -112,12 +112,14 @@ final class PaneWidthController {
         func safe(at x: Double) -> String? {
             if let why = blocker() { return why }
             if ScreenFacts.topWindowOwner(at: point(x)) != ctx.bridge.claudePID { return "Claude does not own the window under the divider" }
-            // Hardware input only: the events Ensemble posts here do not count, the owner's own hand does.
+            // Hardware input only: the events Ensemble posts here never count, the owner's own hand always does.
             if ClaudeBridge.secondsSincePhysicalInput() < CACurrentMediaTime() - since { return "the keyboard or mouse was used" }
             return nil
         }
         if let why = safe(at: from) { return why }
         posted = true
+        ClaudeBridge.ownPointerEvents(began: true)
+        defer { ClaudeBridge.ownPointerEvents(began: false) }
         ClaudeBridge.postMouse(.mouseMoved, at: point(from))
         ClaudeBridge.postMouse(.leftMouseDown, at: point(from))
         var x = from
