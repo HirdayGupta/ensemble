@@ -1,6 +1,23 @@
 import AppKit
 import EnsembleCore
 
+/// What a calibration run is for, fixed when it starts.
+enum CalibrationPurpose: Equatable {
+    /// Every screen, replacing everything this spot held (nil or unknown: the first spot, or a new one).
+    case wholeSpot(String?)
+    /// Only the screens covered, into this spot; its other screens and every other spot keep theirs.
+    case screens(String?)
+    /// A new spot beside the ones already saved.
+    case newSpot
+}
+
+/// The screens a calibration visits, what it is for, and a line for its intro naming the position, if any.
+struct CalibrationPlan {
+    let screens: [NSScreen]
+    let purpose: CalibrationPurpose
+    let note: String?
+}
+
 /// Tracks the desk setup (camera plus screen arrangement), detects when it changes, and decides what that
 /// means: restore silently, keep working on the screens that are still valid, or ask before pointing and
 /// dictation resume. The pure matching lives in `EnsembleCore.SetupEvaluator`; this owns persistence, the
@@ -22,10 +39,10 @@ final class SetupController {
     private var debounceTask: Task<Void, Never>?
     private let promptWindow = SetupPromptController()
 
-    /// Wired by the coordinator: the full manual calibration path (every current screen) and a path that
-    /// calibrates only the given screens. Both end up back here through `storeFullCalibration`/`storeSubsetCalibration`.
+    /// Wired by the coordinator: the manual calibration path (every current screen, the position in use) and a
+    /// path that runs a given plan. Both end up back here through `storeCalibration`.
     var startFullCalibration: () -> Void = {}
-    var startSubsetCalibration: ([NSScreen]) -> Void = { _ in }
+    var runPlan: (CalibrationPlan) -> Void = { _ in }
 
     private static let debounce: UInt64 = 1_000_000_000
     private static let secondsPerScreen = 11
@@ -83,6 +100,7 @@ final class SetupController {
     }
 
     private func evaluate() {
+        defer { publish() }
         guard let cameraID, let cameraName else { return }
         let screens = currentScreens()
         let decision = SetupEvaluator.evaluate(profiles: profiles, cameraID: cameraID, cameraName: cameraName,
@@ -150,7 +168,7 @@ final class SetupController {
             let ids = Set(newScreens.map(\.id))
             let targets = NSScreen.screens.filter { ScreenGeometry.stableID(of: $0).map(ids.contains) == true }
             guard !targets.isEmpty else { return }
-            startSubsetCalibration(targets)
+            runPlan(CalibrationPlan(screens: targets, purpose: .screens(spotInUseID), note: nil))
         }
     }
 
@@ -171,41 +189,95 @@ final class SetupController {
 
     // MARK: - Storing a calibration
 
-    /// A full manual Calibrate: every connected screen was just covered, replacing this camera's whole profile.
-    @discardableResult
-    func storeFullCalibration(_ results: [ScreenCalibrationResult]) -> Bool {
-        guard let cameraID, let cameraName else { return false }
-        guard ctx.pointer.fit(screens: results.map { PointerScreen(id: $0.screenID, frame: $0.frame, samples: $0.samples) }) else { return false }
-        let now = Date()
-        var profile = CameraProfile(cameraID: cameraID, cameraName: cameraName)
-        profile.merge(results.map { ScreenCalibration(screenID: $0.screenID, frame: $0.frame, samples: $0.samples, calibratedAt: now) })
-        profiles.setProfile(profile)
-        save()
-        validScreenIDs = Set(results.map(\.screenID))
-        finishCalibration(at: now)
-        return true
+    /// The profile of the camera in use.
+    private var profile: CameraProfile? { cameraID.flatMap { profiles.profile(forCameraID: $0) } }
+
+    /// The spot the pointer uses now, or the first spot before any reading picked one.
+    var spotInUseID: String? {
+        guard let spots = profile?.spots, let first = spots.first else { return nil }
+        if let id = ctx.pointer.activeSpotID, spots.contains(where: { $0.id == id }) { return id }
+        return first.id
     }
 
-    /// Only the screens the prompt named were just calibrated; every other screen keeps its own samples,
-    /// and the fit combines every currently valid screen (the ones just done plus the ones already valid).
+    /// What a Calibrate press runs. Nil when the screen asked for is no longer connected.
+    func plan(for request: CalibrationRequest) -> CalibrationPlan? {
+        let all = NSScreen.screens
+        let profile = self.profile
+        let spots = profile?.spots ?? []
+        let inUse = spotInUseID
+        let inUseName = spots.first { $0.id == inUse }?.name
+        let several = spots.count > 1
+        // The old single calibration has no samples to sit beside new ones; only a full calibration replaces it.
+        let modelOnly = profile?.hasModelOnly(validScreenIDs) == true
+        let whole = CalibrationPlan(screens: all, purpose: .wholeSpot(inUse),
+                                    note: several ? inUseName.map { "Replaces \($0), the position in use now." } : nil)
+        switch request {
+        case .recalibrate:
+            return whole
+        case .newPosition:
+            guard let profile, !profile.spots.isEmpty, !modelOnly else { return whole }
+            return CalibrationPlan(screens: all, purpose: .newSpot,
+                                   note: "Adds \(profile.nextSpot.name). Sit or stand where you want it to work.")
+        case .screen(let id):
+            if modelOnly { return whole }
+            let targets = all.filter { ScreenGeometry.stableID(of: $0) == id }
+            guard !targets.isEmpty else { return nil }
+            return CalibrationPlan(screens: targets, purpose: .screens(inUse),
+                                   note: several ? inUseName.map { "Updates this screen in \($0), the position in use now." } : nil)
+        }
+    }
+
+    /// Stores what a calibration run collected as its purpose says, then refits the pointer over every screen
+    /// that is valid now, from every spot: each screen keeps its own map per spot, so replacing one screen or one
+    /// spot leaves the other screens' maps, planes and regions exactly as they were. Nothing is stored if the
+    /// fit fails.
     @discardableResult
-    func storeSubsetCalibration(_ results: [ScreenCalibrationResult]) -> Bool {
+    func storeCalibration(_ results: [ScreenCalibrationResult], purpose: CalibrationPurpose) -> Bool {
         guard let cameraID, let cameraName else { return false }
-        var profile = profiles.profile(forCameraID: cameraID) ?? CameraProfile(cameraID: cameraID, cameraName: cameraName)
+        var profile = self.profile ?? CameraProfile(cameraID: cameraID, cameraName: cameraName)
         profile.cameraName = cameraName
         let now = Date()
-        profile.merge(results.map { ScreenCalibration(screenID: $0.screenID, frame: $0.frame, samples: $0.samples, calibratedAt: now) })
-        let newValid = validScreenIDs.union(results.map(\.screenID))
-        // Every valid screen keeps its own model; only the screens just done are new. No screen with samples:
-        // nothing meaningful to fit yet (should not happen once any calibration has run), so leave the pointer
-        // as it was rather than fit an unusable model.
-        let screens = profile.pointerScreens(for: newValid)
-        guard screens.isEmpty || ctx.pointer.fit(screens: screens) else { return false }
-        profiles.setProfile(profile)
+        let done = results.map { ScreenCalibration(screenID: $0.screenID, frame: $0.frame, samples: $0.samples, calibratedAt: now) }
+        func existing(_ id: String?) -> String? {
+            id.flatMap { id in profile.spots.contains { $0.id == id } ? id : nil } ?? profile.spots.first?.id
+        }
+        switch purpose {
+        case .wholeSpot(let id):
+            profile.dropLegacy()
+            if let spot = existing(id) { profile.replaceSpot(spot, with: done) } else { profile.addSpot(done) }
+        case .screens(let id):
+            if let spot = existing(id) { profile.store(done, inSpot: spot) } else { profile.addSpot(done) }
+        case .newSpot:
+            profile.addSpot(done)
+        }
+        var next = profiles
+        next.setProfile(profile)
+        guard case .ready(_, let valid, _, _) = SetupEvaluator.evaluate(
+            profiles: next, cameraID: cameraID, cameraName: cameraName, previousCameraName: nil, screens: currentScreens()) else { return false }
+        let newValid = Set(valid)
+        // A screen still on the migrated model keeps pointing with it (refitPointer); nothing else to fit then.
+        if !profile.hasModelOnly(newValid) {
+            let screens = profile.pointerScreens(for: newValid)
+            guard !screens.isEmpty, ctx.pointer.fit(screens: screens) else { return false }
+        }
+        profiles = next
         save()
         validScreenIDs = newValid
         finishCalibration(at: now)
+        publish()
         return true
+    }
+
+    /// Forgets one saved position; the others keep pointing. A screen only that position covered asks to be
+    /// calibrated again, the same as a new screen.
+    func removeSpot(_ id: String) {
+        guard var profile = self.profile, profile.spots.count > 1 else { return }
+        profile.removeSpot(id)
+        profiles.setProfile(profile)
+        save()
+        // Its maps go with it, even if no screen is left to refit.
+        ctx.pointer.calibration = nil
+        evaluate()
     }
 
     private func finishCalibration(at date: Date) {
@@ -262,6 +334,26 @@ final class SetupController {
             return screen
         }
         return NSScreen.main ?? NSScreen.screens[0]
+    }
+
+    /// What Settings lists: the camera's saved positions and the connected screens.
+    private func publish() {
+        let summaries = (profile?.spots ?? []).map { spot -> CalibrationSpotSummary in
+            let n = spot.screens.filter { !$0.samples.isEmpty }.count
+            let screens = n == 0 ? "Earlier calibration" : "\(n) screen\(n == 1 ? "" : "s")"
+            let date = spot.calibratedAt.map { Self.dateFormatter.string(from: $0) }
+            return CalibrationSpotSummary(id: spot.id, name: spot.name, detail: [screens, date].compactMap { $0 }.joined(separator: ", "))
+        }
+        ctx.state.set(\.calibrationSpots, summaries)
+        ctx.state.set(\.spotInUse, spotInUseID)
+        let all = NSScreen.screens
+        let descriptions = all.enumerated().map { ScreenDescription(name: $0.element.localizedName, frame: ScreenGeometry.topLeftFrame(of: $0.element), isMain: $0.offset == 0) }
+        let choices = all.enumerated().compactMap { index, screen -> ScreenChoice? in
+            guard let id = ScreenGeometry.stableID(of: screen) else { return nil }
+            let place = ScreenLayout.position(of: descriptions[index], among: descriptions)
+            return ScreenChoice(id: id, name: all.count > 1 ? "\(screen.localizedName), \(place)" : screen.localizedName)
+        }
+        ctx.state.set(\.screenChoices, choices)
     }
 
     private func save() {

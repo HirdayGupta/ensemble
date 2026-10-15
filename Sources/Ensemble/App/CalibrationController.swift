@@ -19,6 +19,8 @@ final class CalibrationModel: ObservableObject {
     @Published var phase = Phase.intro
     @Published var screens: [CalibrationScreenInfo] = []
     @Published var introHeadline = ""
+    /// Which saved position this run replaces or adds, when there is more than one; nil otherwise.
+    @Published var note: String?
     /// What the camera path is waiting for ("Starting the camera..."); empty once a face has been read.
     @Published var waiting = ""
     @Published var activeScreen = -1          // index into `screens` of the screen showing its dot
@@ -83,7 +85,8 @@ final class CalibrationController {
     /// only those (a newly connected display, say) while the others keep their own calibration.
     /// `clickedAt` (`CACurrentMediaTime`) lets the log say how long the window and the first face reading took.
     /// `verifyAim: false` is for the demo stub, whose fake head never moves.
-    func run(screens: [NSScreen] = NSScreen.screens, feed: CalibrationFeed, clickedAt: TimeInterval = CACurrentMediaTime(),
+    /// `note` is a line for the intro naming the position this run is for.
+    func run(screens: [NSScreen] = NSScreen.screens, note: String? = nil, feed: CalibrationFeed, clickedAt: TimeInterval = CACurrentMediaTime(),
              verifyAim: Bool = true, completion: @escaping ([ScreenCalibrationResult]) -> Void) {
         guard task == nil, !screens.isEmpty else { completion([]); return }
         self.completion = completion
@@ -101,6 +104,7 @@ final class CalibrationController {
         model.onSkip = { [weak self] in self?.choice = .skip }
         model.onRetry = { [weak self] in self?.choice = .retry }
         prepareModel(screens: screens)
+        model.note = note
         presentAll(screens: screens)
         EnsembleLog.write(String(format: "calibration window up %.0f ms after the click (%d screens)", (CACurrentMediaTime() - clickedAt) * 1000, screens.count))
         task = Task { [weak self] in
@@ -397,6 +401,9 @@ private struct CalibrationView: View {
     private var intro: some View {
         VStack(spacing: 14) {
             Text(model.introHeadline).font(.system(size: 34, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+            if let note = model.note {
+                Text(note).font(.title3).foregroundStyle(.white.opacity(0.8))
+            }
             VStack(spacing: 6) {
                 ForEach(model.screens) { screen in
                     let here = screen.id == index
