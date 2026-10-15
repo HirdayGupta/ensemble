@@ -141,6 +141,7 @@ struct MenuPanelView: View {
                           systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
                 }
             }
+            UpdateStatusLines(updates: updates).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
             HStack {
                 Text("⌥⌘K shows this panel").font(.caption).foregroundStyle(.tertiary)
                 Spacer()

@@ -34,7 +34,7 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 | Gestures | Remap gestures, including turning the thumbs-up send off, and the hold time. Warn when my look leaves Claude (on by default). Headphone presses on or off (on by default). |
 | Display | Show the nose dot, highlight the session you face, pointer smoothing, correct for where I sit (on by default), live sound bars (asks for microphone access), reverse the pinch-and-drag direction, the send countdown. |
 | Calibration | Calibrate from where you usually sit; sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display). Recalibrate after changing chairs, camera or monitor tilt. Each dot is captured only once your head has turned toward it and holds still. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
-| About | Version, credits and Check for Updates. Update automatically lives under General. |
+| About | Version, credits and Check for Updates. Update automatically lives under General. The installed version shows beside every Check for Updates button, and after a check the result: "Ensemble x.y.z is available" or "Up to date". |
 
 ## Audio pause
 

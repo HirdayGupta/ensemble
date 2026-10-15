@@ -58,6 +58,7 @@ private struct GeneralSettings: View {
                     .disabled(!updates.isConfigured)
                 Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
                     .disabled(!updates.isConfigured)
+                UpdateStatusLines(updates: updates)
             } header: {
                 Text("Updates")
             } footer: {
@@ -233,20 +234,13 @@ private struct CalibrationSettings: View {
 private struct AboutSettings: View {
     @ObservedObject var updates: UpdateController
 
-    private var version: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
-        let build = info?["CFBundleVersion"] as? String ?? "0"
-        return "Version \(short) (\(build))"
-    }
-
     var body: some View {
         VStack(spacing: 14) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 84, height: 84)
             Text("Ensemble").font(.title.weight(.semibold))
-            Text(version).font(.callout).foregroundStyle(.secondary)
+            Text(UpdateController.installedVersion).font(.callout).foregroundStyle(.secondary)
             Text("Hands-free control for Claude on your Mac. Video is analysed on this Mac and never stored or sent.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
@@ -262,6 +256,7 @@ private struct AboutSettings: View {
             .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
             VStack(spacing: 8) {
                 Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
+                UpdateStatusLines(updates: updates, showsInstalled: false)
             }
             Spacer(minLength: 0)
         }
