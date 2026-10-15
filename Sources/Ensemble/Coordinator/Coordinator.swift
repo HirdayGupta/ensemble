@@ -208,7 +208,7 @@ final class Coordinator: AppCoordinating {
         }
         logHeadStats(head)
         guard !state.calibrating else { return }
-        if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head) {
+        if head.faceCount == 1, ctx.calibratedHere, let p = ctx.pointer.point(for: head), ctx.setup.isUsable(p) {
             // A pinch or scroll in progress holds everything still: the hand is in front of the face.
             let under = focus.observe(nose: p, at: head.t, held: gestures.pinchHeld || scroll.isActive)
             dot.follow(nose: p, onSession: under != nil)
@@ -324,6 +324,8 @@ final class Coordinator: AppCoordinating {
         case .talkBegan: dictation.begin()
         case .talkEnded(let reason): if ctx.listening != nil { dictation.end(reason: reason.rawValue) }
         case .sendRequested:
+            // While the setup prompt shows, the held thumbs-up answers it instead of sending.
+            if ctx.setup.isPromptShowing { ctx.setup.start(); return }
             if ctx.listening != nil || ctx.busy { send.afterStop = true; EnsembleLog.write("send after stop") } else { send.request() }
         case .cancelRequested: break
         case .scroll(let dy): scroll.scroll(dy, target: focus.target)
@@ -349,6 +351,7 @@ final class Coordinator: AppCoordinating {
     }
 
     private func screensChanged() {
+        ctx.setup.screensChanged()
         ctx.invalidateCalibrationCache()
         EnsembleLog.write("screens changed; calibration valid here: \(ctx.calibratedHere)")
         if ctx.listening != nil { dictation.end(reason: "screens changed") }

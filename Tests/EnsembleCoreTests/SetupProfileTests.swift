@@ -161,3 +161,22 @@ import Testing
         #expect(decoded == profiles)
     }
 }
+
+@Suite struct SetupProfileLegacyTests {
+    @Test func migratedScreenWithoutSamplesIsModelOnly() {
+        var profile = CameraProfile(cameraID: "cam1", cameraName: "Cam", legacyModel: Data([1]))
+        profile.merge([ScreenCalibration(screenID: "a", frame: .zero, samples: [], calibratedAt: Date())])
+        #expect(profile.hasModelOnly(["a"]))
+        #expect(!profile.hasModelOnly(["b"]))
+    }
+
+    @Test func profilesRoundTripThroughJSON() throws {
+        var profiles = SetupProfiles()
+        var p = CameraProfile(cameraID: "c", cameraName: "Cam", legacyModel: Data([1, 2]))
+        p.merge([ScreenCalibration(screenID: "a", frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+                                   samples: [CalibrationSample(yaw: 0.1, pitch: 0.2, target: .zero)], calibratedAt: Date(timeIntervalSince1970: 0))])
+        profiles.setProfile(p)
+        let back = try JSONDecoder().decode(SetupProfiles.self, from: JSONEncoder().encode(profiles))
+        #expect(back == profiles)
+    }
+}

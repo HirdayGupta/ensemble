@@ -28,8 +28,16 @@ public struct CameraProfile: Codable, Equatable, Sendable {
     public var cameraID: String
     public var cameraName: String
     public var screens: [ScreenCalibration]
-    public init(cameraID: String, cameraName: String, screens: [ScreenCalibration] = []) {
-        self.cameraID = cameraID; self.cameraName = cameraName; self.screens = screens
+    /// The fitted pointer model from before profiles existed. Raw samples were never stored then, so a
+    /// migrated profile has this instead; it is used until the first new calibration replaces it.
+    public var legacyModel: Data?
+    public init(cameraID: String, cameraName: String, screens: [ScreenCalibration] = [], legacyModel: Data? = nil) {
+        self.cameraID = cameraID; self.cameraName = cameraName; self.screens = screens; self.legacyModel = legacyModel
+    }
+
+    /// True when any of these screens has no samples of its own (it came from the migrated model).
+    public func hasModelOnly(_ screenIDs: Set<String>) -> Bool {
+        screens.contains { screenIDs.contains($0.screenID) && $0.samples.isEmpty }
     }
 
     public func calibration(forScreenID id: String) -> ScreenCalibration? { screens.first { $0.screenID == id } }

@@ -45,6 +45,7 @@ final class VisionEngine {
     private var requestedCamera: String?
     private var watchdog: Timer?
     private var connectObserver: NSObjectProtocol?
+    private var disconnectObserver: NSObjectProtocol?
     private static let noFrameLimit = 3.0
 
     init() {
@@ -52,6 +53,12 @@ final class VisionEngine {
             forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.deviceConnected() }
+        }
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let id = (note.object as? AVCaptureDevice)?.uniqueID
+            MainActor.assumeIsolated { self?.deviceDisconnected(id) }
         }
         face.onReady = { [weak self] delegate in
             self?.onDiagnostic?("face tracker ready (\(delegate))")
@@ -94,6 +101,14 @@ final class VisionEngine {
     private func deviceConnected() {
         guard isRunning, requestedCamera == nil, let preferred = CameraSession.pick(named: nil), preferred.uniqueID != cameraID else { return }
         onDiagnostic?("a camera connected; switching to \(preferred.localizedName)")
+        start(cameraName: nil)
+    }
+
+    /// The camera in use was unplugged: restart so the session moves to whatever camera is left, and the
+    /// setup logic sees the camera it now actually uses.
+    private func deviceDisconnected(_ id: String?) {
+        guard isRunning, requestedCamera == nil, let id, id == cameraID else { return }
+        onDiagnostic?("the camera in use disconnected; picking another")
         start(cameraName: nil)
     }
 

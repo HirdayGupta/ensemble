@@ -103,6 +103,7 @@ final class SetupController {
         case .ready(let name, let valid, let newScreens, let recent):
             let previousValid = validScreenIDs
             validScreenIDs = Set(valid)
+            refitPointer()
             ctx.invalidateCalibrationCache()
 
             guard !newScreens.isEmpty else {
@@ -142,6 +143,10 @@ final class SetupController {
         case .newCamera:
             startFullCalibration()
         case .ready(_, _, let newScreens, _):
+            if let cameraID, profiles.profile(forCameraID: cameraID)?.hasModelOnly(validScreenIDs) == true {
+                // The old single calibration has no samples to combine with a new screen's; redo them together.
+                startFullCalibration(); return
+            }
             let ids = Set(newScreens.map(\.id))
             let targets = NSScreen.screens.filter { ScreenGeometry.stableID(of: $0).map(ids.contains) == true }
             guard !targets.isEmpty else { return }
@@ -222,10 +227,26 @@ final class SetupController {
     private func migrateLegacyIfNeeded(cameraID: String, cameraName: String) {
         guard profiles.cameras.isEmpty, ctx.settings.calibration != nil else { return }
         let now = ctx.settings.calibratedAt ?? Date()
-        var profile = CameraProfile(cameraID: cameraID, cameraName: cameraName)
+        var profile = CameraProfile(cameraID: cameraID, cameraName: cameraName, legacyModel: ctx.settings.calibration)
         profile.merge(currentScreens().map { ScreenCalibration(screenID: $0.id, frame: $0.frame, samples: [], calibratedAt: now) })
         profiles.setProfile(profile)
         save()
+    }
+
+    /// Points the pointer at what the screens now valid actually have: a fresh fit of their samples, or the
+    /// migrated model when the profile came from the old single calibration.
+    private func refitPointer() {
+        guard let cameraID, !validScreenIDs.isEmpty, let profile = profiles.profile(forCameraID: cameraID) else { return }
+        let samples = profile.samples(for: validScreenIDs)
+        if !profile.hasModelOnly(validScreenIDs), ctx.pointer.fit(samples) {
+            ctx.pointer.resetFilter()
+        } else if let legacy = profile.legacyModel {
+            ctx.pointer.calibration = legacy
+        } else {
+            // Nothing usable to fit: pointing off rather than the previous camera's or screen set's model.
+            validScreenIDs = []
+            ctx.pointer.calibration = nil
+        }
     }
 
     // MARK: - Facts and persistence
