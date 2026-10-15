@@ -1,21 +1,14 @@
+import Accelerate
 import EnsembleCore
-import CoreImage
 import CoreMedia
 import CoreVideo
 import Foundation
 
-/// Per-frame work: hand pose, brightness, and the JPEG for the face tracker. Not thread-safe per job: `hand` is
-/// called only from the engine's hand queue, `light` and `jpeg` only from the camera queue; they share no state.
+/// Per-frame work: hand pose, brightness, and the pixels for the face tracker. Not thread-safe per job: `hand` is
+/// called only from the engine's hand queue, `light` and `facePixels` only from the camera queue; they share no state.
 final class FrameAnalyzer: @unchecked Sendable {
     private let detector = HandPoseDetector()
     private let classifier = GestureClassifier()
-    private let ciContext = CIContext(options: [.cacheIntermediates: false])
-    private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-
-    /// The face tracker gets a frame 320 points wide (320x240 from the usual 640x480), whatever the camera format.
-    static let jpegWidth: CGFloat = 320
-    static let jpegQuality = 0.6
-
 
     func hand(from buffer: CMSampleBuffer, at t: TimeInterval) -> HandObservation {
         let h = detector.detect(buffer)
@@ -45,10 +38,23 @@ final class FrameAnalyzer: @unchecked Sendable {
         return FrameLight(t: t, meanLuma: mean, lumaStdDev: max(0, sumSquares / n - mean * mean).squareRoot())
     }
 
-    func jpeg(from pixels: CVPixelBuffer) -> Data? {
-        let scale = Self.jpegWidth / CGFloat(max(CVPixelBufferGetWidth(pixels), 1))
-        let image = CIImage(cvPixelBuffer: pixels).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
-        return ciContext.jpegRepresentation(of: image, colorSpace: colorSpace, options: [quality: Self.jpegQuality])
+    /// The frame for the face tracker: scaled to `FaceFrameSlot.size` and swapped from BGRA to RGBA, tightly packed,
+    /// ready to become the page's ImageData. Nil when the frame cannot be read.
+    func facePixels(from pixels: CVPixelBuffer) -> (bytes: Data, width: Int, height: Int)? {
+        CVPixelBufferLockBaseAddress(pixels, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard CVPixelBufferGetPixelFormatType(pixels) == kCVPixelFormatType_32BGRA,
+              let base = CVPixelBufferGetBaseAddress(pixels) else { return nil }
+        let (w, h) = FaceFrameSlot.size(cameraWidth: CVPixelBufferGetWidth(pixels), cameraHeight: CVPixelBufferGetHeight(pixels))
+        var src = vImage_Buffer(data: base, height: vImagePixelCount(CVPixelBufferGetHeight(pixels)),
+                                width: vImagePixelCount(CVPixelBufferGetWidth(pixels)), rowBytes: CVPixelBufferGetBytesPerRow(pixels))
+        var bytes = Data(count: w * h * 4)
+        let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
+            var dst = vImage_Buffer(data: raw.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w * 4)
+            guard vImageScale_ARGB8888(&src, &dst, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError else { return false }
+            let bgraToRGBA: [UInt8] = [2, 1, 0, 3]
+            return vImagePermuteChannels_ARGB8888(&dst, &dst, bgraToRGBA, vImage_Flags(kvImageNoFlags)) == kvImageNoError
+        }
+        return ok ? (bytes, w, h) : nil
     }
 }

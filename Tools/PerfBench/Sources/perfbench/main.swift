@@ -3,7 +3,7 @@ import Foundation
 
 let args = Array(CommandLine.arguments.dropFirst())
 setvbuf(stdout, nil, _IOLBF, 0)
-guard let mode = args.first else { print("usage: perfbench native | pointer [noise=0.004] [sweep] | web [transfer=b64|jpegpull|rgbapull|lumapull] [w=480] [h=360] [q=0.6] [hz=30] [sec=15] [delegate=GPU|CPU] [running=VIDEO|IMAGE] [face=1|0]"); exit(2) }
+guard let mode = args.first else { print("usage: perfbench native | pointer [noise=0.004] [sweep] | web [transfer=pull|b64|bgra] [w=320] [h=240] [q=0.6] [hz=30] [sec=15] [delegate=GPU|CPU] [model=landmarker|detector] [face=1|0] [max-cpu-ms=N] [max-growth-mb=N]"); exit(2) }
 switch mode {
 case "native": runNative()
 case "pointer": runPointer(Array(args.dropFirst()))
@@ -20,8 +20,10 @@ case "web":
         case "hz": cfg.hz = Double(kv[1])!
         case "sec": cfg.seconds = Double(kv[1])!
         case "delegate": cfg.delegate = kv[1]
-        case "running": cfg.running = kv[1]
+        case "model": cfg.model = kv[1]
         case "face": cfg.face = kv[1] == "1"
+        case "max-cpu-ms": cfg.maxCPUms = Double(kv[1])
+        case "max-growth-mb": cfg.maxGrowthMB = Double(kv[1])
         default: break
         }
     }

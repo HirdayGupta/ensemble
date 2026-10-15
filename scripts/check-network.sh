@@ -22,6 +22,9 @@ WEB_API_RE='fetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|importScript
 # MediaPipe's own loader uses these to read its wasm, model and worker script; the page can only reach ensemble-asset
 # and the compiled block list refuses everything else. The other web APIs above stay forbidden in these files.
 VENDORED_API_RE='sendBeacon|WebSocket|EventSource|RTCPeerConnection|WebTransport'
+# head.js fetches each camera frame from the app's own scheme (BASE is ensemble-asset://local; the page's CSP allows
+# connect-src ensemble-asset: only), so the frame stays in memory between the app and the page. Its fetch is allowed only
+# while every fetch in head.js is that one call (checked below).
 # three.js reads the tour's hand model through its own loader (XMLHttpRequest or fetch of ensemble-asset://, nothing else is
 # reachable: the tour page gets the same compiled block list). It is held to the same list as MediaPipe's loader.
 VENDORED="vision_bundle.mjs wasm/vision_wasm_internal.js tour/three.min.js"
@@ -34,6 +37,7 @@ Info.plist	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Ensemble.entitlements	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Sources/Ensemble/Engine/FaceTracker.swift	AssetSchemeHandler\.scheme
 Sources/Ensemble/App/Tour/TourSceneView.swift	AssetSchemeHandler\.scheme
+web/head.js	^fetch\($
 Sources/Ensemble/Engine/NetworkBlock.swift	url-filter
 Sources/Ensemble/Engine/NetworkBlock.swift	^(https?|wss?|ftp)://
 web/wasm/vision_wasm_internal.wasm	^http://go/lsc_proto3_utf8$
@@ -84,6 +88,9 @@ scan_web_folder() {
         api=$WEB_API_RE
         case " $VENDORED " in *" $rel "*) api=$VENDORED_API_RE ;; esac
         grep -HnoE "$api" "$f" | report "network API"
+        if [ "$rel" = head.js ]; then
+          grep -Hn 'fetch(' "$f" | grep -vF "fetch(BASE + '/frame/' + number)" | report "fetch other than the frame fetch"
+        fi
         ;;
       *)
         strings -a -n 6 "$f" | grep -noE "$URL_RE" | sed "s|^|$f:|" | report "URL in binary"
