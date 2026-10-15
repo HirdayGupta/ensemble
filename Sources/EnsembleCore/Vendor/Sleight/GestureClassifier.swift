@@ -20,6 +20,7 @@ public struct HandFeatures {
     public var tooSmall: Bool           // pose rejected because the hand is too far away
     public var angled: Bool             // pose rejected because the palm does not face the camera or points down
     public var indexRise: CGFloat = 0   // Ensemble change: index tip above its MCP, in palm lengths (negative = pointing down)
+    public var fingerSpread: Double?    // Ensemble change: index tip to middle tip, in palm lengths; see `WidthGestures`
     public var thumb: Bool { thumbStraight && thumbClear }
     public var extendedCount: Int { [index, middle, ring, little].filter { $0 }.count }
     /// Enough fingers extended to count as an open hand; swipes only track open hands.
@@ -131,6 +132,7 @@ public struct GestureClassifier {
                              extent: hand.extent, palm: size, span: dist(indexMCP, littleMCP) / size,
                              upright: (midMCP.y - wrist.y) / size, tooSmall: false, angled: false)
         f.indexRise = (indexTip.y - indexMCP.y) / size
+        if let middleTip = hand[.middleTip] { f.fingerSpread = Double(dist(indexTip, middleTip) / size) }
         let n = f.extendedCount
         // Ensemble change: "gather" = all five fingertips brought together, fingers forward (not curled into a fist).
         // Measured live: gathered tips spread 0.33–0.55 palm lengths with the tip centroid 1.07–1.38 from the wrist;

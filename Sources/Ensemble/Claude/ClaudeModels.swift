@@ -20,6 +20,8 @@ enum ClaudeLabels {
     static let sidebar = "Sidebar"
     /// The pane header's title button reads "<session name>, rename session".
     static let renameSuffix = ", rename session"
+    /// The divider between two side-by-side session panes (an AXSplitter, value 0-100: that pair's split).
+    static let paneResize = "Resize pane columns"
     static let allModes: Set<String> = ["Manual", "Accept edits", "Plan", "Auto", "Bypass permissions", "Don't ask"]
 }
 

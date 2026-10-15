@@ -131,6 +131,22 @@ private struct ActionSettings: View {
                      : "Moving your pinch up drags the page up, toward later messages, as your Mac scrolls. Cancel takes whichever gesture is left over.")
             }
             Section {
+                ActionRow(symbol: "arrow.left.and.right", title: "Maximize session",
+                          detail: "Hold a peace sign for about half a second: the session you face widens and the others in that window narrow.") {
+                    onOffPicker("Maximize session", gesture: "Peace sign", symbol: "hand.point.up.fill", isOn: $settings.maximizeByPeace)
+                }
+                ActionRow(symbol: "rectangle.split.3x1", title: "Even out sessions",
+                          detail: "Make a peace sign and close the two fingers together quickly: every session in that window gets an equal share.") {
+                    onOffPicker("Even out sessions", gesture: "Scissors", symbol: "scissors", isOn: $settings.evenOutByScissors)
+                }
+            } header: {
+                Text("Session widths")
+            } footer: {
+                Text(settings.mapping.usesTwoFingers
+                     ? "Two fingers is set as another action's gesture above, so the peace sign and scissors do nothing until that changes."
+                     : "Only with Claude in front and never while dictating or sending. Ensemble drags the dividers between sessions for you and puts the pointer back.")
+            }
+            Section {
                 ActionRow(symbol: GestureSlot.scrollUp.actionSymbol, title: "Scroll up", detail: GestureSlot.scrollUp.detail) {
                     posePicker(for: .scrollUp)
                 }
@@ -154,6 +170,15 @@ private struct ActionSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func onOffPicker(_ title: String, gesture: String, symbol: String, isOn: Binding<Bool>) -> some View {
+        Picker(title, selection: isOn) {
+            Text("Off").tag(false)
+            Label(gesture, systemImage: symbol).tag(true)
+        }
+        .labelsHidden()
+        .frame(width: 170)
     }
 
     private func posePicker(for slot: GestureSlot) -> some View {

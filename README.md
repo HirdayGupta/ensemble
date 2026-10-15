@@ -22,6 +22,8 @@ Ensemble is a macOS menu bar app that lets you run Claude desktop's Code session
 
 <p align="center"><b>Scroll with one hand</b><br>Pinch and drag to scroll the session, and flick for momentum.</p>
 
+<p align="center"><b>Make room for one session</b><br>Hold a peace sign and the session you look at widens while the others narrow; close the two fingers like scissors and they share the window evenly again.</p>
+
 <p align="center"><b>Always say what it sees</b><br>A capsule at the top of the screen names the state and the session, so nothing happens by surprise.</p>
 
 <p align="center"><b>Quiet while you talk</b><br>Other audio on your speakers fades out and pauses while you dictate, then comes back.</p>

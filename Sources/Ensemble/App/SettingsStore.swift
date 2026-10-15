@@ -20,6 +20,8 @@ final class SettingsStore: ObservableObject {
         static let playSounds = "playSounds"
         static let pauseMediaWhileDictating = "pauseMediaWhileDictating"
         static let headphonePresses = "headphonePresses"
+        static let maximizeByPeace = "maximizeByPeace"
+        static let evenOutByScissors = "evenOutByScissors"
         static let calibration = "calibration"
         static let calibratedAt = "calibratedAt"
         static let calibrationDisplays = "calibrationDisplays"
@@ -64,6 +66,10 @@ final class SettingsStore: ObservableObject {
     @Published var pauseMediaWhileDictating: Bool { didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMediaWhileDictating) } }
     /// Stem presses on Bluetooth headphones drive dictation and send. On by default.
     @Published var headphonePresses: Bool { didSet { defaults.set(headphonePresses, forKey: Key.headphonePresses) } }
+    /// A held peace sign widens the session you face and narrows the others. On by default.
+    @Published var maximizeByPeace: Bool { didSet { defaults.set(maximizeByPeace, forKey: Key.maximizeByPeace) } }
+    /// Scissors (a peace sign closed quickly) gives every session in that window an equal share. On by default.
+    @Published var evenOutByScissors: Bool { didSet { defaults.set(evenOutByScissors, forKey: Key.evenOutByScissors) } }
     /// Set only through `setLaunchAtLogin`, which talks to the system first.
     @Published private(set) var launchAtLogin: Bool
     @Published var launchAtLoginError: String?
@@ -103,6 +109,8 @@ final class SettingsStore: ObservableObject {
         playSounds = bool(Key.playSounds, true)
         pauseMediaWhileDictating = bool(Key.pauseMediaWhileDictating, true)
         headphonePresses = bool(Key.headphonePresses, true)
+        maximizeByPeace = bool(Key.maximizeByPeace, true)
+        evenOutByScissors = bool(Key.evenOutByScissors, true)
         LoginAgent.repointIfStale()
         launchAtLogin = LoginAgent.isEnabled
         calibration = store.data(forKey: Key.calibration)
