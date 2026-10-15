@@ -192,7 +192,7 @@ struct IslandView: View {
                     switch b.style {
                     case .sent: lines(Text("Sent in ") + session(b.body), nil)
                     case .stopped: lines(Text(b.title), Text("Text kept in ") + session(b.body) + Text(", thumbs-up to send"))
-                    case .refused, .info: lines(Text(b.title), Text(b.body))
+                    case .refused, .info, .success: lines(Text(b.title), Text(b.body))
                     }
                     Spacer(minLength: 0)
                 }
@@ -226,7 +226,9 @@ extension IslandView {
         switch s {
         case .sent: return "checkmark"
         case .stopped: return "mic.slash.fill"
-        case .refused, .info: return "exclamationmark.circle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .info: return "info.circle.fill"
+        case .refused: return "exclamationmark.circle.fill"
         }
     }
 
@@ -234,7 +236,9 @@ extension IslandView {
         switch s {
         case .sent: return .ensembleBlue
         case .stopped: return .white.opacity(0.55)
-        case .refused, .info: return Color(red: 1.0, green: 0.70, blue: 0.25)
+        case .success: return Color(red: 0.35, green: 0.80, blue: 0.55)
+        case .info: return .ensembleBlue
+        case .refused: return Color(red: 1.0, green: 0.70, blue: 0.25)
         }
     }
 }

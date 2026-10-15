@@ -65,6 +65,8 @@ extension ClaudeBridge {
             return .refused("Send button changed before pressing")
         }
         guard (v[3] as? NSNumber)?.boolValue == true else { return .refused("Send button is disabled") }
+        // The last check before the press: another app may have come to the front while this waited in the queue.
+        if let why = SendRules.frontRefusal(claudeInFront: claudeIsFrontmost()) { return .refused(why) }
 
         let err = AX.perform(send, kAXPressAction)
         if err != .success { return .unknown("Send press returned error \(err.rawValue)") }
