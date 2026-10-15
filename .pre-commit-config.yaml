@@ -1,7 +1,7 @@
 # Run before pushing: pre-commit run --all-files
 # Unset the token variables first so a placeholder token never reaches zizmor's online audits:
 #   env -u GH_TOKEN -u GITHUB_TOKEN pre-commit run --all-files
-# CI runs the same two tools in .github/workflows/hygiene.yml. Revisions are commit SHAs, with the tag as a comment.
+# CI runs the same two tools in the `hygiene` job of .github/workflows/ci.yml. Revisions are commit SHAs, with the tag as a comment.
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
