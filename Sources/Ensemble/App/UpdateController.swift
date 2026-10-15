@@ -1,5 +1,6 @@
 import AppKit
 import Sparkle
+import EnsembleCore
 
 /// Release-channel settings. The owner edits this file and Info.plist (SUPublicEDKey) once; see docs/RELEASING.md.
 enum UpdateConfig {
@@ -19,21 +20,25 @@ enum UpdateConfig {
 /// Sparkle 2 wrapper. Policy, in order of what matters for a tool that drives dictation:
 /// - No network until the user turns on automatic updates (Settings > General) or presses Check for Updates.
 /// - Sparkle's own "check automatically?" prompt is suppressed, so no window appears at login or mid-dictation.
-/// - Automatic updates (opt-in) check every 6 hours (SUScheduledCheckInterval), download in the background, and
-///   install only while Ensemble is idle: never while Claude is listening, calibrating or the tour is open.
-/// - Without them, a check that finds an update never opens a window; it changes the menu entry to "Update to x.y.z...".
+/// - Automatic updates (opt-in) check 15 s after launch and then every hour (`UpdatePolicy`), download in the
+///   background, and install only while Ensemble is idle: never while Claude is listening, calibrating or the tour is open.
+/// - Whatever check finds a new version, the one update button turns into "Update to x.y.z"; no window opens by itself.
 @MainActor
 final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
+    /// The newer version the last check found, from a check the user started or the automatic checks they turned on.
     @Published private(set) var availableVersion: String?
-    /// What the last check found: "Ensemble 0.5.0 is available" or "Up to date". Nil until a check has finished;
-    /// the latest version is only ever known from a check the user started or automatic checks they turned on.
-    @Published private(set) var checkResult: String?
+    /// True for a few seconds after a check the user started found nothing.
+    @Published private(set) var showingUpToDate = false
     @Published private(set) var autoInstall = false
     /// True while installing would interrupt the user (dictating, calibrating, tour open); set by the app.
     var isBusy: () -> Bool = { false }
-    static let checkInterval: TimeInterval = 6 * 3600
     private var pendingInstall: (() -> Void)?
     private var installTimer: Timer?
+    private var userCheckInFlight = false
+    private var upToDateTask: Task<Void, Never>?
+
+    /// What the one update button says.
+    var buttonTitle: String { UpdatePolicy.buttonTitle(available: availableVersion, showingUpToDate: showingUpToDate) }
 
     /// The installed version, read from the bundle (no network): "Version 0.4.2 (42)".
     static var installedVersion: String {
@@ -51,13 +56,21 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         controller = SPUStandardUpdaterController(startingUpdater: isConfigured, updaterDelegate: self, userDriverDelegate: self)
         let updater = controller.updater
         autoInstall = isConfigured && updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
-        if autoInstall { updater.updateCheckInterval = Self.checkInterval }
+        if autoInstall { updater.updateCheckInterval = UpdatePolicy.checkInterval }
+        if UpdatePolicy.checksAtLaunch(configured: isConfigured, automatic: autoInstall) {
+            // Sparkle's own schedule counts a full interval from the last check; this shows a new version soon after launch.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(UpdatePolicy.launchDelay * 1_000_000_000))
+                guard let self, self.autoInstall else { return }
+                self.controller.updater.checkForUpdatesInBackground()
+            }
+        }
     }
 
     func setAutoInstall(_ on: Bool) {
         guard isConfigured else { return }
         let updater = controller.updater
-        updater.updateCheckInterval = Self.checkInterval
+        updater.updateCheckInterval = UpdatePolicy.checkInterval
         updater.automaticallyChecksForUpdates = on
         updater.automaticallyDownloadsUpdates = on
         autoInstall = on
@@ -69,16 +82,23 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
         installTimer?.invalidate()
         installTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let install = self.pendingInstall, !self.isBusy() else { return }
-                self.installTimer?.invalidate()
-                self.installTimer = nil
-                self.pendingInstall = nil
+                guard let self, self.pendingInstall != nil, !self.isBusy() else { return }
                 EnsembleLog.write("installing a downloaded update while idle")
-                install()
+                self.installPending()
             }
         }
     }
 
+    private func installPending() {
+        installTimer?.invalidate()
+        installTimer = nil
+        let install = pendingInstall
+        pendingInstall = nil
+        install?()
+    }
+
+    /// The update button: installs a version already downloaded in the background, or checks (which offers a found
+    /// version in Sparkle's window).
     func checkForUpdates() {
         guard isConfigured else {
             NSApp.activate(ignoringOtherApps: true)
@@ -88,7 +108,32 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
             alert.runModal()
             return
         }
+        if pendingInstall != nil, !isBusy() {
+            EnsembleLog.write("installing a downloaded update on the user's press")
+            installPending()
+            return
+        }
+        userCheckInFlight = true
         controller.checkForUpdates(nil)
+    }
+
+    private func found(_ version: String) {
+        upToDateTask?.cancel()
+        showingUpToDate = false
+        availableVersion = version
+    }
+
+    private func foundNothing() {
+        availableVersion = nil
+        guard userCheckInFlight else { return }
+        userCheckInFlight = false
+        showingUpToDate = true
+        upToDateTask?.cancel()
+        upToDateTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(UpdatePolicy.upToDateSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.showingUpToDate = false
+        }
     }
 
     // MARK: SPUUpdaterDelegate
@@ -97,17 +142,30 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     nonisolated func updaterShouldPromptForPermissionToCheck(forUpdates updater: SPUUpdater) -> Bool { false }
 
+    /// Every check reports here, background ones included, so the button changes without the user pressing it.
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
-        Task { @MainActor in self.checkResult = "Ensemble \(version) is available" }
+        Task { @MainActor in self.found(version) }
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
-        Task { @MainActor in self.checkResult = "Up to date" }
+        Task { @MainActor in self.foundNothing() }
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        Task { @MainActor in self.userCheckInFlight = false }
+    }
+
+    /// Skipping the version takes it off the button; "Later" keeps it there.
+    nonisolated func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
+        guard choice == .skip else { return }
+        Task { @MainActor in self.availableVersion = nil }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock: @escaping () -> Void) -> Bool {
+        let version = item.displayVersionString
         Task { @MainActor in
+            self.found(version)
             self.pendingInstall = immediateInstallationBlock
             self.installWhenIdle()
         }
@@ -122,14 +180,6 @@ final class UpdateController: NSObject, ObservableObject, SPUUpdaterDelegate, SP
 
     nonisolated func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
         let version = update.displayVersionString
-        Task { @MainActor in self.availableVersion = version }
-    }
-
-    nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        Task { @MainActor in self.availableVersion = nil }
-    }
-
-    nonisolated func standardUserDriverWillFinishUpdateSession() {
-        Task { @MainActor in self.availableVersion = nil }
+        Task { @MainActor in self.found(version) }
     }
 }

@@ -6,22 +6,28 @@ struct SettingsView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: SettingsStore
     @ObservedObject var updates: UpdateController
+    @ObservedObject var navigation: SettingsNavigation
     let calibrate: (CalibrationRequest) -> Void
     let removeSpot: (String) -> Void
     let replayTour: (TourStep?) -> Void
 
     var body: some View {
-        TabView {
+        TabView(selection: $navigation.tab) {
             GeneralSettings(state: state, settings: settings, updates: updates, replayTour: replayTour)
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             GestureSettings(settings: settings)
                 .tabItem { Label("Gestures", systemImage: "hand.raised") }
+                .tag(SettingsTab.gestures)
             DisplaySettings(settings: settings)
                 .tabItem { Label("Display", systemImage: "rectangle.on.rectangle") }
+                .tag(SettingsTab.display)
             CalibrationSettings(state: state, settings: settings, calibrate: calibrate, removeSpot: removeSpot)
                 .tabItem { Label("Calibration", systemImage: "scope") }
+                .tag(SettingsTab.calibration)
             AboutSettings(updates: updates)
                 .tabItem { Label("About", systemImage: "info.circle") }
+                .tag(SettingsTab.about)
         }
         .frame(width: 540, height: 440)
     }
@@ -57,13 +63,14 @@ private struct GeneralSettings: View {
             Section {
                 Toggle("Update automatically", isOn: Binding(get: { updates.autoInstall }, set: { updates.setAutoInstall($0) }))
                     .disabled(!updates.isConfigured)
-                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
-                    .disabled(!updates.isConfigured)
-                UpdateStatusLines(updates: updates)
+                LabeledContent(UpdateController.installedVersion) {
+                    UpdateButton(updates: updates) { updates.checkForUpdates() }
+                        .disabled(!updates.isConfigured)
+                }
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Checks every 6 hours and installs a new version only while you are not dictating, calibrating or in the tour; Ensemble then restarts on its own. Off: nothing is checked until you press Check for Updates.")
+                Text("Checks soon after launch and then every hour; the button shows a new version as soon as one is found. A new version installs only while you are not dictating, calibrating or in the tour, and Ensemble then restarts on its own. Off: nothing is checked until you press Check for Updates.")
             }
             Section("Tour") {
                 Button("Replay tour") { replayTour(nil) }
@@ -211,8 +218,6 @@ private struct CalibrationSettings: View {
     @ObservedObject var settings: SettingsStore
     let calibrate: (CalibrationRequest) -> Void
     let removeSpot: (String) -> Void
-    /// Nil: every screen.
-    @State private var screenID: String?
     @State private var removing: CalibrationSpotSummary?
 
     var body: some View {
@@ -225,19 +230,31 @@ private struct CalibrationSettings: View {
                         Text("Never").foregroundStyle(.secondary)
                     }
                 }
-                if state.screenChoices.count > 1 {
-                    Picker("Screens", selection: $screenID) {
-                        Text("All screens").tag(String?.none)
-                        ForEach(state.screenChoices) { Text($0.name).tag(String?.some($0.id)) }
+                Button(state.screenChoices.count > 1 ? "Calibrate all screens…" : "Calibrate…") { calibrate(.recalibrate) }
+                    .disabled(state.calibrating)
+                    .ensembleButtonStyle(prominent: true)
+            } footer: {
+                Text("A dot visits five points on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera.")
+            }
+            if !state.screenChoices.isEmpty {
+                Section {
+                    ForEach(state.screenChoices) { screen in
+                        HStack {
+                            Label(screen.name, systemImage: "display")
+                            Spacer(minLength: 8)
+                            if state.screenChoices.count > 1 {
+                                Button("Recalibrate") { calibrate(.screen(screen.id)) }
+                                    .disabled(state.calibrating)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Screens")
+                } footer: {
+                    if state.screenChoices.count > 1 {
+                        Text("Recalibrate one screen to redo only that one; the others keep theirs.")
                     }
                 }
-                Button(screenID == nil ? "Calibrate…" : "Calibrate this screen…") {
-                    calibrate(screenID.map(CalibrationRequest.screen) ?? .recalibrate)
-                }
-                .disabled(state.calibrating)
-                .ensembleButtonStyle(prominent: true)
-            } footer: {
-                Text("A dot visits five points on each screen. Point your nose at it and keep your head still. Redo this if you move your screen or camera. Pick one screen to redo only that one; the others keep theirs.")
             }
             Section {
                 ForEach(state.calibrationSpots) { spot in
@@ -263,9 +280,6 @@ private struct CalibrationSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: state.screenChoices) { _, choices in
-            if let id = screenID, !choices.contains(where: { $0.id == id }) { screenID = nil }
-        }
         .confirmationDialog("Remove \(removing?.name ?? "this position")?", isPresented: Binding(
             get: { removing != nil }, set: { if !$0 { removing = nil } }
         )) {
@@ -302,10 +316,7 @@ private struct AboutSettings: View {
             .padding(14)
             .frame(maxWidth: 400, alignment: .leading)
             .glassSurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            VStack(spacing: 8) {
-                Button(updates.availableVersion.map { "Update to \($0)…" } ?? "Check for Updates…") { updates.checkForUpdates() }
-                UpdateStatusLines(updates: updates, showsInstalled: false)
-            }
+            UpdateButton(updates: updates) { updates.checkForUpdates() }
             Spacer(minLength: 0)
         }
         .padding(.top, 24)
