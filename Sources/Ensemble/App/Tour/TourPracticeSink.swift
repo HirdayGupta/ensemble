@@ -6,4 +6,6 @@ import EnsembleCore
 protocol TourPracticeSink: AnyObject {
     func tourPractice(intent: GestureIntent)
     func tourPractice(head: HeadObservation)
+    /// Every hand reading, with its joint coordinates, for the skeleton inset. Points only; no image reaches the tour.
+    func tourPractice(hand: HandObservation)
 }

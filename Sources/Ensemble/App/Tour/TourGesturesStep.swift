@@ -21,7 +21,7 @@ struct TourGesturesStep: View {
             .labelsHidden()
             .frame(maxWidth: 460)
 
-            TabIllustration(tab: model.activeTab).id(model.activeTab)
+            TabIllustration(model: model)
 
             Text(model.activeTab.explanation)
                 .font(.callout)
@@ -49,44 +49,29 @@ struct TourGesturesStep: View {
     }
 }
 
+/// One 3D scene that follows the active tab, the session mock it drives, and the live skeleton of the owner's own
+/// hand as Vision reads it. The scene is created once for the step, so switching tabs changes its animation
+/// without reloading the page.
 private struct TabIllustration: View {
-    let tab: TourGestureTab
+    @ObservedObject var model: TourModel
+    @StateObject private var scene: TourSceneController
 
-    var body: some View {
-        HStack(spacing: 36) {
-            if tab == .look {
-                LookIllustration()
-            } else {
-                TourHandView(tab: tab)
-                    .frame(width: 220, height: 190)
-            }
-            TourSessionMock(tab: tab)
-        }
-        .frame(height: 220)
+    init(model: TourModel) {
+        self.model = model
+        // Starts on the tab that is open, which is not always the first one when the step is revisited.
+        _scene = StateObject(wrappedValue: TourSceneController(scene: TourScene(model.activeTab), wantsFrames: true))
     }
-}
-
-/// The Look tab's illustration: the overhead head, looping the same as Welcome and Calibrate.
-private struct LookIllustration: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var turned = false
-
-    private var yawDegrees: Double { reduceMotion ? 0 : (turned ? 26 : -26) }
 
     var body: some View {
-        // scaleEffect does not shrink layout, so the head is wrapped in a frame of its scaled size; otherwise the
-        // monitors were squeezed out of the illustration and only an empty bar showed.
-        VStack(spacing: 8) {
-            SessionMonitors(facedIndex: SessionMonitors.facedIndex(forYawDegrees: yawDegrees))
-            OverheadHeadGroup(yawDegrees: yawDegrees)
-                .scaleEffect(0.62)
-                .frame(width: 140, height: 140)
+        let tab = model.activeTab
+        HStack(alignment: .center, spacing: 16) {
+            TourSceneStage(controller: scene, symbol: tab.symbolName, caption: tab.explanation)
+                .frame(width: 340, height: 236)
+            TourSessionMock(tab: tab, frame: scene.frame)
+            TourHandInset(model: model.handInset, done: model.practiceDone.contains(tab))
         }
-        .frame(width: 280, height: 210)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) { turned = true }
-        }
+        .frame(height: 240)
+        .onChange(of: tab) { _, new in scene.setScene(TourScene(new)) }
     }
 }
 

@@ -9,7 +9,8 @@ public enum HandClassifierAdapter {
             let palm = hypot(w.x - m.x, w.y - m.y)
             if palm > 0.01 { pinch = Double(hypot(a.x - b.x, a.y - b.y) / palm) }
         }
-        return HandObservation(t: t, present: true, pose: pose(for: classifier.classify(hand)), palmCenter: hand.palmCenter, pinch: pinch)
+        return HandObservation(t: t, present: true, pose: pose(for: classifier.classify(hand)), palmCenter: hand.palmCenter, pinch: pinch,
+                                skeleton: HandSkeletonFrame(hand: hand))
     }
 
     static func pose(for gesture: Gesture?) -> Pose? {

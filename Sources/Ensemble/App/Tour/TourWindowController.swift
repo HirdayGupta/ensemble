@@ -39,7 +39,7 @@ final class TourWindowController {
         let model = makeModel(step, singleStep) { [weak self] in self?.close() }
         self.model = model
 
-        let size = NSSize(width: 760, height: 620)
+        let size = NSSize(width: 860, height: 640)
         let screen = NSScreen.main ?? NSScreen.screens[0]
         let origin = NSPoint(x: screen.frame.midX - size.width / 2, y: screen.frame.midY - size.height / 2)
         let window = NSWindow(contentRect: NSRect(origin: origin, size: size),

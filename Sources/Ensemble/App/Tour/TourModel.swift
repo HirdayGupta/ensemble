@@ -21,6 +21,9 @@ final class TourModel: ObservableObject, TourPracticeSink {
     private let exitPractice: () -> Void
     private let close: () -> Void
 
+    /// What the system currently sees of the owner's hand, for the gestures step's inset.
+    let handInset = TourHandInsetModel()
+
     private let detector = TourPracticeDetector()
     private let lookDetector = TourLookDetector()
     private var practicing = false
@@ -116,6 +119,7 @@ final class TourModel: ObservableObject, TourPracticeSink {
         practicing = true
         detector.reset()
         lookDetector.reset()
+        handInset.reset()
         enterPractice(self)
     }
 
@@ -128,6 +132,10 @@ final class TourModel: ObservableObject, TourPracticeSink {
     func tourPractice(intent: GestureIntent) {
         guard let tab = detector.observe(intent), tab == activeTab else { return }
         markDone(tab)
+    }
+
+    func tourPractice(hand: HandObservation) {
+        handInset.ingest(hand)
     }
 
     func tourPractice(head: HeadObservation) {

@@ -22,7 +22,9 @@ WEB_API_RE='fetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource|importScript
 # MediaPipe's own loader uses these to read its wasm, model and worker script; the page can only reach ensemble-asset
 # and the compiled block list refuses everything else. The other web APIs above stay forbidden in these files.
 VENDORED_API_RE='sendBeacon|WebSocket|EventSource|RTCPeerConnection|WebTransport'
-VENDORED="vision_bundle.mjs wasm/vision_wasm_internal.js"
+# three.js reads the tour's hand model through its own loader (XMLHttpRequest or fetch of ensemble-asset://, nothing else is
+# reachable: the tour page gets the same compiled block list). It is held to the same list as MediaPipe's loader.
+VENDORED="vision_bundle.mjs wasm/vision_wasm_internal.js tour/three.min.js"
 NATIVE_SYMBOL_RE='URLSession|NSURLConnection|NWConnection|nw_connection|CFSocket|CFHTTP|getaddrinfo|gethostbyname|CFStreamCreatePairWithSocketToHost'
 
 # Allowlist: <path suffix> TAB <regex the matched text must satisfy>. Every entry is a decision; keep each narrow.
@@ -31,12 +33,19 @@ Sources/Ensemble/App/UpdateController.swift	^https://[^/]+/.*appcast\.xml$
 Info.plist	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Ensemble.entitlements	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 Sources/Ensemble/Engine/FaceTracker.swift	AssetSchemeHandler\.scheme
+Sources/Ensemble/App/Tour/TourSceneView.swift	AssetSchemeHandler\.scheme
 Sources/Ensemble/Engine/NetworkBlock.swift	url-filter
 Sources/Ensemble/Engine/NetworkBlock.swift	^(https?|wss?|ftp)://
 web/wasm/vision_wasm_internal.wasm	^http://go/lsc_proto3_utf8$
 web/wasm/vision_wasm_internal.wasm	^http://goto/weakfields$
 web/wasm/vision_wasm_internal.wasm	^https://github\.com/opencv/opencv/issues/16739$
 web/wasm/vision_wasm_internal.wasm	^https://www\.tensorflow\.org/lite/guide/ops_(custom|select)$
+web/tour/three.min.js	^http://www\.w3\.org/1999/xhtml$
+web/tour/GLTFLoader.js	^https://github\.com/(KhronosGroup/glTF|mrdoob/three\.js)/
+web/tour/GLTFLoader.js	^http://,https://,//$
+web/tour/GLTFLoader.js	^https://en\.wikipedia\.org/wiki/Portable_Network_Graphics#File_header$
+web/tour/CCDIKSolver.js	^https://sites\.google\.com/site/auraliusproject/ccd-algorithm$
+web/tour/CCDIKSolver.js	^http://www20\.atpages\.jp/katwat/three\.js_r58/
 MacOS/Ensemble	^https://[^/]+/.*appcast\.xml$
 MacOS/Ensemble	^http://www\.apple\.com/DTDs/PropertyList-1\.0\.dtd$
 MacOS/Ensemble	^(https?|wss?|ftp)://$
