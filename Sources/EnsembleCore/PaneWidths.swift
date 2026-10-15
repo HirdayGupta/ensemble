@@ -21,6 +21,19 @@ public enum PaneWidths {
         return ((0..<n).map { bounds[$0 + 1] - bounds[$0] - gap }, gap)
     }
 
+    /// Where the panes will sit once they have `widths` (from a plan), laid out the way `layout` reads them: the row
+    /// keeps its outer edges and gaps, and each pane keeps its own top and height. nil when the counts differ.
+    public static func frames(panes: [CGRect], dividers: [Double], widths: [Double]) -> [CGRect]? {
+        let n = panes.count
+        guard n >= 2, dividers.count == n - 1, widths.count == n, widths.allSatisfy(\.isFinite) else { return nil }
+        let gap = layout(panes: panes, dividers: dividers).gap
+        var x = Double(panes[0].minX)
+        return (0..<n).map { i in
+            defer { x += widths[i] + gap }
+            return CGRect(x: x, y: Double(panes[i].minY), width: widths[i], height: Double(panes[i].height))
+        }
+    }
+
     /// Pairs each divider between neighbouring panes with the splitter frame nearest the gap between them.
     /// nil when any pair has no splitter within `reach` of its gap, or a splitter is not beside the row.
     public static func dividers(between panes: [CGRect], splitters: [CGRect], reach: Double = 24) -> [Double]? {
