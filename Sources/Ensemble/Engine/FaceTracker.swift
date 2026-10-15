@@ -78,6 +78,8 @@ final class FaceTracker: NSObject, WKScriptMessageHandler, WKNavigationDelegate 
         startAttempt = nil
         readyTimeout?.cancel()
         gate.setOpen(false)
+        // A frame left in the slot would be served to the restarted page as if it were new.
+        frames.clear()
         isReady = false
         onFailure?(message)
     }
