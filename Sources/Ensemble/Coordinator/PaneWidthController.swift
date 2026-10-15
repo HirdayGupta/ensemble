@@ -10,8 +10,11 @@ import EnsembleCore
 /// (`PaneKeys` plans which), posted through the session event tap to Claude in front. The pointer never moves.
 /// Before every key it checks that Claude is still in front with that divider holding its keyboard, that no
 /// dictation, send or Return watch is running, and that the keyboard, mouse and trackpad are untouched; otherwise
-/// nothing more is pressed. Afterwards the keyboard goes back to the session's message box, and the session frames
-/// are read again during and after, so the highlight follows the pane.
+/// nothing more is pressed. From the moment a divider is asked to take the keyboard, keys you type are held back
+/// (`ResizeKeyHold`): the resize stops, and they go out again once the keyboard is back in the message box. Afterwards
+/// the keyboard goes back to the session's message box only if a divider of the row still holds it (`ResizeKeys`),
+/// and with Claude not in front, when Claude next comes to the front. The session frames are read again during and
+/// after, so the highlight follows the pane.
 @MainActor
 final class PaneWidthController {
     private let ctx: CoordinatorContext
@@ -27,6 +30,14 @@ final class PaneWidthController {
     private var startedAt: TimeInterval = 0
     private var pressedAny = false
     private var refreshInFlight = false
+    /// A divider was asked to take the keyboard during this resize, and the row's dividers that were.
+    private var askedDivider = false
+    private var askedDividers: [AXUIElement] = []
+    /// A resize ended with Claude not in front: when Claude next comes to the front, the keyboard goes back to this
+    /// session's message box if one of these dividers still holds it.
+    private var pendingRefocus: (target: ClaudeSession, dividers: [AXUIElement])?
+    private let keyHold = ResizeKeyHold()
+    private var activationObserver: NSObjectProtocol?
 
     /// Plan, press, read back: the second pass corrects what Claude's rounding or a lost key left.
     private static let passes = 2
@@ -42,7 +53,34 @@ final class PaneWidthController {
     /// Which panes recent fits widened and narrowed, so one glance never undoes the last fit.
     private var hold = SessionFit.Hold()
 
-    init(ctx: CoordinatorContext) { self.ctx = ctx }
+    init(ctx: CoordinatorContext) {
+        self.ctx = ctx
+        keyHold.onHeld = { [weak self] in
+            guard let self, self.isRunning, !self.cancelled else { return }
+            EnsembleLog.write("pane widths: a key was typed; stopping and handing it to the message box")
+            self.cancel()
+        }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard app?.bundleIdentifier == ClaudeLabels.bundleID else { return }
+            MainActor.assumeIsolated { self?.claudeCameToFront() }
+        }
+    }
+
+    /// Claude is in front again after a resize ended without it: the keyboard goes back to the message box only if
+    /// a divider of that row still holds it.
+    private func claudeCameToFront() {
+        guard let pending = pendingRefocus, !isRunning else { return }
+        pendingRefocus = nil
+        Task { @MainActor in
+            let onDivider = await self.ctx.bridge.keyboardOnDivider(pending.dividers)
+            guard ResizeKeys.refocus(askedDivider: true, claudeInFront: self.ctx.bridge.claudeIsFrontmost(),
+                                     keyboardOnDivider: onDivider) == .now else { return }
+            EnsembleLog.write("pane widths: Claude is in front again; \(await self.ctx.bridge.focusComposerIfNeeded(pending.target))")
+        }
+    }
 
     /// Stops the running resize only: each run clears it as it ends, or `blocker` would refuse every later fit and
     /// peace sign as "interrupted" until Ensemble restarts.
@@ -139,14 +177,38 @@ final class PaneWidthController {
         isRunning = true
         cancelled = false
         pressedAny = false
+        askedDivider = false
+        askedDividers = []
+        pendingRefocus = nil
         startedAt = CACurrentMediaTime()
     }
 
-    /// The keyboard goes back to the session's message box (a divider keeps it otherwise), and the frames are read
-    /// again once Claude has drawn the last key. Clears `cancelled` so one interrupted resize never blocks the next.
+    /// The keyboard goes back to the session's message box if a divider of the row still holds it (a box you clicked
+    /// into meanwhile keeps it), keys held back meanwhile go out again, and the frames are read again once Claude has
+    /// drawn the last key. Clears `cancelled` so one interrupted resize never blocks the next.
     private func end(_ target: ClaudeSession) async {
+        if askedDivider {
+            let dividers = askedDividers
+            let onDivider = await ctx.bridge.keyboardOnDivider(dividers)
+            switch ResizeKeys.refocus(askedDivider: true, claudeInFront: ctx.bridge.claudeIsFrontmost(), keyboardOnDivider: onDivider) {
+            case .now: EnsembleLog.write("pane widths: \(await ctx.bridge.focusComposerIfNeeded(target))")
+            case .whenClaudeReturns:
+                pendingRefocus = (target, dividers)
+                EnsembleLog.write("pane widths: Claude is not in front; the message box gets the keyboard when it is")
+            case .leave: EnsembleLog.write("pane widths: keyboard left where it is")
+            }
+            let held = keyHold.finish()
+            if !held.isEmpty {
+                let after = await ctx.bridge.keyboardOnDivider(dividers)
+                if ResizeKeys.replayHeld(claudeInFront: ctx.bridge.claudeIsFrontmost(), keyboardOnDivider: after) {
+                    ResizeKeyHold.repost(held)
+                    EnsembleLog.write("pane widths: \(held.count) held key events passed on")
+                } else {
+                    EnsembleLog.write("pane widths: \(held.count) held key events dropped (a divider still holds the keyboard)")
+                }
+            }
+        }
         if pressedAny {
-            EnsembleLog.write("pane widths: \(await ctx.bridge.focusComposerIfNeeded(target))")
             refreshFrames()
             try? await Task.sleep(nanoseconds: Self.settle)
             refreshFrames()
@@ -211,6 +273,10 @@ final class PaneWidthController {
             let divider = dividers[p.divider]
             if focused != p.divider {
                 if focused != nil { refreshFrames() }
+                // From here a divider may hold the keyboard: your keys are held back, and the end puts it back.
+                askedDivider = true
+                for d in dividers where !askedDividers.contains(where: { CFEqual($0, d) }) { askedDividers.append(d) }
+                keyHold.begin()
                 if !(await ctx.bridge.focusDivider(divider, in: target)) {
                     // Claude can take a second or more to move the keyboard after a burst of keys on another divider.
                     let until = CACurrentMediaTime() + Self.focusWait

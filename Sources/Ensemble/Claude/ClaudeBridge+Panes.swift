@@ -64,6 +64,17 @@ extension ClaudeBridge {
         }
     }
 
+    /// Whether Claude's keyboard focus is on one of `dividers`, whether or not Claude is in front; nil when Claude's
+    /// focused element cannot be read.
+    func keyboardOnDivider(_ dividers: [AXUIElement]) async -> Bool? {
+        await run {
+            guard let pid = self.claudePID, let focused = AX.element(AX.application(pid: pid), kAXFocusedUIElementAttribute) else {
+                return nil
+            }
+            return dividers.contains { CFEqual($0, focused) }
+        }
+    }
+
     private func holdsKeyboard(_ el: AXUIElement, pid: pid_t) -> Bool {
         AX.element(AX.application(pid: pid), kAXFocusedUIElementAttribute).map { CFEqual($0, el) } ?? false
     }
@@ -122,6 +133,8 @@ extension ClaudeBridge {
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { continue }
             event.flags = flags
+            // Marked as Ensemble's own so the resize's key hold (`ResizeKeyHold`) lets it through.
+            event.setIntegerValueField(.eventSourceUserData, value: ResizeKeyHold.ownTag)
             event.post(tap: .cgSessionEventTap)
         }
     }
