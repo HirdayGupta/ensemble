@@ -149,7 +149,8 @@ final class DictationController {
             self.processID = bridge.claudePID
             self.ctx.state.listening = true
             self.ctx.changed()
-            // Other audio is paused before the microphone opens, so neither it nor the pause is transcribed.
+            // Other audio is paused before the microphone opens, so neither it nor the pause is transcribed; the
+            // pause never lowers the volume, so the start cue after the press plays at full volume.
             if self.ctx.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
             let result = await self.ctx.bridge.startDictation(session)
             self.ctx.busy = false
@@ -168,7 +169,16 @@ final class DictationController {
                 self.startedAt = CACurrentMediaTime()
                 self.inputDevice = await Task.detached { bridge.defaultInputDeviceName() }.value
                 self.safety.episodeConfirmed()
-                if next != .stopSwitchedOff { Notifier.shared.playCue(.listenStart) }
+                // Claude's composer dictation has no start tone of its own, so this cue is the one heard; the
+                // output volume is never lowered (DictationAudio), and on Bluetooth it waits out the profile switch.
+                if DictationAudio.startCue(after: next, soundsOn: self.ctx.settings.playSounds) {
+                    let bluetooth = MediaDucker.defaultOutput().map(MediaDucker.isBluetooth) ?? false
+                    let delay = DictationAudio.startCueDelay(outputIsBluetooth: bluetooth)
+                    Task { @MainActor in
+                        if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1e9)) }
+                        Notifier.shared.playCue(.listenStart)
+                    }
+                }
                 // Pressing the microphone can leave the keyboard on the button; a key typed while dictating belongs in
                 // this session's message box.
                 if next == .keepListening {

@@ -44,7 +44,7 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 
 | Group | What you can change |
 |---|---|
-| General | Update automatically (off by default: checks soon after launch and then every hour, installs only while idle). Turn Ensemble on or off, open at login (restarts after a crash), play sounds, fade out and pause other audio while dictating, and Pause after typing or mouse use (1 to 5 seconds, 2 by default). |
+| General | Update automatically (off by default: checks soon after launch and then every hour, installs only while idle). Turn Ensemble on or off, open at login (restarts after a crash), play sounds (a start, stop and send sound), pause other audio while dictating, and Pause after typing or mouse use (1 to 5 seconds, 2 by default). |
 | Actions | One row per action, with the action's icon and the gesture that does it: Talk (pinch twice), Send (any pose, or Off; thumbs-up by default) with its hold time, and Scroll (pinch and move) with Reverse the scroll direction. Under "Other ways to scroll", Scroll up and Scroll down can each take a held pose; both are Off by default because pinch and move already scrolls, and a held pose would scroll whenever your hand rested in that shape. Under "Session widths", Maximize session (peace sign) and Even out sessions (scissors), each on by default and each can be Off; both stand aside while two fingers is another action's pose. Fit the focused session to the chat width (on by default). Warn when my look leaves Claude (on by default). Headphone presses on or off (on by default). |
 | Display | Show the nose dot, highlight the session you face, pointer smoothing, correct for where I sit (on by default), live sound bars (asks for microphone access). |
 | Calibration | Calibrate from where you usually sit; sliding along the desk afterward needs no recalibration while "Correct for where I sit" is on (Settings, Display). Recalibrate after changing chairs, camera or monitor tilt. Settings, Calibration opens with your screens drawn where macOS has them (as System Settings, Displays draws them), each with its name, size and calibration date; click a screen, or its Recalibrate button below, to redo that screen only. Add position keeps a second calibration (standing, leaning back) beside the first; the one nearest your head is used, and Calibrate redoes that one. Each dot is captured only once your head has turned toward it and holds still. A new camera or screen asks on its own; while that card shows, a held thumbs-up starts it instead of sending. |
@@ -52,7 +52,7 @@ Two guards apply only while dictating. The switch wait does not advance while yo
 
 ## Audio pause
 
-While you dictate, other audio on speakers fades out in 0.25 seconds and pauses, then resumes and fades back in over 0.4 seconds. Headphones are left alone. The volume is saved before it is touched, so a crash puts it right on the next launch. The setting is on by default.
+While you dictate, other audio on speakers is paused with the play/pause key before the microphone opens, and resumes after the stop sound. The output volume is never touched, so Claude's sounds and Ensemble's start, stop and send sounds always play at your volume. Headphones are left alone. If the key does not stop the audio (it reached another app), the press is undone and the audio is left as it was. The setting is on by default.
 
 ## Headphone presses
 

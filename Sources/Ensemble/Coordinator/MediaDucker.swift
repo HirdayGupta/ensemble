@@ -3,63 +3,52 @@ import AudioToolbox
 import CoreAudio
 
 /// Other audio playing through speakers would be heard by the microphone and transcribed. Before dictation starts,
-/// this fades the system output down in 0.25 s, presses play/pause, and puts the volume straight back: the media is
-/// paused, so nothing is heard, and Claude's own start and stop sounds play at normal volume. When dictation ends it
-/// waits for Claude's stop sound, then presses play again with the volume faded in over 0.4 s. Headphones and
-/// Bluetooth output are left alone: the microphone cannot hear them.
+/// this presses play/pause and checks the media stopped; when dictation ends it waits out Ensemble's stop cue and
+/// presses play again. Headphones and Bluetooth output are left alone: the microphone cannot hear them.
+///
+/// Allowlist model (owner, 2026-10-15): the output volume is never touched, so Claude's sounds and Ensemble's cues
+/// always play at the owner's volume; only other apps' media is paused. Silencing other apps without the key would
+/// need a CoreAudio process tap, which needs the System Audio Recording permission (docs/gotchas.md, 6).
 ///
 /// macOS 15.4 removed apps' access to which app is playing, so play/pause goes to whatever macOS treats as
-/// "now playing". The check that the sound actually stopped runs before Claude's microphone is pressed (Claude's
-/// start sound would otherwise read as audio still playing); if it did not stop, the press is undone and nothing
-/// else is touched.
-///
-/// The volume to return to is saved while it is down: a crash mid-fade is put right on the next launch.
+/// "now playing". The check that the sound actually stopped runs before Claude's microphone is pressed; if it did
+/// not stop, the press is undone and nothing else is touched.
 @MainActor
 final class MediaDucker {
-    private var paused: (device: AudioObjectID, volume: Float32?)?
-    /// The resume after a dictation: waiting for Claude's stop sound (`resumePending` set), then fading in (`rampTarget` set).
+    /// The speakers whose media this dictation paused.
+    private var paused: AudioObjectID?
+    /// The resume after a dictation, while it waits out the stop cue.
     private var resumeTask: Task<Void, Never>?
-    private var resumePending: (device: AudioObjectID, volume: Float32?)?
-    private var rampTarget: (device: AudioObjectID, volume: Float32)?
+    private var resumePending: AudioObjectID?
+    /// Where builds before the allowlist model saved a volume they had lowered.
     private static let savedKey = "duck.savedVolume"
     private static let savedUIDKey = "duck.deviceUID"
 
-    /// Runs before the microphone is pressed; returns once the media is paused (about 0.5 s) or at once when
+    /// Runs before the microphone is pressed; returns once the media is paused (about 0.25 s) or at once when
     /// nothing is playing on speakers.
     func duck() async {
-        // A resume from the last dictation may still be pending (its 0.7 s wait) or fading in. Pressing play now
-        // would start the music under the new dictation: cancel it. Not yet pressed, the media is still paused and
-        // stays so for this dictation; already pressed, the volume goes straight to its target and the usual fade
-        // out below runs.
+        // A resume from the last dictation may still be waiting: cancel it, and the media stays paused for this one.
         if let pending = resumeTask {
             pending.cancel()
             resumeTask = nil
             if let p = resumePending {
                 resumePending = nil
                 paused = p
-                Self.clearSaved()
                 EnsembleLog.write("a new dictation began before the audio resumed; it stays paused")
                 return
             }
-            if let r = rampTarget { Self.setVolume(r.device, r.volume); Self.clearSaved() }
-            rampTarget = nil
         }
         guard paused == nil, let dev = Self.defaultOutput(), Self.mediaPlaying(dev), !Self.isHeadphones(dev) else { return }
-        let volume = Self.volume(dev)
-        Self.save(dev, volume)
-        if let volume { await Self.ramp(dev, from: volume, to: 0, seconds: 0.25) }
         Self.pressPlayPause()
         try? await Task.sleep(nanoseconds: 250_000_000)
         let stopped = !Self.mediaPlaying(dev)
         if !stopped { Self.pressPlayPause() }
-        if let volume { Self.setVolume(dev, volume) }
-        Self.clearSaved()
-        EnsembleLog.write(stopped ? "audio on speakers faded out and paused for dictation"
+        EnsembleLog.write(stopped ? "audio on speakers paused for dictation (volume untouched)"
                                   : "play/pause did not stop the audio; press undone, audio left as it was")
-        if stopped { paused = (dev, volume) }
+        if stopped { paused = dev }
     }
 
-    /// Dictation ended: after Claude's stop sound, resume the media and fade it back in.
+    /// Dictation ended: after the stop cue, resume the media.
     func restore() {
         guard let p = paused else { return }
         paused = nil
@@ -68,40 +57,22 @@ final class MediaDucker {
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, self.resumePending != nil else { return }
             self.resumePending = nil
-            let target = Self.volume(p.device) ?? p.volume
-            if let target { Self.save(p.device, target); Self.setVolume(p.device, 0); self.rampTarget = (p.device, target) }
-            Self.pressPlayPause()
-            if let target { await Self.ramp(p.device, from: 0, to: target, seconds: 0.4) }
-            guard !Task.isCancelled else { return }
-            self.rampTarget = nil
             self.resumeTask = nil
-            Self.clearSaved()
+            Self.pressPlayPause()
         }
     }
 
-    /// Quit path: resume at once, no fade.
+    /// Quit path: resume at once.
     func restoreNow() {
         resumeTask?.cancel()
         resumeTask = nil
-        if let r = rampTarget { Self.setVolume(r.device, r.volume); Self.clearSaved(); rampTarget = nil }
         if let p = resumePending { resumePending = nil; paused = p }
         guard paused != nil else { return }
         paused = nil
         Self.pressPlayPause()
     }
 
-    private static func save(_ dev: AudioObjectID, _ volume: Float32?) {
-        guard let volume, let uid = uid(dev) else { return }
-        UserDefaults.standard.set(volume, forKey: savedKey)
-        UserDefaults.standard.set(uid, forKey: savedUIDKey)
-    }
-
-    private static func clearSaved() {
-        UserDefaults.standard.removeObject(forKey: savedKey)
-        UserDefaults.standard.removeObject(forKey: savedUIDKey)
-    }
-
-    /// Launch: a volume left down by a crash goes back to where it was.
+    /// Launch: a volume an earlier build left down when it crashed mid-fade goes back to where it was.
     static func recoverAfterCrash() {
         let d = UserDefaults.standard
         guard let v = d.object(forKey: savedKey) as? Float, let uid = d.string(forKey: savedUIDKey) else { return }
@@ -126,8 +97,8 @@ final class MediaDucker {
     }
 
     /// Some app other than Claude, Ensemble or the system sound player is sending audio out. Per process, because the
-    /// output device itself stays "running" for a while after any short sound (measured 2026-10-14: Claude's own
-    /// dictation chime read as music playing, and the media key went to the wrong app).
+    /// output device itself stays "running" for a while after any short sound (measured 2026-10-14: a dictation
+    /// chime read as music playing, and the media key went to the wrong app).
     nonisolated static func mediaPlaying(_ dev: AudioObjectID) -> Bool {
         guard let procs = CoreAudioInput.processes() else { return isPlaying(dev) }
         let me = ProcessInfo.processInfo.processIdentifier
@@ -143,10 +114,15 @@ final class MediaDucker {
         (read(dev, kAudioDevicePropertyDeviceIsRunningSomewhere, kAudioObjectPropertyScopeGlobal, UInt32(0)) ?? 0) != 0
     }
 
+    nonisolated static func isBluetooth(_ dev: AudioObjectID) -> Bool {
+        let transport: UInt32 = read(dev, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, 0) ?? 0
+        return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+    }
+
     /// Bluetooth output, or the built-in headphone jack: the microphone cannot hear it.
     static func isHeadphones(_ dev: AudioObjectID) -> Bool {
+        if isBluetooth(dev) { return true }
         let transport: UInt32 = read(dev, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, 0) ?? 0
-        if transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE { return true }
         if transport == kAudioDeviceTransportTypeBuiltIn,
            let source: UInt32 = read(dev, kAudioDevicePropertyDataSource, kAudioDevicePropertyScopeOutput, 0) {
             return source == 0x6864706E   // 'hdpn'
@@ -154,26 +130,10 @@ final class MediaDucker {
         return false
     }
 
-    static func volume(_ dev: AudioObjectID) -> Float32? {
-        read(dev, kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioDevicePropertyScopeOutput, Float32(0))
-    }
-
-    static func setVolume(_ dev: AudioObjectID, _ v: Float32) {
+    private static func setVolume(_ dev: AudioObjectID, _ v: Float32) {
         var a = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, kAudioDevicePropertyScopeOutput)
         var value = max(0, min(1, v))
         _ = AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
-    }
-
-    /// Eased volume ramp in 60 Hz steps.
-    static func ramp(_ dev: AudioObjectID, from: Float32, to: Float32, seconds: Double) async {
-        let steps = max(1, Int(seconds * 60))
-        for i in 1...steps {
-            if Task.isCancelled { return }
-            let x = Float32(i) / Float32(steps)
-            let eased = x * x * (3 - 2 * x)
-            setVolume(dev, from + (to - from) * eased)
-            try? await Task.sleep(nanoseconds: UInt64(seconds / Double(steps) * 1e9))
-        }
     }
 
     static func uid(_ dev: AudioObjectID) -> String? {
