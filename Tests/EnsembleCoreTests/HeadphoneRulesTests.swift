@@ -96,4 +96,13 @@ struct HeadphoneGestureTests {
         m.beginTalkExternally()
         #expect(m.tick(now: 2.5) == [.talkEnded(.stale)])
     }
+
+    @Test("A pause the system sends around a microphone start or stop is not a press")
+    func micChangeIgnored() {
+        var f = HeadphoneInputFilter()
+        #expect(f.accept(.pause, at: 10.4, lastSyntheticKeyAt: -.infinity, lastMicChangeAt: 10) == nil)
+        #expect(f.accept(.togglePlayPause, at: 12.9, lastSyntheticKeyAt: -.infinity, lastMicChangeAt: 10) == nil)
+        #expect(f.accept(.nextTrack, at: 10.4, lastSyntheticKeyAt: -.infinity, lastMicChangeAt: 10) == .doublePress)
+        #expect(f.accept(.pause, at: 13.5, lastSyntheticKeyAt: -.infinity, lastMicChangeAt: 10) == .press)
+    }
 }

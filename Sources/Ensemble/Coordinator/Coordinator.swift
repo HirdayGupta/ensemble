@@ -279,6 +279,8 @@ final class Coordinator: AppCoordinating {
         returnKeys.reset(); keyTap.setActive(false)
         state.status = .off
         state.clearRefusal()
+        // The last target and nose position would otherwise be pushed again and leave the highlight on a window.
+        ctx.targetFrame = nil; ctx.nosePoint = nil; ctx.resizeFrame = nil
         pushOverlay()
     }
 
@@ -725,7 +727,7 @@ final class Coordinator: AppCoordinating {
                 let before = self.ctx.claudeDictations.recording
                 self.ctx.claudeDictations.observe(present: found.map(\.id), recordingNow: scan.recording, at: CACurrentMediaTime())
                 let now = self.ctx.claudeDictations.recording
-                if now != before { EnsembleLog.write("Claude is dictating without Ensemble in \(now.count) session(s)") }
+                if now != before { HeadphoneRemote.noteMicChange(); EnsembleLog.write("Claude is dictating without Ensemble in \(now.count) session(s)") }
             }
             if found.map(\.id) != self.ctx.sessions.map(\.id) { EnsembleLog.write("Claude sessions found: \(found.count) (named \(found.filter { $0.title != nil }.count)) \(found.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" })") }
             self.ctx.sessions = found

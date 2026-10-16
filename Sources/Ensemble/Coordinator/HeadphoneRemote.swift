@@ -21,6 +21,11 @@ final class HeadphoneRemote {
     /// as a remote command; commands inside `HeadphoneInputFilter.selfKeyWindow` after it are dropped.
     static var lastSyntheticKeyAt: TimeInterval = -.infinity
 
+    /// When a microphone capture last started or stopped (Ensemble's own dictation or Claude's); see
+    /// `HeadphoneInputFilter.micChangeWindow`.
+    static var lastMicChangeAt: TimeInterval = -.infinity
+    static func noteMicChange() { lastMicChangeAt = CACurrentMediaTime() }
+
     var onAction: (HeadphoneAction) -> Void = { _ in }
     private let settingOn: () -> Bool
     private let claudeRunning: () -> Bool
@@ -112,7 +117,8 @@ final class HeadphoneRemote {
     }
 
     private func received(_ command: HeadphoneCommand, at t: TimeInterval) {
-        guard let action = filter.accept(command, at: t, lastSyntheticKeyAt: Self.lastSyntheticKeyAt) else {
+        guard let action = filter.accept(command, at: t, lastSyntheticKeyAt: Self.lastSyntheticKeyAt,
+                                     lastMicChangeAt: Self.lastMicChangeAt) else {
             EnsembleLog.write("headphone command \(command) ignored")
             return
         }
