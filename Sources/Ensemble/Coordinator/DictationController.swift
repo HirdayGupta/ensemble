@@ -153,7 +153,9 @@ final class DictationController {
             // pause never lowers the volume, so the start cue after the press plays at full volume.
             if self.ctx.settings.pauseMediaWhileDictating { self.duckWanted = true; await self.ducker.duck() }
             let claudeOutputBefore = await Task.detached { Self.claudeOutputs() }.value
+            HeadphoneRemote.noteMicChange()
             let result = await self.ctx.bridge.startDictation(session)
+            HeadphoneRemote.noteMicChange()
             self.ctx.busy = false
             self.startInFlight = false
             // An interruption (lock, sleep, the safety check) while the press was in flight stops at once, like a switch-off.
@@ -205,7 +207,9 @@ final class DictationController {
             if !immediate { try? await Task.sleep(nanoseconds: UInt64((tail ?? Self.stopTail) * 1e9)) }
             // An immediate stop waits on nothing, not even this read (CoreAudio can stall while devices change).
             let claudeOutputBefore: Int? = immediate ? nil : await Task.detached { Self.claudeOutputs() }.value
+            HeadphoneRemote.noteMicChange()
             let result = await self.ctx.bridge.stopDictation(session)
+            HeadphoneRemote.noteMicChange()
             // Whether Claude plays its own stop sound, looked at once for this stop: the stop banner's cue and a later
             // "Kept, not sent" cue both follow it, so neither doubles Claude's.
             if case .done = result { self.stopSoundCheck = Self.soundCheck(before: claudeOutputBefore) }
