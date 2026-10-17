@@ -4,25 +4,30 @@ import Testing
 @Suite struct GrantRelaunchTests {
     @Test func aCopyThatStartedWithoutTheGrantRelaunchesWhenItArrives() {
         var rule = GrantRelaunch(startedWithGrant: false)
-        #expect(rule.shouldRelaunch(granted: false) == false)
-        #expect(rule.shouldRelaunch(granted: true))
+        let before = rule.shouldRelaunch(granted: false)
+        let after = rule.shouldRelaunch(granted: true)
+        #expect(before == false)
+        #expect(after)
     }
 
     @Test func itRelaunchesOnlyOnce() {
         var rule = GrantRelaunch(startedWithGrant: false)
-        #expect(rule.shouldRelaunch(granted: true))
-        #expect(rule.shouldRelaunch(granted: true) == false)
+        let first = rule.shouldRelaunch(granted: true)
+        let second = rule.shouldRelaunch(granted: true)
+        #expect(first)
+        #expect(second == false)
     }
 
     @Test func aCopyThatStartedWithTheGrantNeverRelaunches() {
         var rule = GrantRelaunch(startedWithGrant: true)
-        #expect(rule.shouldRelaunch(granted: true) == false)
-        #expect(rule.shouldRelaunch(granted: false) == false)
-        #expect(rule.shouldRelaunch(granted: true) == false)
+        let readings = [true, false, true].map { rule.shouldRelaunch(granted: $0) }
+        #expect(readings == [false, false, false])
     }
 
     @Test func aGrantThatNeverArrivesNeverRelaunches() {
         var rule = GrantRelaunch(startedWithGrant: false)
-        for _ in 0..<100 { #expect(rule.shouldRelaunch(granted: false) == false) }
+        var any = false
+        for _ in 0..<100 where rule.shouldRelaunch(granted: false) { any = true }
+        #expect(any == false)
     }
 }
