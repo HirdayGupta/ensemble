@@ -85,7 +85,6 @@ final class Coordinator: AppCoordinating {
         let ctx = CoordinatorContext(state: state, settings: settings, overlay: overlay)
         self.ctx = ctx
         health = HealthMonitor(ctx: ctx, engine: engine)
-        health.relaunchOnGrantAllowed = { [weak self] in !(self?.tourOpen ?? false) }
         focus = FocusController(ctx: ctx)
         dot = DotPlacement(ctx: ctx)
         scroll = ScrollController(ctx: ctx)
@@ -95,6 +94,7 @@ final class Coordinator: AppCoordinating {
         headphone = HeadphoneRemote(settingOn: { [weak settings] in (settings?.headphonePresses ?? false) && (settings?.enabled ?? false) },
                                     claudeRunning: { [weak ctx] in ctx?.bridge.claudeIsRunning() ?? false })
         headphone.onAction = { [weak self] in self?.apply(headphone: $0); self?.wake() }
+        health.relaunchOnGrantAllowed = { [weak self] in !(self?.tourOpen ?? false) }
         ctx.changed = { [weak self] in self?.pushOverlay() }
         ctx.wake = { [weak self] in self?.armTickTimer() }
         panes.sendBusy = { [weak self] in self.map { $0.send.inFlight || $0.send.afterStop } ?? true }
