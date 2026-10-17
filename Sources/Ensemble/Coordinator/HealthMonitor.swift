@@ -14,6 +14,10 @@ final class HealthMonitor {
     private(set) var trackerFailure: String?
     private(set) var trackerReady = false
     private(set) var accessibilityTrusted = true
+    /// Reopens Ensemble once when Accessibility is granted while it runs (macOS applies the grant only to a new process).
+    private var grantRelaunch = GrantRelaunch(startedWithGrant: true)
+    /// False while the tour is open: its permissions step shows the grant live and the tour must not be torn down.
+    var relaunchOnGrantAllowed: () -> Bool = { true }
     private(set) var cameraAllowed = true
     /// A session scan has finished since Claude started running; until then an empty list means "not looked yet".
     var sessionsScanned = false
@@ -29,6 +33,7 @@ final class HealthMonitor {
     func begin() {
         running = true
         accessibilityTrusted = Permissions.accessibilityTrusted
+        grantRelaunch = GrantRelaunch(startedWithGrant: Permissions.accessibilityTrusted)
         cameraAllowed = Permissions.cameraAllowed
         cameraProblem = nil; trackerFailure = nil; trackerReady = false
         lastCameraRestart = Date()
@@ -82,6 +87,11 @@ final class HealthMonitor {
         let trusted = Permissions.accessibilityTrusted && !ctx.bridge.accessibilityDisabled
         if trusted != accessibilityTrusted { EnsembleLog.write("accessibility permission is now \(trusted ? "granted" : "missing")") }
         accessibilityTrusted = trusted
+        if relaunchOnGrantAllowed(), grantRelaunch.shouldRelaunch(granted: Permissions.accessibilityTrusted) {
+            EnsembleLog.write("accessibility granted: restarting to apply it")
+            Permissions.relaunch()
+            return
+        }
         let allowed = Permissions.cameraAllowed
         let flippedOn = allowed && !cameraAllowed
         if allowed != cameraAllowed { EnsembleLog.write("camera permission is now \(allowed ? "granted" : "denied")") }
