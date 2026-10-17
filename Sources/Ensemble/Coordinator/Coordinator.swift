@@ -85,6 +85,7 @@ final class Coordinator: AppCoordinating {
         let ctx = CoordinatorContext(state: state, settings: settings, overlay: overlay)
         self.ctx = ctx
         health = HealthMonitor(ctx: ctx, engine: engine)
+        health.relaunchOnGrantAllowed = { [weak self] in !(self?.tourOpen ?? false) }
         focus = FocusController(ctx: ctx)
         dot = DotPlacement(ctx: ctx)
         scroll = ScrollController(ctx: ctx)
