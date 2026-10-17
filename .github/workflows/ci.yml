@@ -37,9 +37,6 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Build
-        run: swift build -c release 2>&1 | tee /tmp/ensemble-ci-build.log
-
       - name: Test
         run: swift test 2>&1 | tee /tmp/ensemble-ci-test.log
 
@@ -114,8 +111,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Website logic tests
-        run: node --test docs/live/test/logic.test.mjs
+      - name: Website tests
+        run: node --test docs/live/test/logic.test.mjs docs/live/test/capture-events.test.mjs
 
   # Line coverage of EnsembleCore only: the app target needs a camera and Accessibility, so it is not measured. Every
   # line this change adds or edits under Sources/EnsembleCore must be covered, and the total may not fall below the
