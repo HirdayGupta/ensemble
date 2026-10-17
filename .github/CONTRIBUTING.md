@@ -228,5 +228,11 @@ node <path-to-figurehead>/scripts/figurehead.mjs render Assets/hero.hero.json --
 node <path-to-figurehead>/scripts/figurehead.mjs check Assets/hero.hero.json Assets/hero.svg --repo .
 ```
 
+`Assets/social-preview.png` (1280 by 640, the repository's social preview card) is the hero on a white canvas, rendered from `Assets/social-preview.html`. Regenerate it whenever the hero changes, then upload it under Settings, General, Social preview:
+
+```
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars --force-color-profile=srgb --window-size=1280,640 --screenshot="$PWD/Assets/social-preview.png" "file://$PWD/Assets/social-preview.html"
+```
+
 Check the pages with `readmerlin check --pages` from the repository root. Every comparison cell in the README was read
 from the other project's own README or support page, so re-read them before changing a cell.
