@@ -14,6 +14,12 @@ const LETTER_ALLOWED = [STARS_URL, CLONES_URL];   // the only two off-origin req
 const DMG = 'https://github.com/oficiallyAkshay/ensemble/releases/latest/download/Ensemble.dmg';
 const FAKE = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'];
 const HEAVY = ['/live/vendor/vision_bundle.js', '/live/vendor/wasm/vision_wasm_internal.js', '/live/vendor/wasm/vision_wasm_internal.wasm.gz', '/live/models/face_landmarker.task.gz', '/live/models/gesture_recognizer.task.gz'];
+// The demo opens on the empty desktop: double-click Claude, then turn Ensemble on from the menu bar.
+const turnOn = async (p) => {
+  await p.eval("document.getElementById('claude-icon').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))");
+  await p.eval("document.getElementById('mb-ens').click()");
+  await p.eval("document.getElementById('mp-power').click()");   // the switch starts the camera, or the mouse when the visitor chose it
+};
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); say(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' :: ' + detail : ''}`); };
 
@@ -32,11 +38,12 @@ async function camera() {
     say('page loaded; checking nothing heavy loaded before consent');
     const pre = w.requests.map((r) => r.url.replace(ORIGIN, ''));
     check('no wasm, model or runtime request before the button', !pre.some((u) => /vendor|models|\.wasm|\.task/.test(u)), pre.join(' '));
-    check('gate is showing', await p.eval("document.getElementById('app').dataset.state === 'gate' && !document.getElementById('gate').hidden"));
+    check('the demo opens on the desktop: Claude closed, no gate, one app icon, a skeleton dock', await p.eval("document.getElementById('app').dataset.state === 'desk' && document.getElementById('gate').hidden && document.getElementById('mac').dataset.claude === 'closed' && document.querySelectorAll('.ls-appicon').length === 1 && document.querySelectorAll('.ls-dock i').length >= 6 && getComputedStyle(document.getElementById('window')).visibility === 'hidden'"));
+    check('the guide column is 20% of the page, counts three steps, and Open Claude is a tooltip', await p.eval("(() => { const g = document.getElementById('guide').getBoundingClientRect(); return Math.abs(g.width / innerWidth - 0.2) < 0.02 && window.__live.step() === 'opened' && document.querySelectorAll('.step:not(.note)').length === 3 && document.getElementById('tip').textContent.includes('Claude'); })()"));
     check('no video element is visible', await p.eval("[...document.querySelectorAll('video')].every(v => v.closest('#sink') && v.getBoundingClientRect().right < 0)"));
     const mark = w.requests.length;
-    say('pressing Turn on camera');
-    await p.eval("document.getElementById('go-camera').click()");
+    say('double-clicking Claude, then Turn on Ensemble in the menu bar');
+    await turnOn(p);
     const ms = await p.waitFor("document.getElementById('app').dataset.state === 'running' || !document.getElementById('gate').hidden && !document.getElementById('gate-message').hidden", 180000, 'camera running');
     const state = await p.eval("document.getElementById('app').dataset.state");
     say(`state after ${ms} ms: ${state}`);
@@ -55,12 +62,12 @@ async function camera() {
       say(`UI frame rate while tracking: ${fps.toFixed(0)} fps (headless Chrome)`);
       check('UI stays smooth while tracking (>= 30 fps)', fps >= 30, fps.toFixed(0));
       check('sees panel readouts are live', (await p.eval("document.getElementById('r-speed').textContent")) !== '-');
-      check('the centring step is up first: dot, line, countdown, Skip; coach and outline wait', await p.eval("(() => { const c = document.getElementById('centre'); return !c.hidden && document.getElementById('coach').hidden && !document.getElementById('hl').classList.contains('on') && !!c.querySelector('.bead') && document.getElementById('centre-skip').offsetParent !== null; })()"));
+      check('the centring step is up first: dot, line, countdown, Skip; the outline waits', await p.eval("(() => { const c = document.getElementById('centre'); return !c.hidden && window.__live.step() === 'centred' && !document.getElementById('hl').classList.contains('on') && !!c.querySelector('.bead') && document.getElementById('centre-skip').offsetParent !== null; })()"));
       check('with no face it says "Find the camera"', (await p.eval("document.getElementById('centre-line').textContent")) === 'Find the camera');
       await p.eval("document.getElementById('centre-skip').click()");
       await sleep(700);
-      check('Skip ends the step and the coach starts', await p.eval("document.getElementById('centre').hidden && !document.getElementById('coach').hidden"));
-      check('coach shows a first suggestion', (await p.eval("document.getElementById('prompt').textContent")).includes('Look at one'));
+      check('Skip ends the step and the tour moves on to looking (a tooltip, not a counted step)', await p.eval("document.getElementById('centre').hidden && window.__live.step() === 'looked' && !document.getElementById('tip').hidden"));
+      check('the progressor shows a first suggestion', (await p.eval("document.getElementById('prompt').textContent")).includes('Look at one'));
 
       say('camera stays on; now bytes downloaded after the button');
       const after = w.requests.slice(mark).filter((r) => r.bytes);
@@ -147,7 +154,7 @@ async function mouse() {
     check('mouse mode never shows the centring step', await p.eval("document.getElementById('centre').hidden && getComputedStyle(document.getElementById('centre')).display === 'none' && !window.__live.centring().active"));
     check('four panes with headers, composers, footers and traffic lights', await p.eval("document.querySelectorAll('.ls-pane').length === 4 && document.querySelectorAll('.ls-ph').length === 4 && document.querySelectorAll('.ls-composer').length === 4 && document.querySelectorAll('.ls-foot').length === 4 && document.querySelectorAll('.ls-lights i').length === 3"));
     check('tables and lists render inside the transcripts', await p.eval("document.querySelectorAll('.ls-line.tablewrap table').length >= 2 && document.querySelectorAll('.ls-line.list li').length >= 4"));
-    check('composer placeholder and footer match the real app', await p.eval("getComputedStyle(document.querySelector('.ls-composer .draft'), '::before').content.includes('to queue for later') && document.querySelector('.ls-foot').textContent.includes('Bypass permissions') && /Opus 5\\.5|Sonnet 5\\.5/.test(document.querySelector('.ls-foot').textContent)"));
+    check('composer placeholder and footer match the real app', await p.eval("getComputedStyle(document.querySelector('.ls-composer .draft'), '::before').content.includes('to send') && document.querySelector('.ls-foot').textContent.includes('Bypass permissions') && /Opus 5\\.5|Sonnet 5\\.5/.test(document.querySelector('.ls-foot').textContent)"));
     const centre = (id) => p.eval(`(() => { const r = document.querySelector('[data-id=${id}]').getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2}; })()`);
     const api = await centre('api'), land = await centre('landing');
     await p.mouse('mouseMoved', api.x, api.y);
@@ -196,7 +203,8 @@ async function mouse() {
     const after = await p.eval("document.querySelector('[data-id=api] .ls-transcript').scrollTop");
     say(`scrollTop ${before} -> ${after}`);
     check('press and drag scrolls that pane', after !== before);
-    check('all four ticked, offer shown', (await p.eval('Object.values(window.__live.done()).every(Boolean)')) && await p.eval("!document.getElementById('done').hidden"));
+    check('all four gestures ticked; headphones is a separate optional tab that never blocks', (await p.eval("['looked','dictated','sent','scrolled'].every((k) => window.__live.done()[k])")) && !!(await p.eval("document.getElementById('tab-h')")) && (await p.eval('window.__live.tab()')) === 'gestures');
+    check('the unsigned-app step comes straight after, with the offer shown and Apple\'s guide linked', (await p.eval('window.__live.step()')) === 'install' && await p.eval("!document.getElementById('done').hidden && !!document.querySelector('.step[data-k=install] a[href*=\"support.apple.com\"]')"));
     check('finish screen not forced', await p.eval("document.getElementById('finish').hidden"));
     await p.eval("document.getElementById('done').click()");
     await sleep(200);
@@ -344,7 +352,8 @@ async function letter() {
     say('arrived at ' + await p.eval('location.href'));
     check('went straight to live/?go=1', (await p.eval('location.search')) === '?go=1');
     await p.waitFor("document.readyState === 'complete'", 15000);
-    check('no consent gate is shown (its buttons never appear)', await p.eval("getComputedStyle(document.querySelector('#gate .gate-intro')).display === 'none'"));
+    check('the demo opens on the desktop, not on a gate, and waits for the visitor', await p.eval("document.getElementById('gate').hidden && document.getElementById('app').dataset.state === 'desk' && window.__live.mode === 'none'"));
+    await turnOn(p);
     await p.waitFor("document.getElementById('app').dataset.state === 'running' || !document.getElementById('gate-message').hidden", 120000, 'demo running');
     check('demo is running on the camera with no second prompt', (await p.eval('window.__live.mode')) === 'camera', await p.eval("document.getElementById('gate-message').textContent"));
     check('the demo shows no video, only the skeleton panel', await p.eval("[...document.querySelectorAll('video')].every(v => v.closest('#sink'))"));
@@ -406,6 +415,9 @@ async function letterDenied() {
     check('mouse option goes to live/?mouse=1', (await p.eval('location.search')) === '?mouse=1');
     await p.waitFor("document.readyState === 'complete'", 15000);
     await sleep(500);
+    check('the demo waits on the desktop with Ensemble off', (await p.eval('window.__live.mode')) === 'none' && (await p.eval('window.__live.menu().state')) === 'Off');
+    await turnOn(p);
+    await sleep(300);
     check('demo is in mouse mode with no gate', (await p.eval('window.__live.mode')) === 'mouse' && await p.eval("document.getElementById('gate').hidden"));
     check('no heavy file loaded for the mouse', !w.requests.some((r) => /\/live\/(models|vendor)\//.test(r.url) && r.type !== 'Other' && false) || true);
     check('no console errors', real(w).length === 0, real(w).join(' | '));
@@ -459,6 +471,8 @@ async function prefetch() {
     await p.eval("location.href = 'live/?go=1'");
     await p.waitFor("location.pathname.includes('/live/')", 15000);
     const t0 = Date.now();
+    await p.waitFor("window.__live", 15000, 'demo script');
+    await turnOn(p);
     await p.waitFor("window.__live && (window.__live.mode === 'camera' || !document.getElementById('gate-message').hidden)", 120000, 'demo up');
     const ms = Date.now() - t0;
     check('demo started on the camera', (await p.eval('window.__live.mode')) === 'camera', await p.eval("document.getElementById('gate-message').textContent"));
@@ -612,12 +626,12 @@ async function centre() {
     await stub(p, 12);
     await p.send('Page.navigate', { url: URL_ });
     await p.waitFor("document.readyState === 'complete'", 15000);
-    await p.eval("document.getElementById('go-camera').click()");
+    await turnOn(p);
     await p.waitFor("document.getElementById('app').dataset.state === 'running'", 120000, 'camera running');
     let s = await st();
     check('step shows once the trackers run, before anything is interactive', s.active && s.state === 'wait' && s.line === 'Find the camera', JSON.stringify(s));
     check('the target dot sits at the centre of the Claude window', await p.eval("(() => { const b = document.querySelector('#centre .bead').getBoundingClientRect(), w = document.querySelector('.ls-window').getBoundingClientRect(); return Math.abs((b.left + b.width / 2) - (w.left + w.width / 2)) < 2 && Math.abs((b.top + b.height / 2) - (w.top + w.height / 2)) < 2; })()"));
-    check('line, number, ring and Skip are present; coach and highlight wait', await p.eval("document.getElementById('coach').hidden && !document.getElementById('hl').classList.contains('on') && document.getElementById('centre-skip').offsetParent !== null && document.getElementById('centre-arc').getAttribute('r') === '52'"));
+    check('line, number, ring and Skip are present; the highlight waits', await p.eval("!document.getElementById('hl').classList.contains('on') && document.getElementById('centre-skip').offsetParent !== null && document.getElementById('centre-arc').getAttribute('r') === '52'"));
     await p.send('Page.screenshot'.replace('Page.screenshot', 'Page.bringToFront'));
     // a face appears, resting at yaw 0.07, pitch 0.03
     await feed(0.07, 0.03);
@@ -637,7 +651,7 @@ async function centre() {
     await feed(0.07, 0.03);
     await p.waitFor("window.__live.centring().state === 'done' || !window.__live.centring().active", 15000, 'countdown to finish');
     await p.waitFor("document.getElementById('centre').hidden", 5000, 'the step to fade out').catch(() => {});
-    check('the step ends by itself and the coach starts after it', await p.eval("document.getElementById('centre').hidden && !document.getElementById('coach').hidden && document.getElementById('prompt').textContent.includes('Look at one')"));
+    check('the step ends by itself and the next step opens after it', await p.eval("document.getElementById('centre').hidden && document.getElementById('prompt').textContent.includes('Look at one')"));
     const centreAt = await p.eval('window.__live.centre()');
     check('the centre is the average resting angle (0.07, 0.03)', centreAt && Math.abs(centreAt.yaw - 0.07) < 0.01 && Math.abs(centreAt.pitch - 0.03) < 1e-6, JSON.stringify(centreAt));
     const focusAfter = async (yaw) => { await feed(yaw, 0.03); await sleep(1500); return p.eval('window.__live.focus()'); };
@@ -652,7 +666,7 @@ async function centre() {
     await p.eval("document.getElementById('recentre').click()");
     await sleep(300);
     s = await st();
-    check('Recentre re-runs the 3-second step', s.active && s.state === 'wait' && (await p.eval("document.getElementById('coach').hidden")), JSON.stringify(s));
+    check('Recentre re-runs the 3-second step', s.active && s.state === 'wait', JSON.stringify(s));
     check('while it runs nothing acts: no outline, no focus change', !(await p.eval("document.getElementById('hl').classList.contains('on')")));
     await feed(0.2, 0.0);
     await p.waitFor("!window.__live.centring().active", 15000, 'second centring');
@@ -713,6 +727,8 @@ async function smooth() {
     try {
       await stub(p, 12);
       await p.send('Page.navigate', { url: URL_ + '?go=1' });
+      await p.waitFor("window.__live", 15000, 'demo script');
+      await turnOn(p);
       await p.waitFor("window.__live && window.__live.mode === 'camera'", 120000, 'camera running');
       const cam = await p.eval('window.__live.camera()');
       say(`camera at ${fps} fps asked: granted ${JSON.stringify(cam)}`);
@@ -759,6 +775,8 @@ async function scrollable() {
       await stub(p, 12);
       await p.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
       await p.send('Page.navigate', { url: URL_ + '?go=1' });
+      await p.waitFor("window.__live", 15000, 'demo script');
+      await turnOn(p);
       await p.waitFor("window.__live && window.__live.mode === 'camera'", 120000, 'camera running');
       const m = await p.eval("[...document.querySelectorAll('.ls-transcript')].map((t) => ({ sh: t.scrollHeight, ch: t.clientHeight, top: t.scrollTop }))");
       say(`${w}x${h}: ` + m.map((x) => `${x.sh}/${x.ch} = ${(x.sh / x.ch).toFixed(1)}x`).join(', '));
