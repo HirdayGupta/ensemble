@@ -72,6 +72,22 @@ scripts/ship-release.sh 0.2.0
 
 It builds and signs the DMG with the local identity, adds it to the appcast with the update key in this Mac's login keychain (a refusal here stops the run before anything is public), then tags `main`, publishes the GitHub Release, and pushes `appcast.xml` to `gh-pages`, which GitHub Pages serves at the feed address in `UpdateController.swift`. Installed copies then see the version on their next check, or at once with Check for Updates. The release page and the appcast item carry the same notes, the titles of the pull requests merged into `main` since the previous tag, whether by merge commit or by squash, so the update window shows what changed. The update key and feed are set; the private key is also kept outside the keychain by the owner. Copies signed with the local identity update only on this Mac.
 
+## Release on every merge
+
+Every pull request that changes app logic is released as soon as it merges to `main`. Bug fixes are app logic, so they ship the same way and at once. The agent that merges the pull request cuts the release; if a person merged it, the next agent session that sees an unreleased merge cuts it.
+
+**What counts as app logic.** A change to any file under `Sources/` (the app, `EnsembleCore` and the bundled resources) or to `Package.swift` or `Package.resolved`. A change that touches only docs, tests, scripts, CI or the website does not release by itself; it ships with the next release.
+
+**How.** From a clean checkout of `main` whose latest commit has passing checks (`gate`):
+
+```
+scripts/ship-release.sh <next version>
+```
+
+The next version is the latest tag with one added to the patch number (`0.2.24` becomes `0.2.25`). There is no major or minor policy; the owner changes the leading numbers by naming a version. A version is never reused or lowered, and a tag is never moved. The release notes are the `docs/CHANGELOG.md` "Unreleased" entries. `ship-release.sh` signs with the owner's login keychain, so this runs on the owner's Mac. It stops before anything is public if the build, the signature or the appcast refuses; fix the cause and run it again, do not work around it.
+
+**Taking it back.** A bad release is fixed by the next release; the version that shipped stays published because installed copies compare build numbers. Stop the releases by removing this section and the exception in `AGENTS.md`.
+
 ## Cut a release
 
 1. Merge to `main`; the tests pass.

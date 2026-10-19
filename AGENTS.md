@@ -19,11 +19,12 @@ scripts/bundle.sh           # build/Ensemble.app, signed; needs a signing identi
 - Nothing personal in the tree or in history: no personal email, no machine paths, no tokens, no names of private repositories. Commit under the repository's GitHub no-reply identity (`<id>+<user>@users.noreply.github.com`); never change `user.email`. A push whose newest commit carries any other address is refused by GitHub, and older commits are not checked, so check `git log --format=%ae` yourself.
 - Dictation safety: Claude's microphone is never left recording because of Ensemble. A change to dictation or send keeps the written-before-pressed record, the dead-man check, the standing check and the narrow send rules (`docs/safety.md`), and the pull request says how.
 - Acting only on Claude: with another app in front, gestures do nothing.
-- Never run `tccutil`, `defaults` or anything that touches the keychain or the installed app from an agent session.
+- Never run `tccutil`, `defaults` or anything that touches the keychain or the installed app from an agent session. One exception, approved by the owner: cutting a release. An agent session, interactive or scheduled, runs `scripts/ship-release.sh`, which signs with the login keychain, as `docs/RELEASING.md` ("Release on every merge") describes.
 
 ## Working rules
 
 - Branch before editing; open a pull request; `gate` (which waits for `ci`, `hygiene`, coverage and the other checks) must pass. No force-push to `main`, no `git add -A`, no amended commits, no skipped hooks.
+- After a pull request that changes app logic merges to `main`, cut the release (`docs/RELEASING.md`, "Release on every merge"). Never reuse or lower a version, never move a tag, never release from anything but a clean, green `main`.
 - Commit messages state the outcome. No emojis in commits, code, comments or docs.
 - Do not revert values the owner set by hand (`docs/gotchas.md`, 9). Never merge a branch created before the history rewrite (10).
 - `Sources/EnsembleCore` has no UI and no camera, and every change there comes with a test. Never edit a fixture to make a test pass. Only `Coordinator` decides to press Claude's controls.
