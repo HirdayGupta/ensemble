@@ -4,6 +4,7 @@ Each release and what changed, newest first, dated by its release on GitHub. Bac
 
 ## Unreleased
 
+- The website counts anonymous visits, download views, scroll depth, the friends' contact cards and where visitors leave the demo, with no cookie and nothing about the visitor, and sends nothing when Do Not Track or Global Privacy Control is on. A footer line on the letter says so; `docs/telemetry.md` ("The website") lists every event and property and how to read them.
 - The website demo loads its trackers (about 12 MB) quietly in the background as soon as it opens, so the camera button no longer shows a loading bar or a size, and the page no longer says that nothing downloads until you press it; and the "What Ensemble sees" panel shows a resting face and hand skeleton instead of an empty grey box when nothing is tracked.
 - The friends' texts on the website now look like iOS Messages in light mode: a white card, the sender and time in small grey, and the words in a light grey bubble with a tail, instead of a dark notification.
 - Releases are cut by a plain launchd job on the owner's Mac within about 5 minutes of the checks passing on a merge that changes app logic (`scripts/install-auto-release.sh`, `scripts/auto-release.sh`); no Claude routine is involved.
