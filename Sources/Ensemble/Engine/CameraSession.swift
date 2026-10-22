@@ -42,9 +42,11 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         return CameraChoices.automaticPick(kinds, calibratedIDs: calibratedIDs).map { all[$0] }
     }
 
-    /// `isContinuityCamera` is checked first: the device type alone does not reliably tell a phone from a USB camera.
+    /// An app without `NSCameraUseContinuityCameraDeviceType` in its Info.plist sees an iPhone's Continuity Camera
+    /// as `.external`, which Automatic ranks above the built-in camera; on a first run the tour then calibrated the
+    /// phone, and the saved calibration kept it first from then on. `isContinuityCamera` tells it apart.
     private static func kind(of device: AVCaptureDevice) -> CameraKind {
-        if device.isContinuityCamera || device.deviceType == .continuityCamera { return .continuity }
+        if device.isContinuityCamera { return .other }
         switch device.deviceType {
         case .external: return .external
         case .builtInWideAngleCamera: return .builtIn
