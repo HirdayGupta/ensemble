@@ -37,9 +37,19 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         let all = devices()
         if let name, let match = all.first(where: { $0.localizedName == name }) { return match }
         let kinds = all.map { device -> (id: String, kind: CameraKind) in
-            (device.uniqueID, device.deviceType == .external ? .external : device.deviceType == .builtInWideAngleCamera ? .builtIn : .other)
+            (device.uniqueID, Self.kind(of: device))
         }
         return CameraChoices.automaticPick(kinds, calibratedIDs: calibratedIDs).map { all[$0] }
+    }
+
+    /// `isContinuityCamera` is checked first: the device type alone does not reliably tell a phone from a USB camera.
+    private static func kind(of device: AVCaptureDevice) -> CameraKind {
+        if device.isContinuityCamera || device.deviceType == .continuityCamera { return .continuity }
+        switch device.deviceType {
+        case .external: return .external
+        case .builtInWideAngleCamera: return .builtIn
+        default: return .other
+        }
     }
 
     static func requestAccess() async -> Bool {

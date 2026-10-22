@@ -47,7 +47,7 @@ import Testing
         #expect(CameraChoices.rows(connected: cameras, chosen: stored)[0].isCurrent)
     }
 
-    private let desk: [(id: String, kind: CameraKind)] = [("phone", .other), ("builtin", .builtIn), ("webcam", .external)]
+    private let desk: [(id: String, kind: CameraKind)] = [("phone", .continuity), ("builtin", .builtIn), ("webcam", .external)]
 
     @Test func automaticKeepsTheOldOrderWhenNothingIsCalibrated() {
         #expect(CameraChoices.automaticPick(desk, calibratedIDs: []) == 2)
@@ -58,7 +58,18 @@ import Testing
 
     @Test func automaticPrefersACameraWithASavedCalibration() {
         #expect(CameraChoices.automaticPick(desk, calibratedIDs: ["builtin"]) == 1)
-        #expect(CameraChoices.automaticPick(desk, calibratedIDs: ["phone"]) == 0)
+    }
+
+    @Test func automaticStartsTheMacsOwnCameraOverAContinuityCamera() {
+        let mac: [(id: String, kind: CameraKind)] = [("phone", .continuity), ("builtin", .builtIn)]
+        #expect(CameraChoices.automaticPick(mac, calibratedIDs: []) == 1)
+        #expect(CameraChoices.automaticPick(mac, calibratedIDs: ["phone"]) == 1)
+        #expect(CameraChoices.automaticPick(desk, calibratedIDs: ["phone"]) == 2)
+        #expect(CameraChoices.automaticPick([("phone", .continuity), ("other", .other)], calibratedIDs: ["phone"]) == 1)
+    }
+
+    @Test func aContinuityCameraAloneIsStillStarted() {
+        #expect(CameraChoices.automaticPick([("phone", .continuity)], calibratedIDs: []) == 0)
     }
 
     @Test func amongCalibratedCamerasTheExternalOneStillWins() {
